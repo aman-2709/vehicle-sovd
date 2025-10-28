@@ -1,267 +1,69 @@
 @startuml
-!define C4_COMPONENT
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
 
-title SOVD Command WebApp - Component Diagram (C4 Level 3 - Application Server)
+LAYOUT_WITH_LEGEND()
 
-skinparam componentStyle rectangle
-skinparam linetype ortho
-skinparam packageStyle rectangle
+title Component Diagram - Application Server
 
-' API Router Layer (Controllers)
-package "API Router Layer" #lightblue {
-  component "Auth Controller\n(app/api/v1/auth.py)" as AuthController {
-    note right
-      POST /api/v1/auth/login
-      POST /api/v1/auth/refresh
-      POST /api/v1/auth/logout
-      GET /api/v1/auth/me
-    end note
-  }
+Container_Boundary(app_server, "Application Server (FastAPI)") {
 
-  component "Vehicle Controller\n(app/api/v1/vehicles.py)" as VehicleController {
-    note right
-      GET /api/v1/vehicles
-      GET /api/v1/vehicles/{id}
-      GET /api/v1/vehicles/{id}/status
-      POST /api/v1/vehicles
-      PATCH /api/v1/vehicles/{id}
-    end note
-  }
+  Component(api_router, "API Router", "FastAPI APIRouter", "Top-level request routing and middleware chain")
 
-  component "Command Controller\n(app/api/v1/commands.py)" as CommandController {
-    note right
-      POST /api/v1/commands
-      GET /api/v1/commands/{id}
-      GET /api/v1/commands
-      GET /api/v1/commands/{id}/responses
-    end note
-  }
+  Component(auth_controller, "Auth Controller", "FastAPI Router", "Handles /auth/* endpoints: login, logout, refresh token")
+  Component(vehicle_controller, "Vehicle Controller", "FastAPI Router", "Handles /vehicles/* endpoints: list, get, status")
+  Component(command_controller, "Command Controller", "FastAPI Router", "Handles /commands/* endpoints: execute, history, get response")
 
-  component "WebSocket Handler\n(app/api/v1/websocket.py)" as WebSocketHandler {
-    note right
-      /ws/responses/{command_id}
-      - Connection lifecycle
-      - Authentication via token
-    end note
-  }
+  Component(auth_service, "Auth Service", "Python Module", "JWT generation/validation, password hashing, RBAC enforcement")
+  Component(vehicle_service, "Vehicle Service", "Python Module", "Vehicle registry, connection status, health checks")
+  Component(command_service, "Command Service", "Python Module", "Command validation, execution orchestration, response aggregation")
+  Component(audit_service, "Audit Service", "Python Module", "Structured logging, audit trail persistence")
+
+  Component(sovd_handler, "SOVD Protocol Handler", "Python Module", "SOVD 2.0 specification validation, command encoding, response decoding")
+
+  Component(vehicle_repo, "Vehicle Repository", "SQLAlchemy", "Data access for vehicles table")
+  Component(command_repo, "Command Repository", "SQLAlchemy", "Data access for commands table")
+  Component(response_repo, "Response Repository", "SQLAlchemy", "Data access for responses table")
+  Component(user_repo, "User Repository", "SQLAlchemy", "Data access for users table")
+
+  Component(shared_kernel, "Shared Kernel", "Python Modules", "Logging, configuration, error handling, dependency injection")
 }
 
-' Service Layer (Business Logic)
-package "Service Layer" #lightgreen {
-  component "Auth Service\n(app/services/auth_service.py)" as AuthService {
-    note right
-      - JWT generation/validation
-      - Password hashing (bcrypt)
-      - User authentication
-      - Session management
-    end note
-  }
+ContainerDb(postgres, "PostgreSQL", "Database")
+ContainerDb(redis, "Redis", "Cache")
+Container(vehicle_connector, "Vehicle Connector", "gRPC/WebSocket Client")
+System_Ext(idp, "Identity Provider", "OAuth2")
 
-  component "Vehicle Service\n(app/services/vehicle_service.py)" as VehicleService {
-    note right
-      - Vehicle CRUD operations
-      - Connection status tracking
-      - Vehicle caching logic
-    end note
-  }
+Rel(api_router, auth_controller, "Routes /auth/* to")
+Rel(api_router, vehicle_controller, "Routes /vehicles/* to")
+Rel(api_router, command_controller, "Routes /commands/* to")
 
-  component "Command Service\n(app/services/command_service.py)" as CommandService {
-    note right
-      - Command submission
-      - SOVD validation orchestration
-      - Command status tracking
-      - Response collection
-    end note
-  }
+Rel(auth_controller, auth_service, "Uses")
+Rel(vehicle_controller, vehicle_service, "Uses")
+Rel(command_controller, command_service, "Uses")
 
-  component "Audit Service\n(app/services/audit_service.py)" as AuditService {
-    note right
-      - Security event logging
-      - Command execution logging
-      - Compliance tracking
-    end note
-  }
+Rel(auth_service, user_repo, "Uses")
+Rel(auth_service, idp, "Validates tokens with", "HTTPS")
+Rel(auth_service, audit_service, "Logs auth events to")
 
-  component "WebSocket Manager\n(app/services/websocket_manager.py)" as WebSocketManager {
-    note right
-      - Connection registry
-      - Broadcasting to clients
-      - Redis Pub/Sub listener
-      - Connection cleanup
-    end note
-  }
-}
+Rel(vehicle_service, vehicle_repo, "Uses")
+Rel(vehicle_service, redis, "Caches vehicle status in", "Redis Protocol")
+Rel(vehicle_service, audit_service, "Logs vehicle events to")
 
-' Integration/Connector Layer
-package "Integration Layer" #orange {
-  component "SOVD Protocol Handler\n(app/services/sovd_protocol_handler.py)" as SOVDHandler {
-    note right
-      - SOVD 2.0 command validation
-      - Schema validation (JSON Schema)
-      - Command encoding/decoding
-      - Parameter validation
-    end note
-  }
+Rel(command_service, command_repo, "Uses")
+Rel(command_service, response_repo, "Uses")
+Rel(command_service, sovd_handler, "Validates commands with")
+Rel(command_service, vehicle_connector, "Executes commands via")
+Rel(command_service, audit_service, "Logs command events to")
 
-  component "Vehicle Connector\n(app/connectors/vehicle_connector.py)" as VehicleConnector {
-    note right
-      - gRPC client implementation
-      - Command transmission
-      - Response streaming
-      - Retry logic & error handling
-      - Connection pooling
-    end note
-  }
-}
+Rel(vehicle_repo, postgres, "Reads/Writes", "SQL")
+Rel(command_repo, postgres, "Reads/Writes", "SQL")
+Rel(response_repo, postgres, "Reads/Writes", "SQL")
+Rel(user_repo, postgres, "Reads/Writes", "SQL")
 
-' Repository Layer (Data Access)
-package "Repository Layer" #lightyellow {
-  component "User Repository\n(app/repositories/user_repository.py)" as UserRepo
-  component "Vehicle Repository\n(app/repositories/vehicle_repository.py)" as VehicleRepo
-  component "Command Repository\n(app/repositories/command_repository.py)" as CommandRepo
-  component "Response Repository\n(app/repositories/response_repository.py)" as ResponseRepo
-  component "Session Repository\n(app/repositories/session_repository.py)" as SessionRepo
-  component "Audit Log Repository\n(app/repositories/audit_log_repository.py)" as AuditRepo
-}
+Rel(audit_service, postgres, "Writes audit logs to", "SQL")
 
-' Shared Kernel (Infrastructure)
-package "Shared Kernel" #lightgray {
-  component "Database Module\n(app/database.py)" as Database {
-    note right
-      - AsyncEngine
-      - SessionLocal factory
-      - Connection pooling
-    end note
-  }
-
-  component "Config Module\n(app/config.py)" as Config {
-    note right
-      - Pydantic Settings
-      - Environment variables
-      - Feature flags
-    end note
-  }
-
-  component "Dependencies Module\n(app/dependencies.py)" as Dependencies {
-    note right
-      - get_db (session injection)
-      - get_current_user (JWT)
-      - require_role (RBAC)
-      - get_redis
-    end note
-  }
-
-  component "Middleware\n(app/middleware/)" as Middleware {
-    note right
-      - logging_middleware.py
-      - error_handling_middleware.py
-      - cors_middleware.py
-    end note
-  }
-
-  component "Utils\n(app/utils/)" as Utils {
-    note right
-      - logging.py (structlog)
-      - error_codes.py
-      - validators.py
-    end note
-  }
-}
-
-' External Dependencies
-database "PostgreSQL" as DB
-database "Redis" as Cache
-cloud "Vehicle (gRPC)" as Vehicle
-
-' API Layer to Service Layer Dependencies
-AuthController --> AuthService
-VehicleController --> VehicleService
-CommandController --> CommandService
-WebSocketHandler --> WebSocketManager
-
-' Service Layer to Repository Layer Dependencies
-AuthService --> UserRepo : authenticate user
-AuthService --> SessionRepo : manage sessions
-VehicleService --> VehicleRepo : CRUD operations
-CommandService --> CommandRepo : store commands
-CommandService --> ResponseRepo : store responses
-AuditService --> AuditRepo : log events
-
-' Service Layer to Integration Layer Dependencies
-CommandService --> SOVDHandler : validate SOVD commands
-CommandService --> VehicleConnector : execute commands
-CommandService --> AuditService : log command execution
-
-' Integration Layer to Repository Layer Dependencies
-VehicleConnector --> ResponseRepo : store streaming responses
-
-' Service Layer to External Dependencies
-AuthService --> Cache : session storage
-VehicleService --> Cache : vehicle status cache
-WebSocketManager --> Cache : Pub/Sub listener
-
-' Repository Layer to Database
-UserRepo --> Database
-VehicleRepo --> Database
-CommandRepo --> Database
-ResponseRepo --> Database
-SessionRepo --> Database
-AuditRepo --> Database
-
-' Database to PostgreSQL
-Database --> DB : asyncpg
-
-' Cache to Redis
-Cache --> Cache : Redis protocol
-
-' Vehicle Connector to External Vehicle
-VehicleConnector --> Vehicle : gRPC over TLS
-
-' Shared Kernel Dependencies (used by all layers)
-AuthService ..> Config : configuration
-AuthService ..> Dependencies : dependency injection
-VehicleService ..> Config : configuration
-CommandService ..> Config : configuration
-CommandService ..> Dependencies : RBAC checks
-AuditService ..> Config : configuration
-WebSocketManager ..> Dependencies : authentication
-
-' Middleware applied to all API routes
-AuthController ..> Middleware : logging, errors
-VehicleController ..> Middleware : logging, errors
-CommandController ..> Middleware : logging, errors
-
-' Utils used across layers
-AuthService ..> Utils : logging, validators
-VehicleService ..> Utils : logging, validators
-CommandService ..> Utils : logging, error codes
-AuditService ..> Utils : logging
-VehicleConnector ..> Utils : logging, error codes
-
-note bottom of CommandService
-  **Command Execution Flow:**
-  1. Validate SOVD command (via SOVD Handler)
-  2. Store command record (via Command Repo)
-  3. Execute via Vehicle Connector
-  4. Collect responses (via Response Repo)
-  5. Publish event to Redis Pub/Sub
-  6. Log audit event (via Audit Service)
-end note
-
-note bottom of WebSocketManager
-  **Real-time Updates:**
-  - Listens to Redis Pub/Sub channels
-  - Broadcasts to connected WebSocket clients
-  - Manages connection lifecycle
-  - Handles reconnection logic
-end note
-
-note bottom of VehicleConnector
-  **gRPC Communication:**
-  - Bidirectional streaming
-  - Automatic retry with exponential backoff
-  - Circuit breaker pattern
-  - Connection health monitoring
-end note
+Rel(auth_service, shared_kernel, "Uses utilities from")
+Rel(vehicle_service, shared_kernel, "Uses utilities from")
+Rel(command_service, shared_kernel, "Uses utilities from")
 
 @enduml

@@ -10,27 +10,23 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I1.T1",
+  "task_id": "I1.T2",
   "iteration_id": "I1",
   "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
-  "description": "Create complete directory structure as defined in Section 3 of the plan. Initialize Git repository with `.gitignore`. Create root-level `README.md` with project overview and quick-start instructions. Create `Makefile` with targets: `up` (start docker-compose), `down` (stop services), `test` (run all tests), `lint` (run all linters), `logs` (view logs). Set up empty configuration files: `docker-compose.yml`, `.github/workflows/ci-cd.yml`, `frontend/package.json`, `backend/requirements.txt`, `backend/pyproject.toml`.",
-  "agent_type_hint": "SetupAgent",
-  "inputs": "Directory structure specification from Plan Section 3.",
+  "description": "Create PlantUML source files for Component Diagram (C4 Level 3 - Application Server internal components) and Container Diagram (C4 Level 2 - deployable containers). Component diagram must include: API Router, Auth Controller, Vehicle Controller, Command Controller, Auth Service, Vehicle Service, Command Service, Audit Service, SOVD Protocol Handler, Repository Layer (Vehicle/Command/Response/User repositories), Shared Kernel. Container diagram must include: Web App (React SPA), API Gateway (Nginx), Application Server (FastAPI), WebSocket Server (FastAPI embedded), Vehicle Connector, PostgreSQL, Redis. Include all relationships and communication protocols.",
+  "agent_type_hint": "DiagrammingAgent",
+  "inputs": "Architecture Blueprint Sections 3.4, 3.5; Plan Section 2 (Core Architecture); Technology Stack from Plan Section 2.",
   "target_files": [
-    "README.md",
-    "Makefile",
-    ".gitignore",
-    "docker-compose.yml",
-    ".github/workflows/ci-cd.yml",
-    "frontend/package.json",
-    "backend/requirements.txt",
-    "backend/pyproject.toml"
+    "docs/diagrams/component_diagram.puml",
+    "docs/diagrams/container_diagram.puml"
   ],
   "input_files": [],
-  "deliverables": "Complete directory tree with all folders and placeholder files; functional Makefile with documented targets; README with setup instructions.",
-  "acceptance_criteria": "Directory structure matches Plan Section 3 exactly; `make up` displays help message or runs docker-compose (even if empty); `README.md` includes: project title, goal summary, tech stack list, `make up` quick-start; `.gitignore` excludes: `node_modules/`, `__pycache__/`, `.env`, `*.pyc`, `db_data/`, `.vscode/`, `.idea/`; Git repository initialized with initial commit",
-  "dependencies": [],
-  "parallelizable": false,
+  "deliverables": "Two PlantUML `.puml` source files that render without syntax errors and accurately represent architecture.",
+  "acceptance_criteria": "PlantUML files compile without errors (test with `plantuml -testdot` or online renderer); Component diagram shows all modules listed in description with correct dependencies; Container diagram shows all containers with communication protocols labeled; Diagrams match Architecture Blueprint diagrams in Sections 3.4 and 3.5; Files committed to `docs/diagrams/` directory",
+  "dependencies": [
+    "I1.T1"
+  ],
+  "parallelizable": true,
   "done": false
 }
 ```
@@ -41,171 +37,170 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Directory Structure (from 01_Plan_Overview_and_Setup.md)
+### Context: container-diagram (from 03_System_Structure_and_Data.md)
 
-The complete directory structure specification from Plan Section 3:
+```markdown
+### 3.4. Container Diagram (C4 Level 2)
 
+#### Description
+
+This diagram zooms into the SOVD Command WebApp system boundary and shows the major deployable containers (applications and data stores). Key containers include:
+
+- **Web Application (SPA)**: React-based frontend served as static files
+- **API Gateway**: Nginx reverse proxy for routing, TLS termination, and load balancing
+- **Application Server**: FastAPI-based backend with modular services
+- **WebSocket Server**: Handles real-time streaming responses (embedded in FastAPI)
+- **Vehicle Connector Service**: Abstraction layer for vehicle communication protocols
+- **PostgreSQL Database**: Primary data store for vehicles, commands, responses, and audit logs
+- **Redis Cache**: Session storage and response caching for performance
+
+#### Diagram (PlantUML)
+
+```plantuml
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+
+title Container Diagram - SOVD Command WebApp
+
+Person(engineer, "Automotive Engineer", "Performs vehicle diagnostics")
+System_Ext(vehicle, "Connected Vehicle", "SOVD 2.0 endpoint")
+System_Ext(idp, "Identity Provider", "OAuth2/OIDC provider")
+
+System_Boundary(sovd_system, "SOVD Command WebApp") {
+  Container(web_app, "Web Application", "React 18, TypeScript, MUI", "Provides UI for authentication, vehicle selection, command execution, and response viewing")
+
+  Container(api_gateway, "API Gateway", "Nginx", "Routes requests, terminates TLS, serves static files, load balances")
+
+  Container(app_server, "Application Server", "FastAPI, Python 3.11", "Handles business logic: authentication, command validation, execution orchestration, response handling")
+
+  Container(ws_server, "WebSocket Server", "FastAPI WebSocket", "Manages real-time streaming connections for command responses")
+
+  Container(vehicle_connector, "Vehicle Connector", "Python, gRPC/WebSocket Client", "Abstracts vehicle communication protocols, handles retries, connection pooling")
+
+  ContainerDb(postgres, "Database", "PostgreSQL 15", "Stores vehicles, commands, responses, users, sessions, audit logs")
+
+  ContainerDb(redis, "Cache", "Redis 7", "Caches sessions, vehicle status, recent responses for performance")
+}
+
+Rel(engineer, web_app, "Uses", "HTTPS")
+Rel(web_app, api_gateway, "Makes API calls", "HTTPS, JSON")
+Rel(web_app, ws_server, "Opens WebSocket for streaming", "WSS")
+
+Rel(api_gateway, app_server, "Routes requests to", "HTTP")
+Rel(api_gateway, ws_server, "Routes WebSocket upgrade", "WebSocket Protocol")
+
+Rel(app_server, postgres, "Reads/Writes", "SQL (asyncpg)")
+Rel(app_server, redis, "Caches data", "Redis Protocol")
+Rel(app_server, vehicle_connector, "Requests command execution", "Internal API")
+Rel(app_server, idp, "Validates tokens", "OAuth2/OIDC")
+
+Rel(ws_server, postgres, "Reads response data", "SQL (asyncpg)")
+Rel(ws_server, redis, "Publishes/Subscribes to response events", "Redis Pub/Sub")
+
+Rel(vehicle_connector, vehicle, "Sends SOVD commands, receives responses", "gRPC/WebSocket over TLS")
+Rel(vehicle_connector, redis, "Publishes response events", "Redis Pub/Sub")
+Rel(vehicle_connector, postgres, "Writes responses", "SQL (asyncpg)")
+
+@enduml
 ```
-sovd-command-webapp/
-├── README.md                          # Project overview, setup instructions, architecture summary
-├── Makefile                           # Developer convenience commands (up, down, test, lint)
-├── docker-compose.yml                 # Local development orchestration
-├── .github/
-│   └── workflows/
-│       └── ci-cd.yml                  # GitHub Actions CI/CD pipeline
-│
-├── frontend/                          # React TypeScript frontend
-│   ├── Dockerfile                     # Multi-stage build for production
-│   ├── package.json                   # NPM dependencies
-│   ├── tsconfig.json                  # TypeScript configuration
-│   ├── vite.config.ts                 # Vite build configuration
-│   ├── .eslintrc.json                 # ESLint configuration
-│   ├── .prettierrc                    # Prettier configuration
-│   ├── public/                        # Static assets
-│   ├── src/
-│   │   ├── main.tsx                   # Application entry point
-│   │   ├── App.tsx                    # Root component
-│   │   ├── components/                # Reusable UI components
-│   │   │   ├── auth/                  # Authentication components (LoginForm, etc.)
-│   │   │   ├── vehicles/              # Vehicle components (VehicleList, VehicleSelector)
-│   │   │   ├── commands/              # Command components (CommandForm, ResponseViewer)
-│   │   │   └── common/                # Common UI (Header, Sidebar, ErrorBoundary)
-│   │   ├── pages/                     # Route-level page components
-│   │   │   ├── LoginPage.tsx
-│   │   │   ├── DashboardPage.tsx
-│   │   │   ├── VehiclesPage.tsx
-│   │   │   ├── CommandPage.tsx
-│   │   │   └── HistoryPage.tsx
-│   │   ├── hooks/                     # Custom React hooks
-│   │   ├── api/                       # API client (generated from OpenAPI or manual)
-│   │   ├── types/                     # TypeScript type definitions
-│   │   ├── utils/                     # Utility functions
-│   │   └── styles/                    # Global styles, MUI theme
-│   └── tests/                         # Frontend tests (Vitest, React Testing Library)
-│
-├── backend/                           # FastAPI Python backend
-│   ├── Dockerfile                     # Multi-stage build for production
-│   ├── requirements.txt               # Python dependencies (pinned versions)
-│   ├── requirements-dev.txt           # Development dependencies (pytest, ruff, etc.)
-│   ├── pyproject.toml                 # Python project config (Black, Ruff, mypy)
-│   ├── alembic.ini                    # Alembic migration configuration
-│   ├── alembic/                       # Database migrations
-│   │   ├── env.py
-│   │   └── versions/                  # Migration scripts
-│   ├── app/
-│   │   ├── main.py                    # FastAPI application entry point
-│   │   ├── config.py                  # Configuration management (environment variables)
-│   │   ├── dependencies.py            # Dependency injection setup
-│   │   ├── api/                       # API routers (controllers)
-│   │   │   ├── v1/
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── auth.py            # Authentication endpoints
-│   │   │   │   ├── vehicles.py        # Vehicle management endpoints
-│   │   │   │   ├── commands.py        # Command execution endpoints
-│   │   │   │   └── websocket.py       # WebSocket endpoint for streaming
-│   │   ├── services/                  # Business logic modules
-│   │   │   ├── auth_service.py        # Auth logic (JWT, password hashing, RBAC)
-│   │   │   ├── vehicle_service.py     # Vehicle management logic
-│   │   │   ├── command_service.py     # Command execution orchestration
-│   │   │   ├── audit_service.py       # Audit logging logic
-│   │   │   └── sovd_protocol_handler.py # SOVD 2.0 validation and encoding
-│   │   ├── connectors/                # External system integrations
-│   │   │   └── vehicle_connector.py   # gRPC/WebSocket client for vehicle communication
-│   │   ├── models/                    # SQLAlchemy ORM models
-│   │   │   ├── user.py
-│   │   │   ├── vehicle.py
-│   │   │   ├── command.py
-│   │   │   ├── response.py
-│   │   │   ├── session.py
-│   │   │   └── audit_log.py
-│   │   ├── schemas/                   # Pydantic models (request/response validation)
-│   │   │   ├── auth.py
-│   │   │   ├── vehicle.py
-│   │   │   ├── command.py
-│   │   │   └── common.py
-│   │   ├── repositories/              # Data access layer (repository pattern)
-│   │   │   ├── user_repository.py
-│   │   │   ├── vehicle_repository.py
-│   │   │   ├── command_repository.py
-│   │   │   └── response_repository.py
-│   │   ├── middleware/                # FastAPI middleware (logging, error handling, CORS)
-│   │   ├── utils/                     # Shared utilities (logging setup, validators)
-│   │   └── database.py                # Database connection and session management
-│   └── tests/                         # Backend tests
-│       ├── unit/                      # Unit tests for services, repositories
-│       ├── integration/               # Integration tests for API endpoints
-│       └── conftest.py                # Pytest configuration and fixtures
-│
-├── infrastructure/                    # Infrastructure as Code and deployment
-│   ├── docker/                        # Dockerfiles and docker-compose variations
-│   │   ├── nginx.conf                 # Nginx configuration for production
-│   │   └── docker-compose.prod.yml    # Production-like local environment
-│   ├── kubernetes/                    # Kubernetes manifests (if not using Helm exclusively)
-│   │   └── namespace.yaml
-│   ├── helm/                          # Helm charts for Kubernetes deployment
-│   │   └── sovd-webapp/
-│   │       ├── Chart.yaml
-│   │       ├── values.yaml            # Default values
-│   │       ├── values-production.yaml # Production overrides
-│   │       └── templates/
-│   │           ├── frontend-deployment.yaml
-│   │           ├── backend-deployment.yaml
-│   │           ├── vehicle-connector-deployment.yaml
-│   │           ├── services.yaml
-│   │           ├── ingress.yaml
-│   │           ├── configmap.yaml
-│   │           └── secrets.yaml
-│   ├── terraform/                     # Terraform for AWS infrastructure (optional)
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   └── scripts/                       # Deployment and maintenance scripts
-│       ├── deploy.sh                  # Deployment script
-│       └── backup.sh                  # Database backup script
-│
-├── docs/                              # Documentation and design artifacts
-│   ├── architecture/                  # Architecture documentation
-│   │   ├── blueprint.md               # Copy of architecture blueprint (reference)
-│   │   └── decisions/                 # Architecture Decision Records (ADRs)
-│   │       ├── 001-modular-monolith.md
-│   │       ├── 002-fastapi-choice.md
-│   │       └── 003-grpc-for-vehicle-comms.md
-│   ├── diagrams/                      # UML and architecture diagrams
-│   │   ├── component_diagram.puml     # Component diagram (PlantUML source)
-│   │   ├── container_diagram.puml     # Container diagram (PlantUML source)
-│   │   ├── erd.puml                   # Database ERD (PlantUML source)
-│   │   ├── sequence_command_flow.puml # Command execution sequence diagram
-│   │   ├── sequence_error_flow.puml   # Error handling sequence diagram
-│   │   ├── deployment_diagram.puml    # Deployment architecture diagram
-│   │   └── rendered/                  # Rendered PNG/SVG outputs (generated)
-│   ├── api/                           # API specifications
-│   │   ├── openapi.yaml               # OpenAPI 3.1 specification (auto-generated + refined)
-│   │   └── sovd_command_schema.json   # SOVD command validation schema
-│   ├── runbooks/                      # Operational runbooks
-│   │   ├── deployment.md              # Deployment procedures
-│   │   ├── troubleshooting.md         # Common issues and solutions
-│   │   └── disaster_recovery.md       # DR procedures
-│   └── user-guides/                   # End-user documentation
-│       └── engineer_guide.md          # Guide for automotive engineers using the app
-│
-├── scripts/                           # Development and utility scripts
-│   ├── init_db.sh                     # Initialize local database with schema
-│   ├── seed_data.py                   # Seed database with test data
-│   ├── generate_openapi.py            # Extract OpenAPI spec from FastAPI
-│   └── lint.sh                        # Run all linters (frontend + backend)
-│
-├── tests/                             # End-to-end tests (cross-service)
-│   └── e2e/
-│       ├── playwright.config.ts       # Playwright configuration
-│       └── specs/
-│           ├── auth.spec.ts           # E2E auth flow tests
-│           ├── command_execution.spec.ts # E2E command execution tests
-│           └── vehicle_management.spec.ts
-│
-└── .gitignore                         # Git ignore patterns
 ```
 
-### Context: Technology Stack (from 01_Plan_Overview_and_Setup.md)
+### Context: component-diagram (from 03_System_Structure_and_Data.md)
+
+```markdown
+### 3.5. Component Diagram(s) (C4 Level 3)
+
+#### Description
+
+This diagram details the internal components of the **Application Server** container. It shows the modular architecture with clear separation of concerns:
+
+- **API Controllers**: FastAPI routers handling HTTP endpoints
+- **Auth Service**: Authentication, JWT generation/validation, RBAC
+- **Vehicle Service**: Vehicle registry and status management
+- **Command Service**: SOVD command validation and execution orchestration
+- **Audit Service**: Comprehensive logging of all operations
+- **Repository Layer**: Data access abstraction using repository pattern
+- **SOVD Protocol Handler**: SOVD 2.0 specification compliance layer
+- **Shared Kernel**: Cross-cutting utilities (logging, config, error handling)
+
+#### Diagram (PlantUML - Application Server Components)
+
+```plantuml
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Component Diagram - Application Server
+
+Container_Boundary(app_server, "Application Server (FastAPI)") {
+
+  Component(api_router, "API Router", "FastAPI APIRouter", "Top-level request routing and middleware chain")
+
+  Component(auth_controller, "Auth Controller", "FastAPI Router", "Handles /auth/* endpoints: login, logout, refresh token")
+  Component(vehicle_controller, "Vehicle Controller", "FastAPI Router", "Handles /vehicles/* endpoints: list, get, status")
+  Component(command_controller, "Command Controller", "FastAPI Router", "Handles /commands/* endpoints: execute, history, get response")
+
+  Component(auth_service, "Auth Service", "Python Module", "JWT generation/validation, password hashing, RBAC enforcement")
+  Component(vehicle_service, "Vehicle Service", "Python Module", "Vehicle registry, connection status, health checks")
+  Component(command_service, "Command Service", "Python Module", "Command validation, execution orchestration, response aggregation")
+  Component(audit_service, "Audit Service", "Python Module", "Structured logging, audit trail persistence")
+
+  Component(sovd_handler, "SOVD Protocol Handler", "Python Module", "SOVD 2.0 specification validation, command encoding, response decoding")
+
+  Component(vehicle_repo, "Vehicle Repository", "SQLAlchemy", "Data access for vehicles table")
+  Component(command_repo, "Command Repository", "SQLAlchemy", "Data access for commands table")
+  Component(response_repo, "Response Repository", "SQLAlchemy", "Data access for responses table")
+  Component(user_repo, "User Repository", "SQLAlchemy", "Data access for users table")
+
+  Component(shared_kernel, "Shared Kernel", "Python Modules", "Logging, configuration, error handling, dependency injection")
+}
+
+ContainerDb(postgres, "PostgreSQL", "Database")
+ContainerDb(redis, "Redis", "Cache")
+Container(vehicle_connector, "Vehicle Connector", "gRPC/WebSocket Client")
+System_Ext(idp, "Identity Provider", "OAuth2")
+
+Rel(api_router, auth_controller, "Routes /auth/* to")
+Rel(api_router, vehicle_controller, "Routes /vehicles/* to")
+Rel(api_router, command_controller, "Routes /commands/* to")
+
+Rel(auth_controller, auth_service, "Uses")
+Rel(vehicle_controller, vehicle_service, "Uses")
+Rel(command_controller, command_service, "Uses")
+
+Rel(auth_service, user_repo, "Uses")
+Rel(auth_service, idp, "Validates tokens with", "HTTPS")
+Rel(auth_service, audit_service, "Logs auth events to")
+
+Rel(vehicle_service, vehicle_repo, "Uses")
+Rel(vehicle_service, redis, "Caches vehicle status in", "Redis Protocol")
+Rel(vehicle_service, audit_service, "Logs vehicle events to")
+
+Rel(command_service, command_repo, "Uses")
+Rel(command_service, response_repo, "Uses")
+Rel(command_service, sovd_handler, "Validates commands with")
+Rel(command_service, vehicle_connector, "Executes commands via")
+Rel(command_service, audit_service, "Logs command events to")
+
+Rel(vehicle_repo, postgres, "Reads/Writes", "SQL")
+Rel(command_repo, postgres, "Reads/Writes", "SQL")
+Rel(response_repo, postgres, "Reads/Writes", "SQL")
+Rel(user_repo, postgres, "Reads/Writes", "SQL")
+
+Rel(audit_service, postgres, "Writes audit logs to", "SQL")
+
+Rel(auth_service, shared_kernel, "Uses utilities from")
+Rel(vehicle_service, shared_kernel, "Uses utilities from")
+Rel(command_service, shared_kernel, "Uses utilities from")
+
+@enduml
+```
+```
+
+### Context: technology-stack (from 01_Plan_Overview_and_Setup.md)
 
 ```markdown
 *   **Technology Stack:**
@@ -219,27 +214,79 @@ sovd-command-webapp/
     *   **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
     *   **CI/CD:** GitHub Actions
     *   **Monitoring:** Prometheus + Grafana, structlog for structured logging
+    *   **Tracing:** OpenTelemetry + Jaeger
+    *   **Secrets Management:** Docker secrets (local), AWS Secrets Manager (production)
     *   **Testing:** pytest + pytest-asyncio + httpx (backend), Vitest + React Testing Library (frontend), Playwright (E2E)
     *   **Code Quality:** Ruff + Black + mypy (backend), ESLint + Prettier + TypeScript (frontend)
+    *   **Deployment:** AWS EKS (primary cloud target), with cloud-agnostic design
 ```
 
-### Context: Project Goal (from 01_Plan_Overview_and_Setup.md)
+### Context: architectural-style (from 02_Architecture_Overview.md)
 
 ```markdown
-*   **Goal:** Develop a secure, cloud-based web application that enables automotive engineers to remotely execute SOVD (Service-Oriented Vehicle Diagnostics) 2.0 commands on connected vehicles and view real-time responses through a modern, unified interface.
+### 3.1. Architectural Style
 
-*   **High-Level Requirements Summary:**
-    *   User authentication and role-based access control (Engineer, Admin roles)
-    *   Vehicle registry with connection status monitoring
-    *   SOVD command submission with parameter validation
-    *   Real-time response streaming via WebSocket
-    *   Command history and audit logging
-    *   <2 second round-trip time for 95% of commands
-    *   Support for 100+ concurrent users
-    *   Secure communication (TLS, JWT, RBAC)
-    *   Docker-based deployment ready for cloud platforms (AWS/GCP/Azure)
-    *   80%+ test coverage with CI/CD pipeline
-    *   OpenAPI/Swagger documentation for all backend APIs
+**Selected Style:** **Modular Monolith with Service-Oriented Modules**
+
+#### Rationale
+
+The architecture adopts a **modular monolith** approach with clear service boundaries, positioning the system for future evolution toward microservices if needed, while maintaining simplicity for initial deployment.
+
+**Why Modular Monolith:**
+
+1. **Right-Sized Complexity**: The system has ~3-5 core functional areas (auth, vehicle management, command execution, response handling, audit). This doesn't justify the operational overhead of full microservices.
+
+2. **Simplified Deployment**: Single deployment unit reduces operational complexity while maintaining Docker/Kubernetes compatibility for scaling.
+
+3. **Performance**: In-process communication between modules eliminates network latency for non-critical paths, helping meet the <2s response time requirement.
+
+4. **Development Velocity**: Simplified testing, debugging, and deployment accelerates initial development while the team is small.
+
+5. **Clear Module Boundaries**: Modules are designed as if they were microservices (separate code domains, dependency injection, interface contracts), making future extraction straightforward.
+
+**Service-Oriented Module Design:**
+
+- **API Gateway Module**: Request routing, authentication, rate limiting
+- **Auth Service Module**: User authentication, JWT management, RBAC
+- **Vehicle Service Module**: Vehicle registry, connection status, health monitoring
+- **Command Service Module**: SOVD command validation, execution orchestration, response handling
+- **Vehicle Connector Module**: Abstraction layer for vehicle communication (WebSocket/gRPC)
+- **Audit Service Module**: Comprehensive logging of all operations
+- **Database Access Layer**: Centralized data access with repository pattern
+
+**Modularity Enforcement:**
+- Each module has a clear public interface (domain facade)
+- Inter-module communication through dependency injection
+- No direct database access across module boundaries
+- Shared kernel for cross-cutting concerns (logging, config, utilities)
+```
+
+### Context: key-components (from 01_Plan_Overview_and_Setup.md)
+
+```markdown
+*   **Key Components/Services:**
+    *   **Web Application (SPA)**: React-based frontend for authentication, vehicle selection, command execution, response viewing
+    *   **API Gateway (Nginx)**: Routes requests, terminates TLS, serves static files, load balances
+    *   **Application Server (FastAPI)**: Core business logic with modular services
+        *   **Auth Service Module**: JWT generation/validation, password hashing, RBAC enforcement
+        *   **Vehicle Service Module**: Vehicle registry, connection status, health monitoring
+        *   **Command Service Module**: SOVD command validation, execution orchestration, response aggregation
+        *   **Audit Service Module**: Structured logging, audit trail persistence
+        *   **SOVD Protocol Handler**: SOVD 2.0 specification compliance, command encoding, response decoding
+    *   **WebSocket Server (FastAPI)**: Real-time streaming of command responses (embedded in Application Server)
+    *   **Vehicle Connector Service**: Abstraction layer for gRPC/WebSocket communication with vehicles
+    *   **PostgreSQL Database**: Persistent storage for users, vehicles, commands, responses, sessions, audit logs
+    *   **Redis Cache**: Session storage, vehicle status caching, Pub/Sub for response events
+```
+
+### Context: communication-patterns (from 01_Plan_Overview_and_Setup.md)
+
+```markdown
+*   **Communication Patterns:**
+    *   **Synchronous Request/Response (REST)**: Auth endpoints (login/logout/refresh), vehicle listing, command submission, history retrieval
+    *   **Asynchronous Streaming (WebSocket)**: Real-time command response delivery, live vehicle status updates, command execution status
+    *   **Event-Driven Internal (Redis Pub/Sub)**: Decouples Vehicle Connector from WebSocket Server; response events published to channels, subscribed by WebSocket clients
+    *   **gRPC (Vehicle Communication)**: Efficient binary protocol for backend ↔ vehicle communication; supports server-streaming for multi-part responses
 ```
 
 ---
@@ -248,135 +295,80 @@ sovd-command-webapp/
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### Current State Assessment
-
-I have analyzed the existing project structure and found that:
-
-1. **Directory Structure**: The root-level directory structure exists with the following key directories: `backend/`, `frontend/`, `docs/`, `infrastructure/`, `scripts/`, `tests/`
-
-2. **Core Files Already Present**:
-   - **README.md**: EXISTS - Contains project overview, goals, technology stack, and quick start instructions
-   - **Makefile**: EXISTS - Contains targets for `up`, `down`, `test`, `lint`, `logs`, and `help`
-   - **.gitignore**: EXISTS - Contains proper exclusions for node_modules, __pycache__, .env, *.pyc, db_data, .vscode, .idea
-   - **docker-compose.yml**: EXISTS - Currently has a placeholder service, needs to be updated but structure is present
-   - **backend/requirements.txt**: EXISTS - Has placeholder comments, needs actual dependencies
-   - **backend/pyproject.toml**: EXISTS - Has proper Black, Ruff, and mypy configurations already
-   - **frontend/package.json**: EXISTS - Has basic structure with scripts defined but empty dependencies
-
-3. **Missing Elements**:
-   - `.github/workflows/ci-cd.yml` - Does NOT exist
-   - Many subdirectories defined in the plan are missing
-   - Git repository appears to be initialized (based on .gitignore presence)
-
 ### Relevant Existing Code
 
+*   **File:** `docs/diagrams/component_diagram.puml`
+    *   **Summary:** This file contains an existing component diagram but it does NOT use the C4 PlantUML library as specified in the Architecture Blueprint. It uses standard PlantUML syntax with custom styling.
+    *   **Recommendation:** You MUST REPLACE this file completely with a new diagram that uses the official C4 PlantUML library (`!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml`). The Architecture Blueprint Section 3.5 provides the exact structure you should follow.
+    *   **Critical:** The existing diagram has good content coverage showing all required components, but the syntax must be converted to use C4 macros like `Component()`, `Container_Boundary()`, `Rel()`, etc.
+
+*   **File:** `docs/diagrams/container_diagram.puml`
+    *   **Summary:** This file contains an existing container diagram but similarly does NOT use the C4 PlantUML library as required. It uses standard PlantUML component syntax.
+    *   **Recommendation:** You MUST REPLACE this file completely with a new diagram using the official C4 PlantUML library (`!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml`). The Architecture Blueprint Section 3.4 provides the exact reference implementation.
+    *   **Critical:** The existing diagram covers most required containers (Web App, API Gateway, Application Server, PostgreSQL, Redis, Connected Vehicle) but needs to be rewritten using C4 macros like `Container()`, `ContainerDb()`, `Person()`, `System_Ext()`, `Rel()`, etc.
+
 *   **File:** `README.md` (root)
-    *   **Summary:** This file contains a comprehensive project overview with goals, technology stack, quick start instructions, and project structure documentation. It follows the format specified in the acceptance criteria.
-    *   **Recommendation:** This file is COMPLETE and meets all requirements. DO NOT modify unless adding new information.
+    *   **Summary:** The project README is complete and well-structured, providing project overview, goals, technology stack, and quick start instructions.
+    *   **Note:** This file was created in task I1.T1 and meets all acceptance criteria. No changes needed for this task.
 
 *   **File:** `Makefile` (root)
-    *   **Summary:** Contains all required targets (up, down, test, lint, logs) with proper commands and a help target. Includes smart handling for placeholder docker-compose.yml.
-    *   **Recommendation:** This file is COMPLETE and meets all requirements. DO NOT modify.
-
-*   **File:** `.gitignore` (root)
-    *   **Summary:** Contains all required exclusions including node_modules/, __pycache__/, .env, *.pyc, db_data/, .vscode/, .idea/ as specified in acceptance criteria.
-    *   **Recommendation:** This file is COMPLETE and meets all requirements. DO NOT modify.
-
-*   **File:** `docker-compose.yml` (root)
-    *   **Summary:** Has placeholder structure with version, services, networks, and volumes defined. Uses a hello-world placeholder service.
-    *   **Recommendation:** This file exists but is a placeholder. It DOES NOT need to be modified for Task I1.T1. The actual services will be added in Task I1.T5.
-
-*   **File:** `backend/pyproject.toml`
-    *   **Summary:** Contains complete configurations for Black (line-length=100), Ruff (E, F, I, N, W, UP rules), mypy (strict settings), pytest, and coverage.
-    *   **Recommendation:** This file is COMPLETE and meets all requirements. DO NOT modify.
-
-*   **File:** `backend/requirements.txt`
-    *   **Summary:** Contains placeholder comments but no actual dependencies.
-    *   **Recommendation:** This file exists as a placeholder. DO NOT populate it yet - actual dependencies will be added in Task I1.T6.
-
-*   **File:** `frontend/package.json`
-    *   **Summary:** Has basic structure with scripts (dev, build, preview, lint, test) but empty dependencies and devDependencies objects.
-    *   **Recommendation:** This file exists with proper structure. DO NOT populate dependencies yet - they will be added in Task I1.T7.
+    *   **Summary:** The Makefile provides convenient targets for `up`, `down`, `test`, `lint`, and `logs` commands.
+    *   **Note:** This file was created in task I1.T1. The project follows a "make-based" workflow for development commands.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** The project root directory is already `/home/aman/dev/personal-projects/sovd`, which appears to be named just `sovd` rather than `sovd-command-webapp` as specified in the plan. This is acceptable - the plan's root directory name is a suggestion, and the current name is fine.
+*   **Tip - C4 PlantUML Syntax:** The Architecture Blueprint provides EXACT PlantUML code examples in Sections 3.4 and 3.5 that use the official C4 library. You should use these as your PRIMARY reference and adapt them to ensure all components mentioned in the task description are included.
 
-*   **Note:** Many of the target files for this task (README.md, Makefile, .gitignore, docker-compose.yml, pyproject.toml) already exist and meet the acceptance criteria. Your primary work should be:
-  1. Creating the complete directory structure (all subdirectories)
-  2. Creating the missing `.github/workflows/ci-cd.yml` skeleton file
-  3. Ensuring all `__init__.py` files exist where needed (Python packages)
+*   **Tip - Component Diagram Requirements:** The task description specifies these components MUST be included in the Component Diagram:
+    - API Router
+    - Auth Controller, Vehicle Controller, Command Controller
+    - Auth Service, Vehicle Service, Command Service, Audit Service
+    - SOVD Protocol Handler
+    - Repository Layer (Vehicle/Command/Response/User repositories)
+    - Shared Kernel
 
-*   **Warning:** DO NOT populate backend/requirements.txt or frontend/package.json with actual dependencies. These are explicitly deferred to Tasks I1.T6 and I1.T7. The existing placeholder files are sufficient for Task I1.T1.
+    The existing diagram has all of these PLUS additional components (WebSocket Handler, Session Repository, Audit Log Repository, WebSocket Manager). You should INCLUDE all components from both the task description and the Architecture Blueprint to be comprehensive.
 
-*   **Critical:** You MUST create ALL subdirectories specified in the directory structure, including empty ones. The acceptance criteria states: "Directory structure matches Plan Section 3 exactly". This includes:
-  - All frontend subdirectories (components/auth, components/vehicles, components/commands, components/common, pages, hooks, api, types, utils, styles, tests)
-  - All backend subdirectories (alembic/versions, app/api/v1, app/services, app/connectors, app/models, app/schemas, app/repositories, app/middleware, app/utils, tests/unit, tests/integration)
-  - All infrastructure subdirectories (docker, kubernetes, helm/sovd-webapp/templates, terraform, scripts)
-  - All docs subdirectories (architecture/decisions, diagrams/rendered, api, runbooks, user-guides)
-  - All tests subdirectories (e2e/specs)
-  - All scripts files (can be empty placeholders)
+*   **Tip - Container Diagram Requirements:** The task description specifies these containers MUST be included:
+    - Web App (React SPA)
+    - API Gateway (Nginx)
+    - Application Server (FastAPI)
+    - WebSocket Server (FastAPI embedded)
+    - Vehicle Connector
+    - PostgreSQL
+    - Redis
 
-*   **Tip:** Use `mkdir -p` for creating nested directory structures efficiently. For Python packages (backend/app subdirectories), ensure each directory has an `__init__.py` file.
+    The Architecture Blueprint adds Identity Provider as an external system. Include ALL of these for completeness.
 
-*   **Note:** The `.github/workflows/ci-cd.yml` should be a skeleton/placeholder file with basic structure and comments indicating it will be populated in Task I5.T3. Do NOT attempt to implement the full CI/CD pipeline now.
+*   **Tip - Communication Protocols:** The task explicitly requires "communication protocols labeled" in the Container Diagram. Use the `Rel()` macro's third parameter to specify protocols like "HTTPS", "WSS", "gRPC over TLS", "Redis Pub/Sub", "SQL (asyncpg)", etc. The Architecture Blueprint examples show exactly how to do this.
 
-*   **Git Repository:** The acceptance criteria states "Git repository initialized with initial commit". Check if the repository is already initialized. If not, run `git init` and create an initial commit with all the baseline files.
+*   **Warning - PlantUML Testing:** The acceptance criteria require testing diagrams "with `plantuml -testdot` or online renderer". PlantUML is NOT installed in the local environment. You MUST instruct the Coder Agent to use an online PlantUML renderer (like https://www.plantuml.com/plantuml/ or http://www.plantuml.com/plantuml/uml/) to validate the diagrams compile without errors. Alternatively, suggest installing PlantUML locally if needed.
 
-### Task Completion Checklist
+*   **Warning - File Overwrites:** Both target files already exist with content. Your task is to REPLACE them, not append. Make sure to use the Write tool (not Edit) to completely overwrite the existing files with the new C4-compliant diagrams.
 
-To meet the acceptance criteria, you MUST verify:
+*   **Note - C4 Layout Directives:** The Architecture Blueprint examples use `LAYOUT_TOP_DOWN()` for Container Diagram and `LAYOUT_WITH_LEGEND()` for Component Diagram. These are C4 library helpers that improve diagram readability. You SHOULD use these same directives.
 
-1. ✅ Directory structure matches Plan Section 3 exactly (all subdirectories created)
-2. ✅ All `__init__.py` files exist in Python package directories
-3. ✅ `README.md` exists and includes: project title, goal summary, tech stack list, `make up` quick-start (ALREADY COMPLETE)
-4. ✅ `Makefile` has all required targets and `make up` works (ALREADY COMPLETE)
-5. ✅ `.gitignore` excludes all specified patterns (ALREADY COMPLETE)
-6. ✅ `docker-compose.yml` exists as placeholder (ALREADY COMPLETE)
-7. ✅ `.github/workflows/ci-cd.yml` exists as skeleton (NEEDS CREATION)
-8. ✅ `frontend/package.json` has basic structure (ALREADY COMPLETE)
-9. ✅ `backend/requirements.txt` exists as placeholder (ALREADY COMPLETE)
-10. ✅ `backend/pyproject.toml` has proper tool configurations (ALREADY COMPLETE)
-11. ✅ Git repository initialized with initial commit (VERIFY AND COMPLETE IF NEEDED)
+*   **Note - Directory Structure Convention:** The project follows the directory structure from Plan Section 3, which places PlantUML source files in `docs/diagrams/` with rendered outputs in `docs/diagrams/rendered/` subdirectory. You do NOT need to generate rendered images - only the `.puml` source files.
 
-### Specific Actions Required
+*   **Note - Git Workflow:** The acceptance criteria state "Files committed to `docs/diagrams/` directory". The Coder Agent should be instructed that files will be committed as part of the normal git workflow (this task doesn't require running git commands).
 
-Based on my analysis, you need to:
+### Quality Checklist for Coder Agent
 
-1. **Create Missing Subdirectories**: Run through the entire directory structure specification and create ALL missing subdirectories, especially:
-   - `frontend/src/components/auth/`, `frontend/src/components/vehicles/`, `frontend/src/components/commands/`, `frontend/src/components/common/`
-   - `frontend/src/pages/`, `frontend/src/hooks/`, `frontend/src/api/`, `frontend/src/types/`, `frontend/src/utils/`, `frontend/src/styles/`
-   - `backend/app/api/v1/` (with `__init__.py`)
-   - `backend/app/services/`, `backend/app/connectors/`, `backend/app/models/`, `backend/app/schemas/`, `backend/app/repositories/`, `backend/app/middleware/`, `backend/app/utils/` (all with `__init__.py`)
-   - `backend/alembic/versions/`
-   - `backend/tests/unit/`, `backend/tests/integration/` (with `__init__.py`)
-   - `infrastructure/docker/`, `infrastructure/kubernetes/`, `infrastructure/helm/sovd-webapp/templates/`, `infrastructure/terraform/`, `infrastructure/scripts/`
-   - `docs/architecture/decisions/`, `docs/diagrams/rendered/`, `docs/api/`, `docs/runbooks/`, `docs/user-guides/`
-   - `tests/e2e/specs/`
+Before completing this task, ensure:
 
-2. **Create `__init__.py` Files**: Ensure ALL Python package directories have an `__init__.py` file:
-   - `backend/app/__init__.py`
-   - `backend/app/api/__init__.py`
-   - `backend/app/api/v1/__init__.py`
-   - `backend/app/services/__init__.py`
-   - `backend/app/connectors/__init__.py`
-   - `backend/app/models/__init__.py`
-   - `backend/app/schemas/__init__.py`
-   - `backend/app/repositories/__init__.py`
-   - `backend/app/middleware/__init__.py`
-   - `backend/app/utils/__init__.py`
-   - `backend/tests/__init__.py`
-   - `backend/tests/unit/__init__.py`
-   - `backend/tests/integration/__init__.py`
+1. ✅ Both `.puml` files use the official C4 PlantUML library includes
+2. ✅ Container Diagram uses `C4_Container.puml` and appropriate macros
+3. ✅ Component Diagram uses `C4_Component.puml` and appropriate macros
+4. ✅ All components/containers from task description are present
+5. ✅ All components/containers from Architecture Blueprint are present
+6. ✅ Communication protocols are labeled in relationships
+7. ✅ Diagrams compile without errors (validated via online renderer)
+8. ✅ File structure matches: API Router → Controllers → Services → Repositories → Database
+9. ✅ External systems (Vehicle, Identity Provider) are properly marked as `System_Ext()`
+10. ✅ Databases use `ContainerDb()` macro
+11. ✅ Diagram titles match Architecture Blueprint style
+12. ✅ Notes/legends provide additional context where helpful
 
-3. **Create `.github/workflows/ci-cd.yml`**: Create a skeleton workflow file with:
-   - Basic YAML structure
-   - Comments indicating it will be populated in Task I5.T3
-   - Placeholder workflow name and trigger
+---
 
-4. **Verify Git Initialization**:
-   - Check if `.git` directory exists
-   - If not, run `git init`
-   - Create an initial commit with all baseline files
-
-5. **Run `make up` to verify**: Ensure the Makefile target works correctly
+**End of Briefing Package**
