@@ -10,6 +10,270 @@ This is the full specification of the task you must complete.
 
 ```json
 {
+  "task_id": "I1.T8",
+  "iteration_id": "I1",
+  "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
+  "description": "Initialize Alembic in backend directory with `alembic init alembic`. Configure `backend/alembic.ini` to use environment variable for database URL. Modify `backend/alembic/env.py` to: import SQLAlchemy models from `app.models`, read database URL from environment variable `DATABASE_URL`, use async engine (asyncpg). Create initial migration `001_initial_schema` that generates the same schema as `initial_schema.sql` from I1.T4 (using Alembic auto-generate or manual revision). Test migration: `alembic upgrade head` should create all tables.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Database schema from I1.T4; SQLAlchemy ORM best practices.",
+  "target_files": [
+    "backend/alembic.ini",
+    "backend/alembic/env.py",
+    "backend/alembic/versions/001_initial_schema.py"
+  ],
+  "input_files": [
+    "docs/api/initial_schema.sql"
+  ],
+  "deliverables": "Configured Alembic with initial migration; migration script that creates database schema.",
+  "acceptance_criteria": "`alembic upgrade head` (run from backend directory) creates all 6 tables in database; `alembic downgrade base` successfully drops all tables; `alembic history` shows migration 001_initial_schema; `env.py` reads DATABASE_URL from environment variable (e.g., `os.getenv(\"DATABASE_URL\")`); Migration file includes all CREATE TABLE statements matching `initial_schema.sql`; No errors when running migration against PostgreSQL 15",
+  "dependencies": [
+    "I1.T4",
+    "I1.T5",
+    "I1.T6"
+  ],
+  "parallelizable": false,
+  "done": false
+}
+```
+
+---
+
+## 2. Architectural & Planning Context
+
+The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
+
+### Context: data-model-overview (from 03_System_Structure_and_Data.md)
+
+```markdown
+### 3.6. Data Model Overview & ERD
+
+#### Description
+
+The data model supports the core functionalities of vehicle management, command execution, response tracking, and comprehensive auditing. Key design decisions:
+
+- **Relational Design**: Strong referential integrity ensures data consistency for audit compliance
+- **JSONB Columns**: `command_params` and `response_payload` use JSONB for flexible schema while maintaining queryability
+- **Temporal Tracking**: All entities include `created_at`; commands and responses include detailed timestamp tracking
+- **Status Enums**: Explicit status values enable workflow tracking and filtering
+- **Audit Trail**: Dedicated `audit_logs` table captures all operations for compliance
+
+#### Key Entities
+
+**users**
+- Stores user profiles, authentication credentials, and roles
+- Supports RBAC with `role` field (e.g., 'engineer', 'admin')
+- Links to commands via `user_id` foreign key for audit trail
+
+**vehicles**
+- Registry of all vehicles with VIN as natural key
+- Tracks connection status (`connected`, `disconnected`, `error`)
+- `last_seen_at` enables stale connection detection
+- Supports filtering and health monitoring
+
+**commands**
+- Records every SOVD command execution attempt
+- JSONB `command_params` stores structured parameters
+- Status tracking: `pending`, `in_progress`, `completed`, `failed`
+- Links to user (who executed) and vehicle (target)
+
+**responses**
+- Stores command responses (may be multiple responses per command for streaming)
+- JSONB `response_payload` accommodates variable response structures
+- `sequence_number` orders streaming responses
+- `received_at` tracks latency
+
+**sessions**
+- Manages user sessions and JWT refresh tokens
+- `expires_at` enables session cleanup
+- Links to user for session revocation
+
+**audit_logs**
+- Comprehensive audit trail for compliance
+- JSONB `details` captures operation-specific metadata
+- Links to user, vehicle, and command as applicable
+- Supports filtering by action, entity_type, timestamp
+```
+
+### Context: database-indexes (from 03_System_Structure_and_Data.md)
+
+```markdown
+#### Database Indexes (Performance Critical)
+
+**Indexes for Query Performance:**
+
+```sql
+-- Users
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_email ON users(email);
+
+-- Vehicles
+CREATE INDEX idx_vehicles_vin ON vehicles(vin);
+CREATE INDEX idx_vehicles_status ON vehicles(connection_status);
+CREATE INDEX idx_vehicles_last_seen ON vehicles(last_seen_at DESC);
+
+-- Commands
+CREATE INDEX idx_commands_vehicle_id ON commands(vehicle_id);
+CREATE INDEX idx_commands_user_id ON commands(user_id);
+CREATE INDEX idx_commands_status ON commands(status);
+CREATE INDEX idx_commands_submitted_at ON commands(submitted_at DESC);
+CREATE INDEX idx_commands_composite ON commands(vehicle_id, status, submitted_at DESC);
+
+-- Responses
+CREATE INDEX idx_responses_command_id ON responses(command_id);
+CREATE INDEX idx_responses_received_at ON responses(received_at DESC);
+
+-- Sessions
+CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
+
+-- Audit Logs
+CREATE INDEX idx_audit_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_vehicle_id ON audit_logs(vehicle_id);
+CREATE INDEX idx_audit_command_id ON audit_logs(command_id);
+CREATE INDEX idx_audit_action ON audit_logs(action);
+CREATE INDEX idx_audit_created_at ON audit_logs(created_at DESC);
+CREATE INDEX idx_audit_composite ON audit_logs(user_id, action, created_at DESC);
+```
+```
+
+### Context: database-rationale (from 03_System_Structure_and_Data.md)
+
+```markdown
+#### Database Design Rationale
+
+**PostgreSQL Selection:**
+- **ACID Compliance**: Critical for audit logs and financial/compliance scenarios
+- **JSONB Support**: Flexible schema for variable command parameters and responses while maintaining indexing and query capabilities
+- **Mature Tooling**: pgAdmin, pg_dump, robust backup solutions
+- **Scalability**: Read replicas for reporting; partitioning for audit_logs table as it grows
+
+**Normalization vs. Denormalization:**
+- **Normalized Design**: Reduces data redundancy, ensures referential integrity
+- **Strategic Denormalization**: `vehicles.last_seen_at` denormalized from connection logs for fast status queries
+- **JSONB for Flexibility**: Avoids EAV anti-pattern while accommodating SOVD command diversity
+
+**Audit Log Design:**
+- Separate table (vs. triggers on every table) centralizes audit logic
+- JSONB `details` captures full before/after state
+- Indexed by user, action, timestamp for compliance queries
+- Future: Consider partitioning by month for long-term retention
+```
+
+### Context: task-i1-t8 (from 02_Iteration_I1.md)
+
+```markdown
+*   **Task 1.8: Initialize Alembic for Database Migrations**
+    *   **Task ID:** `I1.T8`
+    *   **Description:** Initialize Alembic in backend directory with `alembic init alembic`. Configure `backend/alembic.ini` to use environment variable for database URL. Modify `backend/alembic/env.py` to: import SQLAlchemy models from `app.models`, read database URL from environment variable `DATABASE_URL`, use async engine (asyncpg). Create initial migration `001_initial_schema` that generates the same schema as `initial_schema.sql` from I1.T4 (using Alembic auto-generate or manual revision). Test migration: `alembic upgrade head` should create all tables.
+    *   **Agent Type Hint:** `BackendAgent` or `DatabaseAgent`
+    *   **Inputs:** Database schema from I1.T4; SQLAlchemy ORM best practices.
+    *   **Input Files:** [`docs/api/initial_schema.sql`]
+    *   **Target Files:**
+        *   `backend/alembic.ini`
+        *   `backend/alembic/env.py`
+        *   `backend/alembic/versions/001_initial_schema.py` (migration file)
+    *   **Deliverables:** Configured Alembic with initial migration; migration script that creates database schema.
+    *   **Acceptance Criteria:**
+        *   `alembic upgrade head` (run from backend directory) creates all 6 tables in database
+        *   `alembic downgrade base` successfully drops all tables
+        *   `alembic history` shows migration 001_initial_schema
+        *   `env.py` reads DATABASE_URL from environment variable (e.g., `os.getenv("DATABASE_URL")`)
+        *   Migration file includes all CREATE TABLE statements matching `initial_schema.sql`
+        *   No errors when running migration against PostgreSQL 15
+    *   **Dependencies:** `I1.T4` (schema definition), `I1.T5` (docker-compose with database), `I1.T6` (Alembic dependency installed)
+    *   **Parallelizable:** No (requires database to be running)
+```
+
+---
+
+## 3. Codebase Analysis & Strategic Guidance
+
+The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
+
+### Relevant Existing Code
+
+*   **File:** `docs/api/initial_schema.sql`
+    *   **Summary:** This is the complete SQL DDL script that defines all 6 database tables (users, vehicles, commands, responses, sessions, audit_logs) with proper PostgreSQL 15 syntax, including extensions (pgcrypto), all indexes (21 total), constraints, comments, and seed data (2 users, 2 vehicles).
+    *   **Recommendation:** You MUST ensure your Alembic migration creates the EXACT same schema as this file. The migration should generate CREATE TABLE statements that match this schema precisely, including data types (UUID, VARCHAR lengths, JSONB, TIMESTAMP WITH TIME ZONE), constraints (CHECK, UNIQUE, NOT NULL, CASCADE), and all indexes. You can reference this file directly when creating the migration.
+    *   **Critical Detail:** The schema includes the pgcrypto extension for UUID generation (`gen_random_uuid()`). Your migration must create this extension first.
+    *   **Seed Data Note:** The SQL file includes seed data INSERT statements. For now, you may EXCLUDE the seed data from the Alembic migration (as it's typically managed separately), but ensure the tables are ready to accept that data structure.
+
+*   **File:** `backend/requirements.txt`
+    *   **Summary:** Contains all production dependencies including `alembic>=1.12.0`, `sqlalchemy>=2.0.0`, and `asyncpg>=0.29.0` (the async PostgreSQL driver).
+    *   **Recommendation:** These dependencies are already installed. You MUST use SQLAlchemy 2.0 async syntax throughout your implementation, particularly `create_async_engine` and async session management in `env.py`.
+
+*   **File:** `backend/pyproject.toml`
+    *   **Summary:** Contains strict type checking and linting configurations (mypy in strict mode, ruff, black).
+    *   **Recommendation:** Your generated code MUST pass `mypy --strict`, `ruff check`, and `black` without errors. Pay special attention to type hints in your `env.py` file.
+
+*   **File:** `docker-compose.yml`
+    *   **Summary:** Defines the local development environment with PostgreSQL 15 accessible at `localhost:5432` (from host) or `db:5432` (from containers). Database credentials are: `sovd_user` / `sovd_pass` / `sovd` database name. The backend service has `DATABASE_URL=postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd` environment variable.
+    *   **Recommendation:** Your `alembic.ini` and `env.py` MUST read the DATABASE_URL from the environment. Do NOT hardcode the connection string. The format must be `postgresql+asyncpg://` for async support.
+
+*   **File:** `backend/app/main.py`
+    *   **Summary:** Basic FastAPI application with placeholder health check and CORS middleware. Currently has no database integration.
+    *   **Recommendation:** You do NOT need to modify this file for the current task. Your Alembic setup should be independent and executed via the `alembic` CLI tool.
+
+*   **File:** `docs/diagrams/erd.puml`
+    *   **Summary:** PlantUML ERD that visually documents all 6 entities, their fields, data types, constraints, foreign key relationships, and indexes. This is the visual representation of the schema defined in `initial_schema.sql`.
+    *   **Recommendation:** Use this diagram as a reference to understand the entity relationships and verify your migration creates all foreign keys correctly. The diagram explicitly shows CASCADE behavior for foreign keys.
+
+*   **File:** `scripts/init_db.sh`
+    *   **Summary:** Comprehensive bash script that initializes the database using the `initial_schema.sql` file. It includes health checks, verification, and detailed output.
+    *   **Recommendation:** This script is an ALTERNATIVE to Alembic for initial database setup. Your Alembic migration should produce the same result as running this script. You can use this script's verification logic (checking table count, index count, seed data) as a guide for testing your migration.
+
+### Implementation Tips & Notes
+
+*   **Tip:** When you run `alembic init alembic`, Alembic will create the `alembic/` directory with `env.py`, `script.py.mako`, and `alembic.ini`. You will need to HEAVILY modify `env.py` to support async SQLAlchemy 2.0.
+*   **Critical:** The `env.py` file MUST use `create_async_engine` and `AsyncConnection` from SQLAlchemy 2.0. DO NOT use the default synchronous engine. The default `env.py` template uses sync code - you must replace it with async patterns.
+*   **Note:** Since no SQLAlchemy ORM models exist yet (task I1.T9 creates them), you will NOT be able to use Alembic's auto-generate feature for this initial migration. You should create a MANUAL migration using `alembic revision --rev-id="001" -m "initial_schema"` and write the `upgrade()` and `downgrade()` functions by hand based on `initial_schema.sql`.
+*   **Warning:** The project uses SQLAlchemy 2.0 with type hints (`Mapped[]` syntax). When you eventually integrate models (in I1.T9), ensure your `env.py` imports `target_metadata` from the models' Base, but for THIS task, you can set `target_metadata = None` since you're doing a manual migration.
+*   **Async Pattern:** Your `env.py` should have two functions: `run_migrations_offline()` (for generating SQL without DB connection) and `run_migrations_online()` (for executing against a live DB). The `run_migrations_online()` function MUST use `async with connectable.begin() as connection:` and `await connection.run_sync(do_run_migrations)`.
+*   **Environment Variable:** Use `os.getenv("DATABASE_URL")` or `config.get_main_option("sqlalchemy.url")` with a fallback to the environment variable. The `alembic.ini` file should have a placeholder like `sqlalchemy.url = ${DATABASE_URL}` but this doesn't work directly - you need to programmatically read it in `env.py`.
+*   **Testing:** After creating your migration, test it by running:
+    1. `docker-compose up -d db redis` (start only the database)
+    2. `cd backend`
+    3. `export DATABASE_URL=postgresql+asyncpg://sovd_user:sovd_pass@localhost:5432/sovd`
+    4. `alembic upgrade head` (should create tables)
+    5. `alembic downgrade base` (should drop tables)
+    6. Verify with `psql` that tables exist after upgrade and are gone after downgrade
+*   **Index Creation:** Your migration MUST create all 21 indexes from `initial_schema.sql`. Use `op.create_index()` statements or raw `CREATE INDEX` statements via `op.execute()`.
+*   **Extension Creation:** Your migration MUST create the pgcrypto extension at the beginning of the `upgrade()` function: `op.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')`
+*   **Comments:** While SQL comments (COMMENT ON TABLE/COLUMN) are nice to have, they are OPTIONAL for this task. Focus on getting the table structure and indexes correct first.
+*   **Downgrade:** Your `downgrade()` function should drop all tables in reverse dependency order: audit_logs, sessions, responses, commands, vehicles, users. Use `op.drop_table()` and ensure you also drop indexes if needed (though CASCADE should handle most cleanup).
+
+### Common Pitfalls to Avoid
+
+*   **DO NOT** use the default synchronous `engine.connect()` pattern in `env.py` - it won't work with `postgresql+asyncpg://` URLs
+*   **DO NOT** try to use Alembic's `--autogenerate` for this initial migration - you don't have ORM models yet
+*   **DO NOT** hardcode the DATABASE_URL in `alembic.ini` or `env.py` - always read from environment
+*   **DO NOT** forget to create the pgcrypto extension before creating tables (UUIDs won't work without it)
+*   **DO NOT** forget to drop the extension in your `downgrade()` function
+*   **DO NOT** create tables in the wrong order - respect foreign key dependencies (users and vehicles first, then commands, then responses)
+
+### Success Criteria Checklist
+
+Use this checklist to verify your implementation:
+
+- [ ] `alembic init alembic` executed successfully
+- [ ] `backend/alembic.ini` exists with DATABASE_URL configuration documented
+- [ ] `backend/alembic/env.py` uses async SQLAlchemy 2.0 patterns
+- [ ] `backend/alembic/env.py` reads DATABASE_URL from environment variable
+- [ ] Migration `001_initial_schema.py` created in `versions/` directory
+- [ ] Migration creates pgcrypto extension
+- [ ] Migration creates all 6 tables with exact schema from `initial_schema.sql`
+- [ ] Migration creates all 21+ indexes
+- [ ] Migration includes proper `downgrade()` function
+- [ ] `alembic upgrade head` completes without errors
+- [ ] All 6 tables exist after upgrade
+- [ ] `alembic downgrade base` completes without errors
+- [ ] All tables dropped after downgrade
+- [ ] `alembic history` shows the migration
+- [ ] No mypy, ruff, or black errors in generated code
+- [ ] Migration works with PostgreSQL 15
+
+```json
+{
   "task_id": "I1.T7",
   "iteration_id": "I1",
   "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
