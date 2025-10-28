@@ -105,6 +105,7 @@ class TestLoginEndpoint:
             email="inactive@example.com",
             password_hash=hash_password(password),
             role="engineer",
+            is_active=False,
         )
         db_session.add(user)
         await db_session.commit()
@@ -264,6 +265,7 @@ class TestRefreshEndpoint:
         await db_session.commit()
 
         # Deactivate user
+        user.is_active = False
         await db_session.commit()
 
         # Try to refresh
@@ -405,8 +407,10 @@ class TestGetCurrentUserProfileEndpoint:
         # Create access token
         access_token = create_access_token(user.user_id, user.username, user.role)
 
-        # Delete user
-        await db_session.delete(user)
+        # Delete user using SQL delete (bypasses ORM cascade)
+        user_id = user.user_id
+        from sqlalchemy import delete as sql_delete
+        await db_session.execute(sql_delete(User).where(User.user_id == user_id))
         await db_session.commit()
 
         # Try to get profile

@@ -309,6 +309,7 @@ class TestAuthenticateUser:
             email="test@example.com",
             password_hash=hashed,
             role="engineer",
+            is_active=True,
         )
 
         # Mock get_user_by_username to return our mock user

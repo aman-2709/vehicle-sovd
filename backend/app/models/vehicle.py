@@ -43,7 +43,7 @@ class Vehicle(Base):
     __tablename__ = "vehicles"
 
     vehicle_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     vin: Mapped[str] = mapped_column(String(17), unique=True, nullable=False)
     make: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -55,7 +55,7 @@ class Vehicle(Base):
         "metadata", JSONB(astext_type=Text()), server_default=text("'{}'")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()")
+        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
 
     # Relationships

@@ -19,3 +19,5 @@ black>=23.11.0
 
 # Type checking
 mypy>=1.7.0
+types-python-jose>=3.3.4
+types-passlib>=1.7.7

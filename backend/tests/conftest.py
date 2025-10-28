@@ -48,7 +48,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     )
 
     # Create only auth-related tables (users and sessions)
-    # Not all tables since some use PostgreSQL-specific types
+    # Other tables use PostgreSQL-specific types (JSONB) that aren't compatible with SQLite
     async with engine.begin() as conn:
         def create_tables(connection):
             User.__table__.create(connection, checkfirst=True)

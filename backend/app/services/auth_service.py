@@ -7,6 +7,7 @@ and user authentication against the database.
 
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
 import structlog
 from jose import JWTError, jwt
@@ -108,7 +109,8 @@ def create_refresh_token(user_id: uuid.UUID, username: str) -> str:
         "username": username,
         "exp": expire,
         "iat": now,
-        "type": "refresh"
+        "type": "refresh",
+        "jti": str(uuid.uuid4())  # Unique token ID to prevent collisions
     }
 
     token = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -123,7 +125,7 @@ def create_refresh_token(user_id: uuid.UUID, username: str) -> str:
     return token
 
 
-def verify_access_token(token: str) -> dict | None:
+def verify_access_token(token: str) -> dict[str, Any] | None:
     """
     Validate and decode a JWT access token.
 
@@ -162,7 +164,7 @@ def verify_access_token(token: str) -> dict | None:
         return None
 
 
-def verify_refresh_token(token: str) -> dict | None:
+def verify_refresh_token(token: str) -> dict[str, Any] | None:
     """
     Validate and decode a JWT refresh token.
 

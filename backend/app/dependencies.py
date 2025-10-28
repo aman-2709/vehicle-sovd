@@ -6,6 +6,7 @@ Provides dependencies for authentication and authorization.
 
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 import structlog
 from fastapi import Depends, HTTPException, status
@@ -104,7 +105,7 @@ async def get_current_user(
     return user
 
 
-def require_role(allowed_roles: list[str]) -> Callable:
+def require_role(allowed_roles: list[str]) -> Callable[..., Any]:
     """
     Factory function to create a role-based authorization dependency.
 

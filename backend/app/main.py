@@ -38,7 +38,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     """
     Health check endpoint for Docker healthcheck and monitoring.
 
@@ -53,7 +53,7 @@ async def health_check():
 
 
 @app.get("/")
-async def root():
+async def root() -> dict[str, str]:
     """
     Root endpoint providing basic API information.
 
@@ -69,7 +69,7 @@ async def root():
 
 # Application startup event
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """
     Execute initialization tasks on application startup.
     This will be expanded in future tasks to include:
@@ -84,7 +84,7 @@ async def startup_event():
 
 # Application shutdown event
 @app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_event() -> None:
     """
     Execute cleanup tasks on application shutdown.
     This will be expanded to include:

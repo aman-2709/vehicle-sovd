@@ -4,7 +4,7 @@ Authentication schema definitions.
 Pydantic models for authentication-related API requests and responses.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
@@ -45,9 +45,7 @@ class UserResponse(BaseModel):
     role: str = Field(..., description="User role (e.g., 'engineer', 'admin')")
     email: str = Field(..., description="User email address")
 
-    class Config:
-        """Pydantic config."""
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LogoutResponse(BaseModel):

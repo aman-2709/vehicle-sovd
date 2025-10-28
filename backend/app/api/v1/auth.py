@@ -143,10 +143,10 @@ async def refresh(
         )
 
     # Get user from database to ensure they still exist and are active
-    result = await db.execute(
+    user_result = await db.execute(
         select(User).where(User.user_id == session.user_id)
     )
-    user = result.scalar_one_or_none()
+    user: User | None = user_result.scalar_one_or_none()
 
     if not user:
         logger.warning(
@@ -160,6 +160,22 @@ async def refresh(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Check if user is active
+    if not user.is_active:
+        logger.warning(
+            "refresh_token_invalid",
+            reason="user_inactive",
+            user_id=str(session.user_id)
+        )
+        # Delete session for inactive user
+        await db.delete(session)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is inactive",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
