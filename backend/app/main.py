@@ -13,7 +13,7 @@ Provides:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth
+from app.api.v1 import auth, vehicles
 
 # Create FastAPI application instance
 app = FastAPI(
@@ -35,6 +35,7 @@ app.add_middleware(
 
 # Register API routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(vehicles.router, prefix="/api/v1", tags=["vehicles"])
 
 
 @app.get("/health")
