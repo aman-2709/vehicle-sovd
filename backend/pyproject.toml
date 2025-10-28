@@ -34,6 +34,7 @@ addopts = "-v --strict-markers --cov=app --cov-report=html --cov-report=term"
 [tool.coverage.run]
 source = ["app"]
 omit = ["*/tests/*", "*/test_*.py"]
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 exclude_lines = [

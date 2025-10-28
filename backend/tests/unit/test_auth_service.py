@@ -4,9 +4,9 @@ Unit tests for authentication service.
 Tests password hashing, JWT token creation/validation, and user authentication.
 """
 
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 import uuid
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from jose import jwt
@@ -14,13 +14,13 @@ from jose import jwt
 from app.config import settings
 from app.models.user import User
 from app.services.auth_service import (
-    hash_password,
-    verify_password,
+    authenticate_user,
     create_access_token,
     create_refresh_token,
+    hash_password,
     verify_access_token,
+    verify_password,
     verify_refresh_token,
-    authenticate_user
 )
 
 
@@ -71,11 +71,7 @@ class TestAccessTokenCreation:
         token = create_access_token(user_id, username, role)
 
         # Decode without verification to inspect claims
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
         assert payload["user_id"] == str(user_id)
         assert payload["username"] == username
@@ -92,11 +88,7 @@ class TestAccessTokenCreation:
 
         token = create_access_token(user_id, username, role)
 
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
         # Check expiration is approximately JWT_EXPIRATION_MINUTES in the future
         exp_timestamp = payload["exp"]
@@ -118,11 +110,7 @@ class TestRefreshTokenCreation:
 
         token = create_refresh_token(user_id, username)
 
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
         assert payload["user_id"] == str(user_id)
         assert payload["username"] == username
@@ -137,11 +125,7 @@ class TestRefreshTokenCreation:
 
         token = create_refresh_token(user_id, username)
 
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
 
         # Check expiration is approximately 7 days in the future
         exp_timestamp = payload["exp"]
@@ -180,7 +164,7 @@ class TestAccessTokenVerification:
         token = jwt.encode(
             {"user_id": str(user_id), "username": username, "role": role, "type": "access"},
             "wrong_secret",
-            algorithm=settings.JWT_ALGORITHM
+            algorithm=settings.JWT_ALGORITHM,
         )
 
         payload = verify_access_token(token)
@@ -200,7 +184,7 @@ class TestAccessTokenVerification:
             "role": role,
             "type": "access",
             "exp": past_time,
-            "iat": past_time - timedelta(hours=2)
+            "iat": past_time - timedelta(hours=2),
         }
 
         token = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -227,7 +211,7 @@ class TestAccessTokenVerification:
             "username": "testuser",
             "type": "access",
             "exp": datetime.utcnow() + timedelta(minutes=15),
-            "iat": datetime.utcnow()
+            "iat": datetime.utcnow(),
         }
 
         token = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -281,7 +265,7 @@ class TestRefreshTokenVerification:
             "username": username,
             "type": "refresh",
             "exp": past_time,
-            "iat": past_time - timedelta(days=1)
+            "iat": past_time - timedelta(days=1),
         }
 
         token = jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
@@ -313,10 +297,7 @@ class TestAuthenticateUser:
         )
 
         # Mock get_user_by_username to return our mock user
-        mocker.patch(
-            "app.services.auth_service.get_user_by_username",
-            return_value=mock_user
-        )
+        mocker.patch("app.services.auth_service.get_user_by_username", return_value=mock_user)
 
         # Authenticate
         result = await authenticate_user(db_mock, "testuser", password)
@@ -342,10 +323,7 @@ class TestAuthenticateUser:
             role="engineer",
         )
 
-        mocker.patch(
-            "app.services.auth_service.get_user_by_username",
-            return_value=mock_user
-        )
+        mocker.patch("app.services.auth_service.get_user_by_username", return_value=mock_user)
 
         # Try to authenticate with wrong password
         result = await authenticate_user(db_mock, "testuser", "wrong_password")
@@ -357,11 +335,7 @@ class TestAuthenticateUser:
         db_mock = AsyncMock()
 
         # Mock get_user_by_username to return None
-        mocker.patch(
-            "app.services.auth_service.get_user_by_username",
-            return_value=None
-        )
+        mocker.patch("app.services.auth_service.get_user_by_username", return_value=None)
 
         result = await authenticate_user(db_mock, "nonexistent", "password")
         assert result is None
-

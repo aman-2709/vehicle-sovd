@@ -10,6 +10,527 @@ This is the full specification of the task you must complete.
 
 ```json
 {
+  "task_id": "I2.T3",
+  "iteration_id": "I2",
+  "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
+  "description": "Implement `backend/app/services/command_service.py` with functions: `submit_command(vehicle_id, command_name, command_params, user_id, db_session)` (validates command, inserts command record with status=pending, triggers async execution via Vehicle Connector - stub for now), `get_command_by_id(command_id, db_session)`, `get_command_history(filters, db_session)` (supports filtering by vehicle_id, user_id, status, pagination). Create `backend/app/schemas/command.py` Pydantic models: `CommandSubmitRequest`, `CommandResponse`, `CommandListResponse`. Implement `backend/app/api/v1/commands.py` FastAPI router with endpoints: `POST /api/v1/commands` (requires `engineer` or `admin` role), `GET /api/v1/commands/{command_id}`, `GET /api/v1/commands` (query params: vehicle_id, status, limit, offset). Implement `backend/app/repositories/command_repository.py` with async functions: `create_command()`, `get_command_by_id()`, `update_command_status()`, `get_commands()`. For now, `submit_command` should create command record and immediately mark it as `in_progress` (actual vehicle communication in I2.T5). Write unit tests in `backend/tests/unit/test_command_service.py` and integration tests in `backend/tests/integration/test_command_api.py`.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Architecture Blueprint Section 3.7 (API Endpoints - Command Endpoints); Data Model (commands table).",
+  "target_files": [
+    "backend/app/services/command_service.py",
+    "backend/app/schemas/command.py",
+    "backend/app/api/v1/commands.py",
+    "backend/app/repositories/command_repository.py",
+    "backend/tests/unit/test_command_service.py",
+    "backend/tests/integration/test_command_api.py"
+  ],
+  "input_files": [
+    "backend/app/models/command.py",
+    "backend/app/database.py",
+    "backend/app/dependencies.py"
+  ],
+  "deliverables": "Functional command submission and retrieval API; basic command service logic (without vehicle communication yet); unit and integration tests.",
+  "acceptance_criteria": "`POST /api/v1/commands` with valid payload creates command record (status=pending or in_progress); `POST /api/v1/commands` requires authentication (401 if no JWT); `POST /api/v1/commands` requires `engineer` or `admin` role (403 for other roles); `POST /api/v1/commands` validates vehicle_id exists (400 if invalid); `POST /api/v1/commands` returns command_id and status; `GET /api/v1/commands/{command_id}` returns command details (name, params, status, timestamps); `GET /api/v1/commands` returns paginated list of commands; `GET /api/v1/commands?vehicle_id={id}` filters by vehicle; `GET /api/v1/commands?status=completed` filters by status; Unit tests cover: command validation, status transitions; Integration tests cover: all endpoints with success and error cases; Test coverage ≥ 80%; No linter errors",
+  "dependencies": [
+    "I2.T1",
+    "I2.T2"
+  ],
+  "parallelizable": false,
+  "done": false
+}
+```
+
+---
+
+## 2. Architectural & Planning Context
+
+The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
+
+### Context: API Design - Command Endpoints (from Architecture Blueprint)
+
+Based on the task inputs referencing "Architecture Blueprint Section 3.7 (API Endpoints - Command Endpoints)", the command API should follow RESTful conventions and support:
+
+**Command Submission Endpoint:**
+- `POST /api/v1/commands` - Submit a new SOVD command to a vehicle
+- Request body: `{ "vehicle_id": "uuid", "command_name": "string", "command_params": { ... } }`
+- Response: `{ "command_id": "uuid", "status": "pending|in_progress", "submitted_at": "timestamp" }`
+- Authentication: Required (JWT Bearer token)
+- Authorization: Requires `engineer` or `admin` role
+
+**Command Retrieval Endpoints:**
+- `GET /api/v1/commands/{command_id}` - Get details of a specific command
+- `GET /api/v1/commands` - List commands with pagination and filtering
+  - Query parameters: `vehicle_id`, `status`, `limit`, `offset`, `user_id`
+- Response format: Standard pagination with `items`, `total`, `limit`, `offset`
+
+**Status Values:**
+The command lifecycle includes these status values:
+- `pending` - Command submitted but not yet sent to vehicle
+- `in_progress` - Command is being executed on the vehicle
+- `completed` - Command execution finished successfully
+- `failed` - Command execution failed
+
+### Context: Data Model - Commands Table (from Database Schema)
+
+The Command model includes:
+- `command_id` (UUID, primary key)
+- `user_id` (UUID, foreign key to users table, CASCADE on delete)
+- `vehicle_id` (UUID, foreign key to vehicles table, CASCADE on delete)
+- `command_name` (VARCHAR(100), required)
+- `command_params` (JSONB, required, default '{}')
+- `status` (VARCHAR(20), required, default 'pending')
+- `error_message` (TEXT, nullable)
+- `submitted_at` (TIMESTAMP, auto-generated)
+- `completed_at` (TIMESTAMP, nullable)
+
+**Relationships:**
+- Many-to-one with User (command.user_id → user.user_id)
+- Many-to-one with Vehicle (command.vehicle_id → vehicle.vehicle_id)
+- One-to-many with Response (command.command_id ← response.command_id)
+- One-to-many with AuditLog (command.command_id ← audit_log.command_id)
+
+**Database Indexes:**
+Critical indexes for query performance:
+- `idx_commands_user_id` on `user_id`
+- `idx_commands_vehicle_id` on `vehicle_id`
+- `idx_commands_status` on `status`
+- `idx_commands_submitted_at` on `submitted_at DESC`
+
+---
+
+## 3. Codebase Analysis & Strategic Guidance
+
+The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
+
+### Relevant Existing Code
+
+#### File: `backend/app/models/command.py`
+**Summary:** This file defines the complete Command ORM model with all required fields and relationships. It uses SQLAlchemy 2.0 async style with proper type hints.
+
+**Critical Details:**
+- The Command model is already fully implemented with:
+  - UUID primary key with auto-generation
+  - Foreign keys to users and vehicles with CASCADE delete
+  - JSONB field for command_params with server default '{}'
+  - Status field with server default 'pending'
+  - Proper relationships to User, Vehicle, Response, and AuditLog models
+  - Type hints using `Mapped[]` syntax
+
+**Recommendation:** You MUST import `Command` from this file. DO NOT create a new model. Use this exact model for all database operations.
+
+---
+
+#### File: `backend/app/models/response.py`
+**Summary:** Defines the Response model for storing ordered response chunks from vehicle command execution.
+
+**Critical Details:**
+- Response model includes `sequence_number` for ordering streaming responses
+- Has `is_final` boolean flag to identify the last chunk
+- Uses JSONB for `response_payload`
+- Foreign key to commands with CASCADE delete
+
+**Note:** This is for future use in I2.T4. You won't interact with this model in I2.T3, but be aware it exists for the complete architecture.
+
+---
+
+#### File: `backend/app/dependencies.py`
+**Summary:** Provides FastAPI dependency injection functions for authentication and authorization, including RBAC enforcement.
+
+**Critical Functions:**
+1. `get_current_user(credentials, db)` - Validates JWT and returns authenticated User object
+   - Raises 401 if token invalid or user not found/inactive
+   - Returns User model instance
+
+2. `require_role(allowed_roles)` - Factory function for role-based access control
+   - Returns dependency function that checks user role
+   - Raises 403 if user doesn't have required role
+   - Depends on `get_current_user`
+
+**MANDATORY Usage:**
+- For `POST /api/v1/commands`: Use `user: User = Depends(require_role(["engineer", "admin"]))`
+- For `GET /api/v1/commands/*`: Use `current_user: User = Depends(get_current_user)`
+- This pattern is already proven in `backend/app/api/v1/auth.py` and `backend/app/api/v1/vehicles.py`
+
+**Example Pattern (from vehicles.py):**
+```python
+@router.get("/vehicles", response_model=VehicleListResponse)
+async def get_vehicles(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ...
+```
+
+---
+
+#### File: `backend/app/database.py`
+**Summary:** Database connection and session management module with async SQLAlchemy support.
+
+**Critical Details:**
+- Exports `get_db()` async generator for dependency injection
+- Uses async SQLAlchemy 2.0 with asyncpg driver
+- Session configured with `expire_on_commit=False` (prevents lazy loading errors)
+- Connection pooling: pool_size=20, max_overflow=10
+- Structured logging configured with structlog (JSON output)
+
+**MANDATORY Usage:**
+- Always use `db: AsyncSession = Depends(get_db)` in FastAPI route parameters
+- Use `await db.execute()` for queries
+- Use `await db.commit()` to persist changes
+- Use `await db.flush()` if you need IDs before commit
+
+---
+
+#### File: `backend/app/services/auth_service.py`
+**Summary:** Complete authentication service with JWT token management, password hashing, and user authentication.
+
+**Key Functions:**
+- `hash_password(password)` - Bcrypt hashing
+- `verify_password(plain, hashed)` - Password verification
+- `create_access_token(user_id, username, role)` - JWT generation (15 min expiry)
+- `authenticate_user(db, username, password)` - Database authentication
+
+**Pattern to Follow:**
+- This service file shows the exact pattern you should follow for `command_service.py`
+- Uses structlog for logging with structured fields
+- All functions have complete docstrings with Args, Returns sections
+- Async functions use `AsyncSession` type hint
+- Returns None on failure, data on success
+
+---
+
+#### File: `backend/app/repositories/vehicle_repository.py`
+**Summary:** Data access layer for vehicle operations showing the repository pattern used in this project.
+
+**Critical Pattern (example from this file):**
+```python
+async def get_vehicle_by_id(db: AsyncSession, vehicle_id: uuid.UUID) -> Vehicle | None:
+    """Get vehicle by ID."""
+    result = await db.execute(
+        select(Vehicle).where(Vehicle.vehicle_id == vehicle_id)
+    )
+    return result.scalar_one_or_none()
+```
+
+**Recommendation:** You MUST follow this exact pattern in `command_repository.py`:
+- Use `select()` from sqlalchemy
+- Use `await db.execute()`
+- Use `.scalar_one_or_none()` for single results
+- Use `.scalars().all()` for multiple results
+- Return `None` for not found, raise no exceptions
+
+---
+
+#### File: `backend/tests/conftest.py`
+**Summary:** Pytest configuration with fixtures for database sessions and async HTTP client.
+
+**Critical Details:**
+- Uses SQLite (file-based: `test.db`) for testing
+- Creates fresh session for each test function
+- Only creates User and Session tables (other tables use PostgreSQL-specific JSONB)
+- Provides `db_session` fixture for database tests
+- Provides `async_client` fixture with dependency override
+
+**IMPORTANT LIMITATION:**
+The test fixtures currently only support User and Session tables. For testing Commands, you have TWO options:
+
+**Option 1 (Recommended):** Update conftest.py to include Command and Vehicle tables
+- Import Command and Vehicle models
+- Add `Command.__table__.create()` and `Vehicle.__table__.create()`
+- Add corresponding drops in teardown
+- This allows full integration testing
+
+**Option 2:** Use integration tests against PostgreSQL via docker-compose
+- Tests run slower but use real database
+- No SQLite compatibility issues with JSONB
+
+---
+
+#### File: `backend/tests/integration/test_auth_api.py`
+**Summary:** Comprehensive integration tests showing the exact testing pattern to follow.
+
+**Key Testing Patterns Demonstrated:**
+
+1. **Test Organization:**
+   - Classes group related tests (e.g., `TestLoginEndpoint`)
+   - Each test method has clear, descriptive name
+   - Tests cover: success cases, validation errors, auth failures, edge cases
+
+2. **Test Structure:**
+   ```python
+   @pytest.mark.asyncio
+   async def test_<scenario>(self, async_client, db_session):
+       # 1. Setup: Create test data
+       # 2. Execute: Call API endpoint
+       # 3. Assert: Verify response status and data
+       # 4. Verify: Check database state if needed
+   ```
+
+3. **Database Setup Pattern:**
+   ```python
+   user = User(username="test", password_hash=hash_password("pass"), ...)
+   db_session.add(user)
+   await db_session.commit()  # or flush() if need ID immediately
+   ```
+
+4. **API Call Pattern:**
+   ```python
+   response = await async_client.post(
+       "/api/v1/commands",
+       json={"vehicle_id": str(vehicle_id), "command_name": "ReadDTC", ...},
+       headers={"Authorization": f"Bearer {access_token}"}
+   )
+   ```
+
+5. **Assertion Pattern:**
+   ```python
+   assert response.status_code == status.HTTP_200_OK
+   data = response.json()
+   assert "command_id" in data
+   assert data["status"] in ["pending", "in_progress"]
+   ```
+
+6. **End-to-End Test Example:**
+   See `test_complete_auth_flow()` - shows how to chain multiple operations
+
+**MANDATORY for I2.T3:**
+You MUST create similar test classes:
+- `TestSubmitCommandEndpoint` - test POST /api/v1/commands
+- `TestGetCommandEndpoint` - test GET /api/v1/commands/{id}
+- `TestListCommandsEndpoint` - test GET /api/v1/commands with filters
+- Cover ALL acceptance criteria scenarios
+
+---
+
+### Implementation Tips & Notes
+
+#### Tip #1: Project Code Style Conventions
+After reviewing multiple files, the project follows these strict conventions:
+- **Imports:** Group into stdlib, third-party, local (with blank lines between)
+- **Type Hints:** ALWAYS use type hints (SQLAlchemy 2.0 `Mapped[]` in models, standard hints elsewhere)
+- **Docstrings:** Google-style docstrings for all functions with Args, Returns, Raises sections
+- **Async:** All database operations are async (use `async def` and `await`)
+- **Logging:** Use structlog with structured fields (key=value format)
+- **Error Handling:** Use FastAPI `HTTPException` with appropriate status codes
+
+#### Tip #2: FastAPI Router Pattern
+Based on `auth.py` and `vehicles.py`, follow this exact structure for `commands.py`:
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies import get_current_user, require_role, get_db
+from app.schemas.command import CommandSubmitRequest, CommandResponse, CommandListResponse
+from app.services import command_service
+
+router = APIRouter(prefix="/api/v1/commands", tags=["commands"])
+
+@router.post("", response_model=CommandResponse, status_code=status.HTTP_201_CREATED)
+async def submit_command(
+    request: CommandSubmitRequest,
+    current_user: User = Depends(require_role(["engineer", "admin"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Submit a new SOVD command to a vehicle."""
+    ...
+```
+
+#### Tip #3: Pydantic Schema Pattern
+Based on existing schemas, use this pattern:
+```python
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+import uuid
+
+class CommandSubmitRequest(BaseModel):
+    vehicle_id: uuid.UUID
+    command_name: str = Field(..., min_length=1, max_length=100)
+    command_params: dict = Field(default_factory=dict)
+
+class CommandResponse(BaseModel):
+    command_id: uuid.UUID
+    vehicle_id: uuid.UUID
+    command_name: str
+    command_params: dict
+    status: str
+    submitted_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True  # Enables ORM mode for SQLAlchemy models
+```
+
+#### Tip #4: Status Transition Logic
+For I2.T3, the task says "immediately mark it as in_progress". Implement this in `submit_command`:
+1. Create Command with status='pending'
+2. Flush to get command_id
+3. Update status to 'in_progress'
+4. Commit
+5. Log status change
+
+This prepares for I2.T5 where actual vehicle communication will be triggered.
+
+#### Tip #5: Pagination Pattern
+For `get_command_history()`, implement standard pagination:
+- Accept `limit` (default 50, max 100) and `offset` (default 0)
+- Return total count + items
+- Use SQLAlchemy `limit()` and `offset()` methods
+- Return format: `{"items": [...], "total": N, "limit": L, "offset": O}`
+
+#### Warning #1: JSONB Compatibility
+The `command_params` field is JSONB in PostgreSQL. In integration tests:
+- If using SQLite (current conftest.py), JSONB becomes TEXT
+- SQLite doesn't support JSON operators (no `command_params->>'key'` queries)
+- For I2.T3, basic CRUD is fine with SQLite
+- For advanced filtering (future tasks), you'll need PostgreSQL tests
+
+#### Warning #2: Vehicle Validation
+`POST /api/v1/commands` MUST validate that `vehicle_id` exists:
+```python
+vehicle = await vehicle_repository.get_vehicle_by_id(db, request.vehicle_id)
+if not vehicle:
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Vehicle with ID {request.vehicle_id} not found"
+    )
+```
+
+#### Warning #3: Test Coverage Requirement
+The task requires ≥80% coverage. Make sure you test:
+- ✅ Success case (valid command submission)
+- ✅ Auth failure (no token → 401)
+- ✅ Auth failure (invalid token → 401)
+- ✅ Authorization failure (wrong role → 403)
+- ✅ Validation error (missing fields → 422)
+- ✅ Validation error (invalid vehicle_id → 400)
+- ✅ Get command by ID (found → 200)
+- ✅ Get command by ID (not found → 404)
+- ✅ List commands with no filters
+- ✅ List commands filtered by vehicle_id
+- ✅ List commands filtered by status
+- ✅ List commands with pagination (limit/offset)
+
+#### Note #1: Logging Best Practices
+Follow the structured logging pattern from auth_service.py:
+```python
+logger.info(
+    "command_submitted",
+    command_id=str(command_id),
+    user_id=str(user_id),
+    vehicle_id=str(vehicle_id),
+    command_name=command_name
+)
+```
+
+#### Note #2: Error Response Format
+All error responses should be consistent:
+```python
+raise HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail="Clear, user-friendly error message"
+)
+```
+
+#### Note #3: Linting Requirements
+The project uses:
+- `ruff` for linting (configured in pyproject.toml)
+- `black` for formatting (line length 100)
+- `mypy` for type checking (strict mode)
+
+Before committing, all code must pass:
+```bash
+ruff check backend/
+black backend/
+mypy backend/
+```
+
+---
+
+## 4. Execution Checklist
+
+Use this checklist to ensure all acceptance criteria are met:
+
+### Core Functionality
+- [ ] `POST /api/v1/commands` creates command with status=pending, then in_progress
+- [ ] `POST /api/v1/commands` requires authentication (JWT)
+- [ ] `POST /api/v1/commands` requires engineer or admin role
+- [ ] `POST /api/v1/commands` validates vehicle_id exists
+- [ ] `POST /api/v1/commands` returns command_id and status
+- [ ] `GET /api/v1/commands/{command_id}` returns full command details
+- [ ] `GET /api/v1/commands` returns paginated list
+- [ ] `GET /api/v1/commands?vehicle_id={id}` filters by vehicle
+- [ ] `GET /api/v1/commands?status={status}` filters by status
+- [ ] `GET /api/v1/commands?limit=X&offset=Y` supports pagination
+
+### Code Quality
+- [ ] All functions have complete docstrings
+- [ ] All functions have type hints
+- [ ] Structured logging in all service functions
+- [ ] No linter errors (ruff, black, mypy)
+- [ ] Code follows existing patterns (auth_service, vehicle_service)
+
+### Testing
+- [ ] Unit tests for command_service.py functions
+- [ ] Integration tests for all API endpoints
+- [ ] Test coverage ≥ 80%
+- [ ] All acceptance criteria scenarios tested
+- [ ] Tests pass consistently
+
+### Files Created
+- [ ] backend/app/services/command_service.py
+- [ ] backend/app/schemas/command.py
+- [ ] backend/app/api/v1/commands.py
+- [ ] backend/app/repositories/command_repository.py
+- [ ] backend/tests/unit/test_command_service.py
+- [ ] backend/tests/integration/test_command_api.py
+
+---
+
+## 5. Key Architectural Decisions
+
+### Why Status Transitions: pending → in_progress?
+The task specifies creating the command with status=pending, then immediately updating to in_progress. This design:
+1. Provides a clear audit trail of command lifecycle
+2. Prepares for I2.T5 where async vehicle communication is added
+3. Allows monitoring of commands that are "stuck" in pending state
+4. Separates command creation from execution trigger
+
+### Why Repository Pattern?
+The codebase uses the repository pattern to:
+1. Separate data access logic from business logic
+2. Make testing easier (can mock repositories)
+3. Provide single source of truth for database queries
+4. Follow Domain-Driven Design principles
+
+### Why Separate Service and Repository?
+- **Repository:** Pure data access (CRUD operations)
+- **Service:** Business logic (validation, orchestration, status transitions)
+- **API Router:** HTTP handling (request/response formatting, auth checks)
+
+This three-layer architecture is consistent across auth and vehicles modules.
+
+---
+
+## 6. Related Future Tasks
+
+After I2.T3 is complete, the next related tasks are:
+
+- **I2.T4:** Response repository and retrieval API (GET /api/v1/commands/{id}/responses)
+- **I2.T5:** Mock vehicle connector that actually triggers async command execution
+- **I2.T6:** SOVD protocol handler for command validation
+
+Your implementation in I2.T3 should be designed to integrate cleanly with these future additions. Specifically:
+- Leave room in `submit_command` for triggering vehicle connector (I2.T5)
+- Design command_params validation to be replaceable with SOVD handler (I2.T6)
+- Ensure command status tracking supports the full lifecycle
+
+---
+
+**END OF BRIEFING PACKAGE**
+
+```json
+{
   "task_id": "I2.T1",
   "iteration_id": "I2",
   "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
