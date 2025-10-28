@@ -1,0 +1,120 @@
+@startuml
+!define C4_CONTAINER
+
+title SOVD Command WebApp - Container Diagram (C4 Level 2)
+
+skinparam componentStyle rectangle
+skinparam linetype ortho
+
+' External User
+actor "Automotive Engineer" as User
+
+' Frontend Container
+component "Web App\n<<React SPA>>\n(TypeScript, Vite, MUI)" as WebApp #lightblue {
+  note right
+    - User Interface
+    - Command Form
+    - Response Viewer
+    - Vehicle Management UI
+    - Port: 3000 (dev), 80/443 (prod)
+  end note
+}
+
+' API Gateway
+component "API Gateway\n<<Nginx>>" as Gateway #orange {
+  note right
+    - TLS Termination
+    - Reverse Proxy
+    - Static File Serving
+    - Routes /api/* to backend
+    - Routes /ws/* for WebSocket
+  end note
+}
+
+' Backend Application Server
+component "Application Server\n<<FastAPI>>\n(Python 3.11+, Uvicorn)" as AppServer #lightgreen {
+  note right
+    - REST API Endpoints
+    - Business Logic
+    - WebSocket Server (embedded)
+    - Vehicle Connector (embedded)
+    - Port: 8000
+  end note
+}
+
+' Database
+database "PostgreSQL\n<<Database>>\n(PostgreSQL 15+)" as DB #lightgray {
+  note right
+    - Users, Vehicles
+    - Commands, Responses
+    - Sessions, Audit Logs
+    - JSONB for flexible storage
+    - Port: 5432
+  end note
+}
+
+' Cache/Message Broker
+database "Redis\n<<Cache & Pub/Sub>>\n(Redis 7)" as Cache #pink {
+  note right
+    - Session Storage
+    - Response Caching
+    - Pub/Sub Event Bus
+    - WebSocket Broadcasting
+    - Port: 6379
+  end note
+}
+
+' External Vehicle System
+cloud "Connected Vehicle\n<<External System>>" as Vehicle #lightyellow {
+  note right
+    - SOVD 2.0 Interface
+    - ECU Communication
+    - gRPC Server
+  end note
+}
+
+' User Interactions
+User --> WebApp : Uses\n(HTTPS)
+
+' Frontend to Gateway
+WebApp --> Gateway : REST API Calls\n(HTTPS, JSON)\nWebSocket Upgrade\n(wss://)
+
+' Gateway to Backend
+Gateway --> AppServer : Reverse Proxy\n(HTTP)\nWebSocket Proxy\n(ws://)
+
+' Backend to Database
+AppServer --> DB : Database Queries\n(PostgreSQL Protocol)\n(asyncpg driver)
+
+' Backend to Cache
+AppServer --> Cache : Caching\n(Redis Protocol)\nSession Storage\n(Redis Protocol)\nPub/Sub\n(Redis Pub/Sub)
+
+' Backend to Vehicle
+AppServer --> Vehicle : Command Execution\n(gRPC over TLS)\nResponse Streaming\n(gRPC Stream)
+
+' Redis to Backend (Pub/Sub)
+Cache ..> AppServer : Event Publishing\n(Redis Pub/Sub)\n[async notification]
+
+' WebSocket Flow
+AppServer ..> WebApp : Real-time Updates\n(WebSocket)\n[via Gateway]
+
+note bottom of AppServer
+  **Embedded Components:**
+  - WebSocket Server (FastAPI WebSocket endpoint)
+  - Vehicle Connector (gRPC client module)
+
+  **Key Responsibilities:**
+  - JWT Authentication & RBAC
+  - SOVD 2.0 Command Validation
+  - Command Orchestration
+  - Response Streaming
+  - Audit Logging
+end note
+
+note bottom of Cache
+  **Pub/Sub Channels:**
+  - command_responses:{command_id}
+  - vehicle_status:{vehicle_id}
+  - audit_events
+end note
+
+@enduml
