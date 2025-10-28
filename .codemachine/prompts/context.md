@@ -10,23 +10,30 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I1.T10",
-  "iteration_id": "I1",
-  "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
-  "description": "Implement `backend/app/database.py` module for database connection and session management. Use SQLAlchemy async engine (`create_async_engine`) with asyncpg driver. Create `async_session_maker` using `async_sessionmaker`. Implement `get_db()` async generator function for dependency injection (yields session, closes after use). Read database URL from `backend/app/config.py` (create config module using Pydantic Settings to load DATABASE_URL, REDIS_URL, JWT_SECRET from environment variables or `.env` file). Configure connection pooling (pool_size=20, max_overflow=10). Add logging for database connections.",
+  "task_id": "I2.T1",
+  "iteration_id": "I2",
+  "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
+  "description": "Implement `backend/app/services/auth_service.py` with functions: `create_access_token(user_id, username, role)` (generates JWT), `verify_access_token(token)` (validates and decodes JWT), `hash_password(password)` (bcrypt hash), `verify_password(plain_password, hashed_password)`, `authenticate_user(username, password)` (queries database, verifies password). Create `backend/app/schemas/auth.py` Pydantic models: `LoginRequest`, `TokenResponse`, `UserResponse`. Implement `backend/app/api/v1/auth.py` FastAPI router with endpoints: `POST /api/v1/auth/login` (authenticates user, returns access and refresh tokens), `POST /api/v1/auth/refresh` (validates refresh token from database, issues new access token), `POST /api/v1/auth/logout` (invalidates refresh token), `GET /api/v1/auth/me` (returns current user profile from JWT). Create `backend/app/repositories/user_repository.py` with async functions: `get_user_by_username()`, `get_user_by_id()`, `create_user()`. Implement RBAC dependency: `backend/app/dependencies.py` with `get_current_user(token)` and `require_role(roles: list)` for protecting endpoints. Write unit tests in `backend/tests/unit/test_auth_service.py` and integration tests in `backend/tests/integration/test_auth_api.py`.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "SQLAlchemy async best practices; FastAPI dependency injection patterns.",
+  "inputs": "Architecture Blueprint Section 3.8 (Authentication & Authorization); Plan Section 2 (Technology Stack - JWT, passlib); Data Model (users table).",
   "target_files": [
+    "backend/app/services/auth_service.py",
+    "backend/app/schemas/auth.py",
+    "backend/app/api/v1/auth.py",
+    "backend/app/repositories/user_repository.py",
+    "backend/app/dependencies.py",
+    "backend/tests/unit/test_auth_service.py",
+    "backend/tests/integration/test_auth_api.py"
+  ],
+  "input_files": [
+    "backend/app/models/user.py",
+    "backend/app/models/session.py",
     "backend/app/database.py",
     "backend/app/config.py"
   ],
-  "input_files": [],
-  "deliverables": "Database session management module with async support; configuration module with environment variable loading.",
-  "acceptance_criteria": "`database.py` exports `get_db()` function; `get_db()` is an async generator function yielding AsyncSession; Async engine created with DATABASE_URL from config; Connection pool configured (pool_size=20, max_overflow=10); `config.py` uses Pydantic `BaseSettings` (or `pydantic-settings` in Pydantic v2); Config loads DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_ALGORITHM (default HS256), JWT_EXPIRATION_MINUTES (default 15); `.env.example` file created with sample values for environment variables; No errors when importing `from app.database import get_db`; Logging configured to log database connections (use structlog)",
-  "dependencies": [
-    "I1.T6",
-    "I1.T9"
-  ],
+  "deliverables": "Functional authentication API with JWT generation/validation; RBAC dependency injection; unit and integration tests with 80%+ coverage.",
+  "acceptance_criteria": "`POST /api/v1/auth/login` with valid credentials returns access_token and refresh_token; `POST /api/v1/auth/login` with invalid credentials returns 401 Unauthorized; `POST /api/v1/auth/refresh` with valid refresh token returns new access_token; `POST /api/v1/auth/logout` invalidates refresh token (subsequent refresh attempts fail); `GET /api/v1/auth/me` with valid JWT returns user profile (user_id, username, role); `GET /api/v1/auth/me` with missing/invalid JWT returns 401 Unauthorized; `require_role([\"admin\"])` dependency blocks non-admin users (returns 403 Forbidden); Unit tests cover: token generation, token validation, password hashing/verification; Integration tests cover: all auth endpoints with success and error cases; Test coverage ≥ 80% for auth modules; No linter errors (`ruff check`, `mypy`)",
+  "dependencies": ["I1.T9", "I1.T10"],
   "parallelizable": false,
   "done": false
 }
@@ -38,142 +45,92 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: SQLAlchemy 2.0 Best Practices
+### Context: Authentication & Authorization Strategy (from 05_Operational_Architecture.md)
 
-**SQLAlchemy 2.0 Async Engine Pattern:**
-- Use `create_async_engine()` from `sqlalchemy.ext.asyncio` for async database operations
-- AsyncEngine is the entry point for all async database operations
-- Use `async_sessionmaker()` to create a factory for async sessions
-- Sessions should be managed using async context managers or dependency injection
-- Always use `await` for database operations
+```markdown
+#### Authentication & Authorization
 
-**Connection Pooling:**
-- Default pool is QueuePool (recommended for most applications)
-- Configure `pool_size` for number of connections to maintain
-- Configure `max_overflow` for additional connections beyond pool_size during peak load
-- For production: pool_size=20, max_overflow=10 is a good starting point
-- Connection pools are automatically managed by the engine
+**Authentication Strategy: JWT-Based with Refresh Tokens**
 
-**Best Practice for FastAPI:**
-```python
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+**Implementation:**
+- **Access Tokens**: Short-lived (15 minutes), stateless JWT tokens
+  - Contains: `user_id`, `username`, `role`, `exp` (expiration), `iat` (issued at)
+  - Signed with HS256 algorithm (HMAC with SHA-256)
+  - Validated on every API request via middleware
+- **Refresh Tokens**: Long-lived (7 days), stored in database
+  - Used to obtain new access tokens without re-authentication
+  - Supports token revocation (logout invalidates refresh token)
+  - Rotated on each refresh for security
 
-engine = create_async_engine(
-    database_url,
-    pool_size=20,
-    max_overflow=10,
-    echo=False  # Set to True for SQL logging in development
-)
+**Authentication Flow:**
+1. User submits credentials to `/api/v1/auth/login`
+2. Backend validates against database (password hashed with bcrypt)
+3. On success, generates access + refresh tokens
+4. Client stores access token in memory, refresh token in httpOnly cookie (or local storage with XSS mitigations)
+5. Client includes access token in `Authorization: Bearer {token}` header
+6. On access token expiration, client calls `/api/v1/auth/refresh` with refresh token
+7. Backend validates refresh token, issues new access token
 
-async_session_maker = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False  # Prevent lazy loading errors
-)
+**Authorization Strategy: Role-Based Access Control (RBAC)**
 
-async def get_db():
-    async with async_session_maker() as session:
-        yield session
+**Roles:**
+- **Engineer**: Can view vehicles, execute commands, view command history (own commands)
+- **Admin**: Full access (user management, system configuration, all command history)
+
+**Implementation:**
+- Role stored in `users.role` field
+- Access token JWT includes `role` claim
+- FastAPI dependencies enforce authorization:
+  ```python
+  @router.post("/commands")
+  async def execute_command(
+      user: User = Depends(require_role(["engineer", "admin"])),
+      ...
+  ):
+  ```
+- Unauthorized access returns HTTP 403 Forbidden
 ```
 
-### Context: FastAPI Dependency Injection Pattern
+### Context: Authentication API Endpoints (from 04_Behavior_and_Communication.md)
 
-**Dependency Injection for Database Sessions:**
-- Use async generator functions that yield the session
-- FastAPI automatically handles cleanup after request
-- Pattern:
-```python
-from typing import AsyncGenerator
-from fastapi import Depends
+```markdown
+**Authentication Endpoints**
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    async with async_session_maker() as session:
-        yield session
-        # Cleanup happens automatically after yield
+POST   /api/v1/auth/login
+Request:  { "username": "string", "password": "string" }
+Response: { "access_token": "string", "refresh_token": "string", "expires_in": 900 }
 
-# Usage in route
-@app.get("/users")
-async def get_users(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User))
-    return result.scalars().all()
+POST   /api/v1/auth/refresh
+Request:  { "refresh_token": "string" }
+Response: { "access_token": "string", "expires_in": 900 }
+
+POST   /api/v1/auth/logout
+Headers:  Authorization: Bearer {token}
+Response: { "message": "Logged out successfully" }
+
+GET    /api/v1/auth/me
+Headers:  Authorization: Bearer {token}
+Response: { "user_id": "uuid", "username": "string", "role": "string" }
 ```
 
-### Context: Pydantic Settings (v2)
+### Context: Task Requirements (from 02_Iteration_I2.md)
 
-**Environment Variable Configuration:**
-- Pydantic v2 uses `pydantic-settings` package (separate from pydantic)
-- Import `BaseSettings` from `pydantic_settings` (not `pydantic`)
-- Field defaults and validation work the same as Pydantic models
-- Automatically reads from environment variables or `.env` file
+```markdown
+**Task 2.1: Implement Authentication Service and API Endpoints**
 
-**Pattern:**
-```python
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-class Settings(BaseSettings):
-    # Database configuration
-    DATABASE_URL: str
-
-    # Redis configuration
-    REDIS_URL: str
-
-    # JWT configuration
-    JWT_SECRET: str
-    JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRATION_MINUTES: int = 15
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True
-    )
-
-settings = Settings()
+**Acceptance Criteria:**
+- `POST /api/v1/auth/login` with valid credentials returns access_token and refresh_token
+- `POST /api/v1/auth/login` with invalid credentials returns 401 Unauthorized
+- `POST /api/v1/auth/refresh` with valid refresh token returns new access_token
+- `POST /api/v1/auth/logout` invalidates refresh token (subsequent refresh attempts fail)
+- `GET /api/v1/auth/me` with valid JWT returns user profile (user_id, username, role)
+- `GET /api/v1/auth/me` with missing/invalid JWT returns 401 Unauthorized
+- `require_role(["admin"])` dependency blocks non-admin users (returns 403 Forbidden)
+- Unit tests cover: token generation, token validation, password hashing/verification
+- Integration tests cover: all auth endpoints with success and error cases
+- Test coverage ≥ 80% for auth modules
+- No linter errors (`ruff check`, `mypy`)
 ```
-
-### Context: structlog Configuration
-
-**Structured Logging Pattern:**
-- structlog provides structured, context-aware logging
-- Integrates with Python's standard logging
-- Outputs JSON for easy parsing by log aggregation tools
-- Add context to logs (correlation IDs, user IDs, etc.)
-
-**Basic Configuration:**
-```python
-import structlog
-
-structlog.configure(
-    processors=[
-        structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer()
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-    context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
-)
-
-logger = structlog.get_logger()
-logger.info("database_connection_created", pool_size=20, max_overflow=10)
-```
-
-### Context: Docker Compose Environment Variables
-
-**Environment Variables from docker-compose.yml:**
-```yaml
-backend:
-  environment:
-    DATABASE_URL: postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd
-    REDIS_URL: redis://redis:6379/0
-```
-
-**Important Notes:**
-- DATABASE_URL uses `postgresql+asyncpg://` scheme (not just `postgresql://`)
-- The `asyncpg` driver is required for async operations
-- Service names (`db`, `redis`) are used as hostnames in Docker network
-- These environment variables are automatically available to the backend container
 
 ---
 
@@ -181,122 +138,150 @@ backend:
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
+### CRITICAL FINDING: Task Already Completed
+
+**⚠️ IMPORTANT: This task (I2.T1) appears to be ALREADY FULLY IMPLEMENTED!**
+
+I have verified that ALL target files specified in the task exist and contain complete implementations:
+
 ### Relevant Existing Code
 
-*   **File:** `backend/app/models/__init__.py`
-    *   **Summary:** This file exports all SQLAlchemy ORM models and the Base class. All models (User, Vehicle, Command, Response, Session, AuditLog) are properly defined and use SQLAlchemy 2.0 syntax with type hints.
-    *   **Recommendation:** You MUST import `Base` from `app.models` in your `database.py` file. The Base class contains the metadata for all models and is required for Alembic migrations.
+*   **File:** `backend/app/services/auth_service.py`
+    *   **Summary:** Complete authentication service with JWT token generation/validation, password hashing/verification using bcrypt, and user authentication against the database.
+    *   **Status:** ✅ FULLY IMPLEMENTED - Contains all required functions:
+        - `create_access_token()` - Generates JWT access tokens with 15-minute expiration
+        - `create_refresh_token()` - Generates JWT refresh tokens with 7-day expiration
+        - `verify_access_token()` - Validates access tokens
+        - `verify_refresh_token()` - Validates refresh tokens
+        - `hash_password()` - Bcrypt password hashing
+        - `verify_password()` - Password verification
+        - `authenticate_user()` - Database authentication with active user check
 
-*   **File:** `backend/app/models/base.py`
-    *   **Summary:** Defines the DeclarativeBase class that all ORM models inherit from.
-    *   **Recommendation:** This Base class is already configured and working. DO NOT modify it. Import it via `app.models` as shown in the Alembic env.py file.
+*   **File:** `backend/app/schemas/auth.py`
+    *   **Summary:** Complete Pydantic schemas for authentication API requests and responses.
+    *   **Status:** ✅ FULLY IMPLEMENTED - Contains all required models:
+        - `LoginRequest` - Username and password input
+        - `TokenResponse` - Access and refresh token response
+        - `RefreshRequest` - Refresh token input
+        - `RefreshResponse` - New access token response
+        - `UserResponse` - User profile information
+        - `LogoutResponse` - Logout confirmation
+
+*   **File:** `backend/app/api/v1/auth.py`
+    *   **Summary:** Complete FastAPI router with all authentication endpoints.
+    *   **Status:** ✅ FULLY IMPLEMENTED - Contains all required endpoints:
+        - `POST /login` - User authentication with token generation and session storage
+        - `POST /refresh` - Token refresh with database validation and user active check
+        - `POST /logout` - Session invalidation (deletes all user sessions)
+        - `GET /me` - Current user profile retrieval
+    *   **Note:** Already integrated into main.py and registered with the FastAPI app.
+
+*   **File:** `backend/app/repositories/user_repository.py`
+    *   **Summary:** User repository with async database operations.
+    *   **Status:** ✅ FULLY IMPLEMENTED - Contains all required functions:
+        - `get_user_by_username()` - Query user by username
+        - `get_user_by_id()` - Query user by ID
+        - Additional helper: `create_user()` for user creation
+
+*   **File:** `backend/app/dependencies.py`
+    *   **Summary:** FastAPI dependency injection for authentication and authorization.
+    *   **Status:** ✅ FULLY IMPLEMENTED - Contains:
+        - `get_current_user()` - JWT validation and user extraction dependency
+        - `require_role()` - Factory function for role-based authorization
+        - Comprehensive error handling with 401/403 responses
+        - Active user verification
 
 *   **File:** `backend/app/models/user.py`
-    *   **Summary:** Example of a properly configured SQLAlchemy 2.0 model with Mapped type hints, relationships, and PostgreSQL-specific types (UUID, DateTime with timezone).
-    *   **Recommendation:** Your database session configuration should work seamlessly with these models. All models follow the same pattern with proper async support.
+    *   **Summary:** SQLAlchemy ORM model for users table with RBAC support.
+    *   **Status:** ✅ COMPLETE - Contains all required fields and relationships.
+    *   **Recommendation:** This model is used throughout the authentication system. Do not modify.
 
-*   **File:** `backend/requirements.txt`
-    *   **Summary:** Contains all required dependencies including `sqlalchemy>=2.0.0`, `asyncpg>=0.29.0`, `pydantic>=2.4.0`, `pydantic-settings>=2.0.0`, and `structlog>=23.2.0`.
-    *   **Recommendation:** All dependencies you need are already installed. You MUST use `pydantic-settings` for the Settings class (not the deprecated `pydantic.BaseSettings`).
+*   **File:** `backend/app/models/session.py`
+    *   **Summary:** SQLAlchemy ORM model for sessions table (refresh token storage).
+    *   **Status:** ✅ COMPLETE - Used by auth endpoints for token management.
+    *   **Recommendation:** This model stores refresh tokens in the database for validation.
 
-*   **File:** `backend/pyproject.toml`
-    *   **Summary:** Contains linter and type checker configuration (black, ruff, mypy). Mypy is configured in strict mode with `disallow_untyped_defs = true`.
-    *   **Recommendation:** You MUST add type hints to all functions and parameters. Use `AsyncSession` from `sqlalchemy.ext.asyncio` for type hints. Use `AsyncGenerator[AsyncSession, None]` for the `get_db()` return type.
+*   **File:** `backend/app/database.py`
+    *   **Summary:** Database connection and session management with async SQLAlchemy.
+    *   **Status:** ✅ COMPLETE - Provides `get_db()` dependency for all endpoints.
+    *   **Recommendation:** All database operations use this session factory.
 
-*   **File:** `backend/alembic/env.py`
-    *   **Summary:** Already configured to use async SQLAlchemy engine and imports models from `app.models`. Shows the correct pattern for reading DATABASE_URL from environment variables.
-    *   **Recommendation:** Your `config.py` should follow the same pattern for reading DATABASE_URL. The Alembic configuration demonstrates proper async engine setup with environment variables.
+*   **File:** `backend/app/config.py`
+    *   **Summary:** Application configuration using pydantic-settings.
+    *   **Status:** ✅ COMPLETE - Contains JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_MINUTES.
+    *   **Recommendation:** Configuration is loaded from environment variables or .env file.
 
-*   **File:** `backend/app/main.py`
-    *   **Summary:** Basic FastAPI app with CORS middleware and health check endpoint. Uses startup/shutdown events.
-    *   **Recommendation:** You may want to import and initialize the database engine in the startup event (optional for now, but good practice). Ensure your config module can be imported without errors from this file.
+### Test Files Status
 
-*   **File:** `docker-compose.yml`
-    *   **Summary:** Defines environment variables for the backend service including DATABASE_URL and REDIS_URL. Uses PostgreSQL service name `db` and Redis service name `redis` as hostnames.
-    *   **Recommendation:** Your `config.py` MUST read these environment variables. The DATABASE_URL is already in the correct format: `postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd`.
+*   **File:** `backend/tests/unit/test_auth_service.py`
+    *   **Status:** ⚠️ NEEDS VERIFICATION - Exists but needs coverage check.
+
+*   **File:** `backend/tests/integration/test_auth_api.py`
+    *   **Status:** ⚠️ NEEDS VERIFICATION - Exists but needs coverage check.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** The project uses Pydantic v2, which requires `pydantic-settings` as a separate package. Import `BaseSettings` from `pydantic_settings` (note the underscore, not hyphen).
+*   **Tip:** The complete authentication system is already implemented and integrated. The main task remaining is to verify test coverage is ≥80%.
+*   **Tip:** To verify the implementation, you should:
+    1. Run the existing unit tests: `pytest backend/tests/unit/test_auth_service.py -v`
+    2. Run the existing integration tests: `pytest backend/tests/integration/test_auth_api.py -v`
+    3. Check test coverage: `pytest --cov=app.services.auth_service --cov=app.api.v1.auth --cov-report=term`
+    4. Run linter checks: `ruff check backend/app/services/auth_service.py backend/app/api/v1/auth.py backend/app/dependencies.py`
+    5. Run type checker: `mypy backend/app/services/auth_service.py backend/app/api/v1/auth.py backend/app/dependencies.py`
 
-*   **Tip:** For the `get_db()` function, use the async generator pattern with `yield` to ensure proper session cleanup. FastAPI's dependency injection system will automatically call cleanup code after the yield statement.
+*   **Note:** The authentication endpoints are already registered in `backend/app/main.py` at line 37: `app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])`
 
-*   **Tip:** Set `expire_on_commit=False` in `async_sessionmaker` to prevent lazy loading errors. This is especially important for async sessions where you can't lazily load relationships outside the session context.
+*   **Warning:** All acceptance criteria appear to be met based on code inspection:
+    - ✅ JWT token generation with correct claims (user_id, username, role, exp, iat)
+    - ✅ Token validation with type checking (access vs refresh)
+    - ✅ Refresh token database storage and validation
+    - ✅ Session invalidation on logout
+    - ✅ RBAC with `require_role()` dependency
+    - ✅ Proper HTTP status codes (401 for auth failures, 403 for authorization failures)
+    - ✅ Structured logging with correlation
 
-*   **Tip:** Configure the async engine with `echo=False` in production but you may want to make this configurable (e.g., `echo=settings.DEBUG` if you add a DEBUG setting).
+### Recommended Next Steps
 
-*   **Note:** The task requires logging database connections using structlog. Configure structlog at the module level and log when the engine is created. Include relevant context like pool_size and max_overflow in your log messages.
+Since this task appears to be complete, you should:
 
-*   **Note:** For the `.env.example` file, include all required environment variables with placeholder values. This file should be committed to git (unlike `.env` which should be in `.gitignore`).
+1. **Verify Test Coverage**: Run pytest with coverage reporting to ensure ≥80% coverage
+2. **Run All Tests**: Execute both unit and integration tests to confirm all pass
+3. **Check Linting**: Run `ruff check` and `mypy` to verify no linter errors
+4. **Manual API Testing**: (Optional) Use the FastAPI Swagger UI at `/docs` to manually test all endpoints
+5. **Update Task Status**: If all acceptance criteria are met, mark task I2.T1 as `done: true`
+6. **Move to Next Task**: Proceed to task I2.T3 (I2.T2 is already marked as done)
 
-*   **Warning:** DO NOT hardcode any database credentials or secrets in your code. All sensitive values MUST come from environment variables loaded via Pydantic Settings.
+### Commands to Execute
 
-*   **Warning:** The `JWT_SECRET` environment variable is critical for security. In the `.env.example` file, use a placeholder value and add a comment explaining that users should generate a secure random string.
-
-*   **Best Practice:** Create a single `settings` instance at the module level in `config.py` and export it. This ensures the configuration is loaded once and reused throughout the application.
-
-*   **Best Practice:** Use context managers (`async with`) for session management. The `get_db()` function should use the async session maker's context manager to ensure proper cleanup.
-
-*   **Testing:** After implementation, you should be able to run `from app.database import get_db` without errors. You can test the database connection by running Alembic migrations: `alembic upgrade head`.
-
-### File Structure Expectations
-
-Based on the task requirements, you should create:
-
-1. **`backend/app/config.py`** - Configuration module with:
-   - `Settings` class using `BaseSettings` from `pydantic_settings`
-   - Fields for DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_MINUTES
-   - `model_config` with `.env` file support
-   - Singleton `settings` instance exported
-
-2. **`backend/app/database.py`** - Database session module with:
-   - Import of `create_async_engine`, `async_sessionmaker`, `AsyncSession` from `sqlalchemy.ext.asyncio`
-   - Engine creation with connection pool configuration
-   - `async_session_maker` factory
-   - `get_db()` async generator function for FastAPI dependency injection
-   - structlog configuration and connection logging
-
-3. **`backend/.env.example`** - Example environment file with:
-   - DATABASE_URL (with placeholder values)
-   - REDIS_URL (with placeholder values)
-   - JWT_SECRET (with security comment)
-   - JWT_ALGORITHM (optional, defaults to HS256)
-   - JWT_EXPIRATION_MINUTES (optional, defaults to 15)
-
-### Acceptance Criteria Checklist
-
-Ensure your implementation satisfies all acceptance criteria:
-
-- [ ] `database.py` exports `get_db()` function
-- [ ] `get_db()` is an async generator function yielding AsyncSession
-- [ ] Async engine created with DATABASE_URL from config
-- [ ] Connection pool configured (pool_size=20, max_overflow=10)
-- [ ] `config.py` uses Pydantic BaseSettings from `pydantic_settings`
-- [ ] Config loads DATABASE_URL, REDIS_URL, JWT_SECRET
-- [ ] JWT_ALGORITHM defaults to "HS256"
-- [ ] JWT_EXPIRATION_MINUTES defaults to 15
-- [ ] `.env.example` file created with sample values
-- [ ] No errors when importing `from app.database import get_db`
-- [ ] Logging configured to log database connections using structlog
-- [ ] Code passes type checking (`mypy backend/app/config.py backend/app/database.py`)
-- [ ] Code passes linting (`ruff check backend/app/config.py backend/app/database.py`)
-
-### Additional Context
-
-**Why this task matters:**
-This task establishes the foundational database connection layer that all subsequent backend tasks will depend on. Without this, you cannot implement API endpoints, authentication, or any database operations. The configuration module also establishes the pattern for managing environment variables across the application.
-
-**Common pitfalls to avoid:**
-1. Using `pydantic.BaseSettings` instead of `pydantic_settings.BaseSettings` (Pydantic v2 change)
-2. Forgetting to set `expire_on_commit=False` in async_sessionmaker (causes lazy loading errors)
-3. Not using `async with` for session management in `get_db()` (causes resource leaks)
-4. Hardcoding database credentials instead of using environment variables
-5. Using `postgresql://` instead of `postgresql+asyncpg://` for the async driver
-
-**Success validation:**
-After implementing, test with:
 ```bash
-# From backend directory
-python -c "from app.database import get_db; print('Import successful')"
-python -c "from app.config import settings; print(f'Config loaded: {settings.JWT_ALGORITHM}')"
+# Navigate to backend directory
+cd /home/aman/dev/personal-projects/sovd/backend
+
+# Run unit tests
+pytest tests/unit/test_auth_service.py -v
+
+# Run integration tests
+pytest tests/integration/test_auth_api.py -v
+
+# Check coverage
+pytest tests/unit/test_auth_service.py tests/integration/test_auth_api.py --cov=app.services.auth_service --cov=app.api.v1.auth --cov=app.dependencies --cov=app.repositories.user_repository --cov-report=term --cov-report=html
+
+# Run linters
+ruff check app/services/auth_service.py app/api/v1.auth.py app/dependencies.py app/repositories/user_repository.py
+
+# Run type checker
+mypy app/services/auth_service.py app/api/v1/auth.py app/dependencies.py app/repositories/user_repository.py
 ```
+
+---
+
+## Summary
+
+**Task I2.T1 is ALREADY COMPLETE.** All code files specified in the task requirements have been fully implemented with comprehensive functionality that meets the architecture specifications. The remaining work is to:
+
+1. Verify existing tests achieve ≥80% coverage
+2. Ensure all tests pass
+3. Confirm no linter/type errors
+4. Update the task status to `done: true`
+
+If any issues are found during verification, address them. Otherwise, proceed to the next actionable task (I2.T3).
