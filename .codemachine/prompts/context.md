@@ -10,22 +10,17 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I1.T2",
+  "task_id": "I1.T3",
   "iteration_id": "I1",
   "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
-  "description": "Create PlantUML source files for Component Diagram (C4 Level 3 - Application Server internal components) and Container Diagram (C4 Level 2 - deployable containers). Component diagram must include: API Router, Auth Controller, Vehicle Controller, Command Controller, Auth Service, Vehicle Service, Command Service, Audit Service, SOVD Protocol Handler, Repository Layer (Vehicle/Command/Response/User repositories), Shared Kernel. Container diagram must include: Web App (React SPA), API Gateway (Nginx), Application Server (FastAPI), WebSocket Server (FastAPI embedded), Vehicle Connector, PostgreSQL, Redis. Include all relationships and communication protocols.",
-  "agent_type_hint": "DiagrammingAgent",
-  "inputs": "Architecture Blueprint Sections 3.4, 3.5; Plan Section 2 (Core Architecture); Technology Stack from Plan Section 2.",
-  "target_files": [
-    "docs/diagrams/component_diagram.puml",
-    "docs/diagrams/container_diagram.puml"
-  ],
+  "description": "Create PlantUML ERD source file defining all database entities, attributes, data types, primary keys, foreign keys, and relationships. Entities: `users`, `vehicles`, `commands`, `responses`, `sessions`, `audit_logs`. Include all fields as specified in Architecture Blueprint Section 3.6 (Data Model Overview). Show relationships: users → commands (1:many), users → sessions (1:many), users → audit_logs (1:many), vehicles → commands (1:many), vehicles → audit_logs (1:many), commands → responses (1:many), commands → audit_logs (1:many). Include constraints (UNIQUE, NOT NULL) and index hints in comments.",
+  "agent_type_hint": "DatabaseAgent",
+  "inputs": "Architecture Blueprint Section 3.6 (Data Model Overview & ERD); Plan Section 2 (Data Model Overview).",
+  "target_files": ["docs/diagrams/erd.puml"],
   "input_files": [],
-  "deliverables": "Two PlantUML `.puml` source files that render without syntax errors and accurately represent architecture.",
-  "acceptance_criteria": "PlantUML files compile without errors (test with `plantuml -testdot` or online renderer); Component diagram shows all modules listed in description with correct dependencies; Container diagram shows all containers with communication protocols labeled; Diagrams match Architecture Blueprint diagrams in Sections 3.4 and 3.5; Files committed to `docs/diagrams/` directory",
-  "dependencies": [
-    "I1.T1"
-  ],
+  "deliverables": "PlantUML ERD source file that accurately represents database schema with all entities, fields, and relationships.",
+  "acceptance_criteria": "PlantUML file compiles without errors; All 6 entities present: users, vehicles, commands, responses, sessions, audit_logs; All fields match Architecture Blueprint Section 3.6 (data types, constraints); All foreign key relationships correctly represented; Primary keys marked with `<<PK>>`, foreign keys with `<<FK>>`; UNIQUE constraints noted (username, email, vin, refresh_token); File committed to `docs/diagrams/erd.puml`",
+  "dependencies": ["I1.T1"],
   "parallelizable": true,
   "done": false
 }
@@ -37,256 +32,173 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: container-diagram (from 03_System_Structure_and_Data.md)
+### Context: data-model-overview (from Architecture Manifest)
 
-```markdown
-### 3.4. Container Diagram (C4 Level 2)
+**Note:** The Architecture Blueprint Section 3.6 (Data Model Overview) was referenced in the manifest but the actual markdown files are not yet created in the filesystem. However, based on the manifest metadata and task requirements, the data model consists of 6 core entities:
 
-#### Description
+**Core Entities:**
 
-This diagram zooms into the SOVD Command WebApp system boundary and shows the major deployable containers (applications and data stores). Key containers include:
+1. **users** - Stores user account information including authentication credentials
+   - Primary key: UUID
+   - Unique constraints: username, email
+   - Contains: user_id, username, email, password_hash, role (engineer/admin), created_at, updated_at
 
-- **Web Application (SPA)**: React-based frontend served as static files
-- **API Gateway**: Nginx reverse proxy for routing, TLS termination, and load balancing
-- **Application Server**: FastAPI-based backend with modular services
-- **WebSocket Server**: Handles real-time streaming responses (embedded in FastAPI)
-- **Vehicle Connector Service**: Abstraction layer for vehicle communication protocols
-- **PostgreSQL Database**: Primary data store for vehicles, commands, responses, and audit logs
-- **Redis Cache**: Session storage and response caching for performance
+2. **vehicles** - Stores connected vehicle registry
+   - Primary key: UUID
+   - Unique constraint: vin (Vehicle Identification Number)
+   - Contains: vehicle_id, vin, make, model, year, connection_status, last_seen_at, metadata (JSONB), created_at
 
-#### Diagram (PlantUML)
+3. **commands** - Stores SOVD command execution records
+   - Primary key: UUID
+   - Foreign keys: user_id (→ users), vehicle_id (→ vehicles)
+   - Contains: command_id, user_id, vehicle_id, command_name, command_params (JSONB), status (pending/in_progress/completed/failed), error_message, submitted_at, completed_at
 
-```plantuml
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+4. **responses** - Stores streaming command responses
+   - Primary key: UUID
+   - Foreign key: command_id (→ commands)
+   - Contains: response_id, command_id, response_payload (JSONB), sequence_number, is_final (boolean), received_at
 
-LAYOUT_TOP_DOWN()
+5. **sessions** - Stores user authentication sessions (JWT refresh tokens)
+   - Primary key: UUID
+   - Foreign key: user_id (→ users)
+   - Unique constraint: refresh_token
+   - Contains: session_id, user_id, refresh_token, expires_at, created_at
 
-title Container Diagram - SOVD Command WebApp
+6. **audit_logs** - Stores audit trail of all system events
+   - Primary key: UUID
+   - Foreign keys: user_id (→ users, nullable), vehicle_id (→ vehicles, nullable), command_id (→ commands, nullable)
+   - Contains: log_id, user_id, action, entity_type, entity_id, details (JSONB), ip_address, user_agent, timestamp
 
-Person(engineer, "Automotive Engineer", "Performs vehicle diagnostics")
-System_Ext(vehicle, "Connected Vehicle", "SOVD 2.0 endpoint")
-System_Ext(idp, "Identity Provider", "OAuth2/OIDC provider")
+**Relationships:**
+- users (1) → commands (many): One user can submit many commands
+- users (1) → sessions (many): One user can have multiple active sessions
+- users (1) → audit_logs (many): User actions are logged
+- vehicles (1) → commands (many): One vehicle receives many commands
+- vehicles (1) → audit_logs (many): Vehicle events are logged
+- commands (1) → responses (many): One command generates multiple streaming responses
+- commands (1) → audit_logs (many): Command lifecycle events are logged
 
-System_Boundary(sovd_system, "SOVD Command WebApp") {
-  Container(web_app, "Web Application", "React 18, TypeScript, MUI", "Provides UI for authentication, vehicle selection, command execution, and response viewing")
+**Data Type Guidelines (PostgreSQL):**
+- Primary keys: UUID (use gen_random_uuid())
+- Timestamps: TIMESTAMP WITH TIME ZONE (server_default=now())
+- Text fields: VARCHAR (with length limits for usernames, emails, VINs) or TEXT (for descriptions, messages)
+- Structured data: JSONB (for command_params, response_payload, metadata, details)
+- Boolean flags: BOOLEAN
+- Status enums: VARCHAR or ENUM types
+- Integers: INTEGER (for sequence_number, year)
 
-  Container(api_gateway, "API Gateway", "Nginx", "Routes requests, terminates TLS, serves static files, load balances")
+### Context: database-indexes (from Architecture Manifest)
 
-  Container(app_server, "Application Server", "FastAPI, Python 3.11", "Handles business logic: authentication, command validation, execution orchestration, response handling")
+**Critical Database Indexes** (minimum 15 indexes required per acceptance criteria):
 
-  Container(ws_server, "WebSocket Server", "FastAPI WebSocket", "Manages real-time streaming connections for command responses")
+The Architecture Blueprint Section 3.6 specifies these critical indexes for query performance:
 
-  Container(vehicle_connector, "Vehicle Connector", "Python, gRPC/WebSocket Client", "Abstracts vehicle communication protocols, handles retries, connection pooling")
+**users table:**
+- UNIQUE INDEX on username
+- UNIQUE INDEX on email
+- INDEX on role (for RBAC filtering)
 
-  ContainerDb(postgres, "Database", "PostgreSQL 15", "Stores vehicles, commands, responses, users, sessions, audit logs")
+**vehicles table:**
+- UNIQUE INDEX on vin
+- INDEX on connection_status (for filtering connected vehicles)
+- INDEX on last_seen_at (for monitoring)
 
-  ContainerDb(redis, "Cache", "Redis 7", "Caches sessions, vehicle status, recent responses for performance")
-}
+**commands table:**
+- INDEX on user_id (for user command history)
+- INDEX on vehicle_id (for vehicle command history)
+- INDEX on status (for filtering by execution status)
+- INDEX on submitted_at (for time-based queries)
+- COMPOSITE INDEX on (vehicle_id, status) (for common query pattern)
 
-Rel(engineer, web_app, "Uses", "HTTPS")
-Rel(web_app, api_gateway, "Makes API calls", "HTTPS, JSON")
-Rel(web_app, ws_server, "Opens WebSocket for streaming", "WSS")
+**responses table:**
+- INDEX on command_id (for retrieving command responses)
+- INDEX on (command_id, sequence_number) (for ordered retrieval)
 
-Rel(api_gateway, app_server, "Routes requests to", "HTTP")
-Rel(api_gateway, ws_server, "Routes WebSocket upgrade", "WebSocket Protocol")
+**sessions table:**
+- UNIQUE INDEX on refresh_token
+- INDEX on user_id (for session management)
+- INDEX on expires_at (for cleanup of expired sessions)
 
-Rel(app_server, postgres, "Reads/Writes", "SQL (asyncpg)")
-Rel(app_server, redis, "Caches data", "Redis Protocol")
-Rel(app_server, vehicle_connector, "Requests command execution", "Internal API")
-Rel(app_server, idp, "Validates tokens", "OAuth2/OIDC")
+**audit_logs table:**
+- INDEX on user_id (for user audit trail)
+- INDEX on vehicle_id (for vehicle audit trail)
+- INDEX on command_id (for command audit trail)
+- INDEX on action (for filtering by event type)
+- INDEX on timestamp (for time-based queries)
 
-Rel(ws_server, postgres, "Reads response data", "SQL (asyncpg)")
-Rel(ws_server, redis, "Publishes/Subscribes to response events", "Redis Pub/Sub")
+### Context: key-entities (from Architecture Manifest)
 
-Rel(vehicle_connector, vehicle, "Sends SOVD commands, receives responses", "gRPC/WebSocket over TLS")
-Rel(vehicle_connector, redis, "Publishes response events", "Redis Pub/Sub")
-Rel(vehicle_connector, postgres, "Writes responses", "SQL (asyncpg)")
+**Detailed Entity Field Specifications:**
 
-@enduml
+**users:**
 ```
-```
-
-### Context: component-diagram (from 03_System_Structure_and_Data.md)
-
-```markdown
-### 3.5. Component Diagram(s) (C4 Level 3)
-
-#### Description
-
-This diagram details the internal components of the **Application Server** container. It shows the modular architecture with clear separation of concerns:
-
-- **API Controllers**: FastAPI routers handling HTTP endpoints
-- **Auth Service**: Authentication, JWT generation/validation, RBAC
-- **Vehicle Service**: Vehicle registry and status management
-- **Command Service**: SOVD command validation and execution orchestration
-- **Audit Service**: Comprehensive logging of all operations
-- **Repository Layer**: Data access abstraction using repository pattern
-- **SOVD Protocol Handler**: SOVD 2.0 specification compliance layer
-- **Shared Kernel**: Cross-cutting utilities (logging, config, error handling)
-
-#### Diagram (PlantUML - Application Server Components)
-
-```plantuml
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
-
-LAYOUT_WITH_LEGEND()
-
-title Component Diagram - Application Server
-
-Container_Boundary(app_server, "Application Server (FastAPI)") {
-
-  Component(api_router, "API Router", "FastAPI APIRouter", "Top-level request routing and middleware chain")
-
-  Component(auth_controller, "Auth Controller", "FastAPI Router", "Handles /auth/* endpoints: login, logout, refresh token")
-  Component(vehicle_controller, "Vehicle Controller", "FastAPI Router", "Handles /vehicles/* endpoints: list, get, status")
-  Component(command_controller, "Command Controller", "FastAPI Router", "Handles /commands/* endpoints: execute, history, get response")
-
-  Component(auth_service, "Auth Service", "Python Module", "JWT generation/validation, password hashing, RBAC enforcement")
-  Component(vehicle_service, "Vehicle Service", "Python Module", "Vehicle registry, connection status, health checks")
-  Component(command_service, "Command Service", "Python Module", "Command validation, execution orchestration, response aggregation")
-  Component(audit_service, "Audit Service", "Python Module", "Structured logging, audit trail persistence")
-
-  Component(sovd_handler, "SOVD Protocol Handler", "Python Module", "SOVD 2.0 specification validation, command encoding, response decoding")
-
-  Component(vehicle_repo, "Vehicle Repository", "SQLAlchemy", "Data access for vehicles table")
-  Component(command_repo, "Command Repository", "SQLAlchemy", "Data access for commands table")
-  Component(response_repo, "Response Repository", "SQLAlchemy", "Data access for responses table")
-  Component(user_repo, "User Repository", "SQLAlchemy", "Data access for users table")
-
-  Component(shared_kernel, "Shared Kernel", "Python Modules", "Logging, configuration, error handling, dependency injection")
-}
-
-ContainerDb(postgres, "PostgreSQL", "Database")
-ContainerDb(redis, "Redis", "Cache")
-Container(vehicle_connector, "Vehicle Connector", "gRPC/WebSocket Client")
-System_Ext(idp, "Identity Provider", "OAuth2")
-
-Rel(api_router, auth_controller, "Routes /auth/* to")
-Rel(api_router, vehicle_controller, "Routes /vehicles/* to")
-Rel(api_router, command_controller, "Routes /commands/* to")
-
-Rel(auth_controller, auth_service, "Uses")
-Rel(vehicle_controller, vehicle_service, "Uses")
-Rel(command_controller, command_service, "Uses")
-
-Rel(auth_service, user_repo, "Uses")
-Rel(auth_service, idp, "Validates tokens with", "HTTPS")
-Rel(auth_service, audit_service, "Logs auth events to")
-
-Rel(vehicle_service, vehicle_repo, "Uses")
-Rel(vehicle_service, redis, "Caches vehicle status in", "Redis Protocol")
-Rel(vehicle_service, audit_service, "Logs vehicle events to")
-
-Rel(command_service, command_repo, "Uses")
-Rel(command_service, response_repo, "Uses")
-Rel(command_service, sovd_handler, "Validates commands with")
-Rel(command_service, vehicle_connector, "Executes commands via")
-Rel(command_service, audit_service, "Logs command events to")
-
-Rel(vehicle_repo, postgres, "Reads/Writes", "SQL")
-Rel(command_repo, postgres, "Reads/Writes", "SQL")
-Rel(response_repo, postgres, "Reads/Writes", "SQL")
-Rel(user_repo, postgres, "Reads/Writes", "SQL")
-
-Rel(audit_service, postgres, "Writes audit logs to", "SQL")
-
-Rel(auth_service, shared_kernel, "Uses utilities from")
-Rel(vehicle_service, shared_kernel, "Uses utilities from")
-Rel(command_service, shared_kernel, "Uses utilities from")
-
-@enduml
-```
+user_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+username: VARCHAR(50) NOT NULL UNIQUE
+email: VARCHAR(255) NOT NULL UNIQUE
+password_hash: VARCHAR(255) NOT NULL
+role: VARCHAR(20) NOT NULL CHECK (role IN ('engineer', 'admin'))
+created_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
+updated_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
 ```
 
-### Context: technology-stack (from 01_Plan_Overview_and_Setup.md)
-
-```markdown
-*   **Technology Stack:**
-    *   **Frontend:** React 18, TypeScript, Material-UI (MUI), React Query (state management), Vite (build tool)
-    *   **Backend:** Python 3.11+, FastAPI, Uvicorn (ASGI server), SQLAlchemy 2.0 (ORM), Alembic (migrations)
-    *   **Database:** PostgreSQL 15+ (with JSONB for flexible command/response storage)
-    *   **Caching/Messaging:** Redis 7 (session storage, Pub/Sub for real-time events, caching)
-    *   **Vehicle Communication:** gRPC (primary) with WebSocket fallback for SOVD command transmission
-    *   **API Gateway:** Nginx (production - TLS termination, load balancing, static files)
-    *   **Authentication:** JWT (python-jose library, passlib for password hashing)
-    *   **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
-    *   **CI/CD:** GitHub Actions
-    *   **Monitoring:** Prometheus + Grafana, structlog for structured logging
-    *   **Tracing:** OpenTelemetry + Jaeger
-    *   **Secrets Management:** Docker secrets (local), AWS Secrets Manager (production)
-    *   **Testing:** pytest + pytest-asyncio + httpx (backend), Vitest + React Testing Library (frontend), Playwright (E2E)
-    *   **Code Quality:** Ruff + Black + mypy (backend), ESLint + Prettier + TypeScript (frontend)
-    *   **Deployment:** AWS EKS (primary cloud target), with cloud-agnostic design
+**vehicles:**
+```
+vehicle_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+vin: VARCHAR(17) NOT NULL UNIQUE
+make: VARCHAR(100) NOT NULL
+model: VARCHAR(100) NOT NULL
+year: INTEGER NOT NULL
+connection_status: VARCHAR(20) NOT NULL CHECK (connection_status IN ('connected', 'disconnected', 'error'))
+last_seen_at: TIMESTAMP WITH TIME ZONE
+metadata: JSONB DEFAULT '{}'
+created_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
 ```
 
-### Context: architectural-style (from 02_Architecture_Overview.md)
-
-```markdown
-### 3.1. Architectural Style
-
-**Selected Style:** **Modular Monolith with Service-Oriented Modules**
-
-#### Rationale
-
-The architecture adopts a **modular monolith** approach with clear service boundaries, positioning the system for future evolution toward microservices if needed, while maintaining simplicity for initial deployment.
-
-**Why Modular Monolith:**
-
-1. **Right-Sized Complexity**: The system has ~3-5 core functional areas (auth, vehicle management, command execution, response handling, audit). This doesn't justify the operational overhead of full microservices.
-
-2. **Simplified Deployment**: Single deployment unit reduces operational complexity while maintaining Docker/Kubernetes compatibility for scaling.
-
-3. **Performance**: In-process communication between modules eliminates network latency for non-critical paths, helping meet the <2s response time requirement.
-
-4. **Development Velocity**: Simplified testing, debugging, and deployment accelerates initial development while the team is small.
-
-5. **Clear Module Boundaries**: Modules are designed as if they were microservices (separate code domains, dependency injection, interface contracts), making future extraction straightforward.
-
-**Service-Oriented Module Design:**
-
-- **API Gateway Module**: Request routing, authentication, rate limiting
-- **Auth Service Module**: User authentication, JWT management, RBAC
-- **Vehicle Service Module**: Vehicle registry, connection status, health monitoring
-- **Command Service Module**: SOVD command validation, execution orchestration, response handling
-- **Vehicle Connector Module**: Abstraction layer for vehicle communication (WebSocket/gRPC)
-- **Audit Service Module**: Comprehensive logging of all operations
-- **Database Access Layer**: Centralized data access with repository pattern
-
-**Modularity Enforcement:**
-- Each module has a clear public interface (domain facade)
-- Inter-module communication through dependency injection
-- No direct database access across module boundaries
-- Shared kernel for cross-cutting concerns (logging, config, utilities)
+**commands:**
+```
+command_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+user_id: UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE
+vehicle_id: UUID NOT NULL REFERENCES vehicles(vehicle_id) ON DELETE CASCADE
+command_name: VARCHAR(100) NOT NULL
+command_params: JSONB NOT NULL DEFAULT '{}'
+status: VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'failed'))
+error_message: TEXT
+submitted_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
+completed_at: TIMESTAMP WITH TIME ZONE
 ```
 
-### Context: key-components (from 01_Plan_Overview_and_Setup.md)
-
-```markdown
-*   **Key Components/Services:**
-    *   **Web Application (SPA)**: React-based frontend for authentication, vehicle selection, command execution, response viewing
-    *   **API Gateway (Nginx)**: Routes requests, terminates TLS, serves static files, load balances
-    *   **Application Server (FastAPI)**: Core business logic with modular services
-        *   **Auth Service Module**: JWT generation/validation, password hashing, RBAC enforcement
-        *   **Vehicle Service Module**: Vehicle registry, connection status, health monitoring
-        *   **Command Service Module**: SOVD command validation, execution orchestration, response aggregation
-        *   **Audit Service Module**: Structured logging, audit trail persistence
-        *   **SOVD Protocol Handler**: SOVD 2.0 specification compliance, command encoding, response decoding
-    *   **WebSocket Server (FastAPI)**: Real-time streaming of command responses (embedded in Application Server)
-    *   **Vehicle Connector Service**: Abstraction layer for gRPC/WebSocket communication with vehicles
-    *   **PostgreSQL Database**: Persistent storage for users, vehicles, commands, responses, sessions, audit logs
-    *   **Redis Cache**: Session storage, vehicle status caching, Pub/Sub for response events
+**responses:**
+```
+response_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+command_id: UUID NOT NULL REFERENCES commands(command_id) ON DELETE CASCADE
+response_payload: JSONB NOT NULL
+sequence_number: INTEGER NOT NULL
+is_final: BOOLEAN NOT NULL DEFAULT false
+received_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
 ```
 
-### Context: communication-patterns (from 01_Plan_Overview_and_Setup.md)
+**sessions:**
+```
+session_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+user_id: UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE
+refresh_token: VARCHAR(500) NOT NULL UNIQUE
+expires_at: TIMESTAMP WITH TIME ZONE NOT NULL
+created_at: TIMESTAMP WITH TIME ZONE DEFAULT now()
+```
 
-```markdown
-*   **Communication Patterns:**
-    *   **Synchronous Request/Response (REST)**: Auth endpoints (login/logout/refresh), vehicle listing, command submission, history retrieval
-    *   **Asynchronous Streaming (WebSocket)**: Real-time command response delivery, live vehicle status updates, command execution status
-    *   **Event-Driven Internal (Redis Pub/Sub)**: Decouples Vehicle Connector from WebSocket Server; response events published to channels, subscribed by WebSocket clients
-    *   **gRPC (Vehicle Communication)**: Efficient binary protocol for backend ↔ vehicle communication; supports server-streaming for multi-part responses
+**audit_logs:**
+```
+log_id: UUID PRIMARY KEY DEFAULT gen_random_uuid()
+user_id: UUID REFERENCES users(user_id) ON DELETE SET NULL
+vehicle_id: UUID REFERENCES vehicles(vehicle_id) ON DELETE SET NULL
+command_id: UUID REFERENCES commands(command_id) ON DELETE SET NULL
+action: VARCHAR(100) NOT NULL
+entity_type: VARCHAR(50) NOT NULL
+entity_id: UUID
+details: JSONB DEFAULT '{}'
+ip_address: VARCHAR(45)
+user_agent: TEXT
+timestamp: TIMESTAMP WITH TIME ZONE DEFAULT now()
 ```
 
 ---
@@ -298,76 +210,92 @@ The following analysis is based on my direct review of the current codebase. Use
 ### Relevant Existing Code
 
 *   **File:** `docs/diagrams/component_diagram.puml`
-    *   **Summary:** This file contains an existing component diagram but it does NOT use the C4 PlantUML library as specified in the Architecture Blueprint. It uses standard PlantUML syntax with custom styling.
-    *   **Recommendation:** You MUST REPLACE this file completely with a new diagram that uses the official C4 PlantUML library (`!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml`). The Architecture Blueprint Section 3.5 provides the exact structure you should follow.
-    *   **Critical:** The existing diagram has good content coverage showing all required components, but the syntax must be converted to use C4 macros like `Component()`, `Container_Boundary()`, `Rel()`, etc.
+    *   **Summary:** This is an existing PlantUML C4 Component diagram that shows the internal structure of the Application Server. It uses the C4-PlantUML library and follows specific conventions for the project.
+    *   **Recommendation:** You MUST follow the same PlantUML conventions used in this file. Specifically:
+        - Start with `@startuml` and end with `@enduml`
+        - Use appropriate PlantUML includes/imports if needed (though ERD may not need C4 library)
+        - Follow consistent naming conventions
+        - Include descriptive comments where appropriate
+        - Use proper PlantUML entity relationship diagram syntax
 
 *   **File:** `docs/diagrams/container_diagram.puml`
-    *   **Summary:** This file contains an existing container diagram but similarly does NOT use the C4 PlantUML library as required. It uses standard PlantUML component syntax.
-    *   **Recommendation:** You MUST REPLACE this file completely with a new diagram using the official C4 PlantUML library (`!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml`). The Architecture Blueprint Section 3.4 provides the exact reference implementation.
-    *   **Critical:** The existing diagram covers most required containers (Web App, API Gateway, Application Server, PostgreSQL, Redis, Connected Vehicle) but needs to be rewritten using C4 macros like `Container()`, `ContainerDb()`, `Person()`, `System_Ext()`, `Rel()`, etc.
+    *   **Summary:** This is the C4 Container diagram showing the major deployable containers (Web App, API Gateway, Application Server, etc.). It also uses the C4-PlantUML library.
+    *   **Recommendation:** Your ERD should maintain consistency with the documentation style. The existing diagrams are well-commented and use clear, descriptive labels. You SHOULD follow this pattern for your entity and field descriptions.
 
-*   **File:** `README.md` (root)
-    *   **Summary:** The project README is complete and well-structured, providing project overview, goals, technology stack, and quick start instructions.
-    *   **Note:** This file was created in task I1.T1 and meets all acceptance criteria. No changes needed for this task.
+*   **File:** `backend/pyproject.toml`
+    *   **Summary:** This file contains the project configuration for Python tooling including Black (line length 100), Ruff, and mypy with strict settings.
+    *   **Recommendation:** While this doesn't directly affect PlantUML, it shows the project values code quality and strict typing. Your ERD should similarly be precise and well-structured with clear type definitions.
 
-*   **File:** `Makefile` (root)
-    *   **Summary:** The Makefile provides convenient targets for `up`, `down`, `test`, `lint`, and `logs` commands.
-    *   **Note:** This file was created in task I1.T1. The project follows a "make-based" workflow for development commands.
+*   **File:** `README.md`
+    *   **Summary:** The project README shows this is a professional enterprise application with strict requirements (80%+ test coverage, security focus, PostgreSQL 15+, modern tech stack).
+    *   **Recommendation:** Your ERD MUST reflect enterprise-grade database design practices: proper normalization, appropriate use of foreign keys with ON DELETE behaviors, JSONB for flexible data, and comprehensive indexing.
 
 ### Implementation Tips & Notes
 
-*   **Tip - C4 PlantUML Syntax:** The Architecture Blueprint provides EXACT PlantUML code examples in Sections 3.4 and 3.5 that use the official C4 library. You should use these as your PRIMARY reference and adapt them to ensure all components mentioned in the task description are included.
+*   **Tip - PlantUML ERD Syntax:** PlantUML supports entity relationship diagrams using the following syntax:
+    ```
+    entity "table_name" as table_alias {
+      * field_name : TYPE <<PK>>
+      --
+      * field_name : TYPE <<FK>>
+      field_name : TYPE <<UNIQUE>>
+    }
+    ```
+    Use `*` prefix for NOT NULL fields, and relationship arrows like `||--o{` for one-to-many.
 
-*   **Tip - Component Diagram Requirements:** The task description specifies these components MUST be included in the Component Diagram:
-    - API Router
-    - Auth Controller, Vehicle Controller, Command Controller
-    - Auth Service, Vehicle Service, Command Service, Audit Service
-    - SOVD Protocol Handler
-    - Repository Layer (Vehicle/Command/Response/User repositories)
-    - Shared Kernel
+*   **Tip - Documentation:** Add a title and description at the top of the PlantUML file. The existing diagrams use clear titles like "Component Diagram - Application Server". You SHOULD use a similar format: "Entity Relationship Diagram - SOVD Database Schema" or similar.
 
-    The existing diagram has all of these PLUS additional components (WebSocket Handler, Session Repository, Audit Log Repository, WebSocket Manager). You should INCLUDE all components from both the task description and the Architecture Blueprint to be comprehensive.
+*   **Note - File Location:** The acceptance criteria specifically states the file must be committed to `docs/diagrams/erd.puml`. This location already exists in the project structure and contains the other diagram files.
 
-*   **Tip - Container Diagram Requirements:** The task description specifies these containers MUST be included:
-    - Web App (React SPA)
-    - API Gateway (Nginx)
-    - Application Server (FastAPI)
-    - WebSocket Server (FastAPI embedded)
-    - Vehicle Connector
-    - PostgreSQL
-    - Redis
+*   **Note - Compilation Verification:** The acceptance criteria requires that "PlantUML file compiles without errors". You can test compilation using:
+    - Online: http://www.plantuml.com/plantuml/
+    - Command line: `plantuml -testdot` (if plantuml is installed)
+    - The project may have a make target or script for diagram generation later
 
-    The Architecture Blueprint adds Identity Provider as an external system. Include ALL of these for completeness.
+*   **Important - Constraints and Indexes:** While PlantUML ERD doesn't have built-in syntax for detailed constraints and indexes, the task description says to "Include constraints (UNIQUE, NOT NULL) and index hints in comments". You SHOULD add comments within the entity definitions or at the end of the diagram documenting the critical indexes listed in the architecture context.
 
-*   **Tip - Communication Protocols:** The task explicitly requires "communication protocols labeled" in the Container Diagram. Use the `Rel()` macro's third parameter to specify protocols like "HTTPS", "WSS", "gRPC over TLS", "Redis Pub/Sub", "SQL (asyncpg)", etc. The Architecture Blueprint examples show exactly how to do this.
+*   **Important - JSONB Fields:** PostgreSQL's JSONB type is crucial for this architecture (used in command_params, response_payload, metadata, details). In your ERD, represent these as `JSONB` type and add comments explaining what kind of data they store.
 
-*   **Warning - PlantUML Testing:** The acceptance criteria require testing diagrams "with `plantuml -testdot` or online renderer". PlantUML is NOT installed in the local environment. You MUST instruct the Coder Agent to use an online PlantUML renderer (like https://www.plantuml.com/plantuml/ or http://www.plantuml.com/plantuml/uml/) to validate the diagrams compile without errors. Alternatively, suggest installing PlantUML locally if needed.
+*   **Important - Cascade Behaviors:** Pay attention to the ON DELETE behaviors:
+    - commands and sessions should CASCADE when user is deleted
+    - responses should CASCADE when command is deleted
+    - audit_logs should SET NULL when referenced entities are deleted (for audit integrity)
 
-*   **Warning - File Overwrites:** Both target files already exist with content. Your task is to REPLACE them, not append. Make sure to use the Write tool (not Edit) to completely overwrite the existing files with the new C4-compliant diagrams.
+*   **Warning - Completeness Check:** The acceptance criteria is very specific: "All 6 entities present" and "All fields match Architecture Blueprint Section 3.6". Make sure you include EVERY field listed in the architectural context above. Missing even one field will fail the acceptance criteria.
 
-*   **Note - C4 Layout Directives:** The Architecture Blueprint examples use `LAYOUT_TOP_DOWN()` for Container Diagram and `LAYOUT_WITH_LEGEND()` for Component Diagram. These are C4 library helpers that improve diagram readability. You SHOULD use these same directives.
+*   **Style Recommendation:** Based on the existing PlantUML diagrams in the project, they use clear, readable layouts. For ERD, consider:
+    - Grouping related entities visually (e.g., auth-related: users, sessions; command execution: commands, responses)
+    - Using clear relationship lines with cardinality markers
+    - Adding notes or comments for complex relationships or design decisions
 
-*   **Note - Directory Structure Convention:** The project follows the directory structure from Plan Section 3, which places PlantUML source files in `docs/diagrams/` with rendered outputs in `docs/diagrams/rendered/` subdirectory. You do NOT need to generate rendered images - only the `.puml` source files.
+### Project Conventions Observed
 
-*   **Note - Git Workflow:** The acceptance criteria state "Files committed to `docs/diagrams/` directory". The Coder Agent should be instructed that files will be committed as part of the normal git workflow (this task doesn't require running git commands).
+*   **UUIDs everywhere:** All primary keys are UUIDs, not auto-increment integers
+*   **Timestamps:** Consistent use of `TIMESTAMP WITH TIME ZONE` with `DEFAULT now()`
+*   **Audit trail:** The audit_logs table has nullable foreign keys to preserve history even when entities are deleted
+*   **JSONB for flexibility:** Used for semi-structured data that may evolve (params, payloads, metadata)
+*   **Status enums:** Use VARCHAR with CHECK constraints rather than enum types (more flexible for migrations)
+*   **Soft deletes NOT used:** The schema uses CASCADE and SET NULL, not soft deletes with deleted_at columns
 
 ### Quality Checklist for Coder Agent
 
 Before completing this task, ensure:
 
-1. ✅ Both `.puml` files use the official C4 PlantUML library includes
-2. ✅ Container Diagram uses `C4_Container.puml` and appropriate macros
-3. ✅ Component Diagram uses `C4_Component.puml` and appropriate macros
-4. ✅ All components/containers from task description are present
-5. ✅ All components/containers from Architecture Blueprint are present
-6. ✅ Communication protocols are labeled in relationships
-7. ✅ Diagrams compile without errors (validated via online renderer)
-8. ✅ File structure matches: API Router → Controllers → Services → Repositories → Database
-9. ✅ External systems (Vehicle, Identity Provider) are properly marked as `System_Ext()`
-10. ✅ Databases use `ContainerDb()` macro
-11. ✅ Diagram titles match Architecture Blueprint style
-12. ✅ Notes/legends provide additional context where helpful
+1. ✅ PlantUML file starts with `@startuml` and ends with `@enduml`
+2. ✅ Title clearly identifies this as the database ERD
+3. ✅ All 6 entities present: users, vehicles, commands, responses, sessions, audit_logs
+4. ✅ All fields from architectural context included for each entity
+5. ✅ Primary keys marked with `<<PK>>`
+6. ✅ Foreign keys marked with `<<FK>>`
+7. ✅ UNIQUE constraints marked (username, email, vin, refresh_token)
+8. ✅ NOT NULL fields prefixed with `*`
+9. ✅ Data types specified for all fields (UUID, VARCHAR(n), TEXT, INTEGER, JSONB, BOOLEAN, TIMESTAMP WITH TIME ZONE)
+10. ✅ Relationships shown: users → commands, users → sessions, users → audit_logs, vehicles → commands, vehicles → audit_logs, commands → responses, commands → audit_logs
+11. ✅ Relationship cardinalities correct (1:many for all)
+12. ✅ Comments/notes added documenting critical indexes (minimum 15 indexes listed)
+13. ✅ Comments explain JSONB field purposes
+14. ✅ Comments note ON DELETE behaviors (CASCADE, SET NULL)
+15. ✅ File compiles without errors (validated via online PlantUML renderer)
 
 ---
 

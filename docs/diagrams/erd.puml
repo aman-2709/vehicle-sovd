@@ -1,0 +1,165 @@
+@startuml
+title Entity Relationship Diagram - SOVD Database Schema
+
+' This ERD defines the complete database schema for the SOVD (Service-Oriented Vehicle Diagnostics) platform
+' Database: PostgreSQL 15+
+' All primary keys use UUID type with gen_random_uuid()
+' All timestamps use TIMESTAMP WITH TIME ZONE with now() default
+
+entity "users" as users {
+  * user_id : UUID <<PK>>
+  --
+  * username : VARCHAR(50) <<UNIQUE>>
+  * email : VARCHAR(255) <<UNIQUE>>
+  * password_hash : VARCHAR(255)
+  * role : VARCHAR(20)
+  * created_at : TIMESTAMP WITH TIME ZONE
+  * updated_at : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: role CHECK (role IN ('engineer', 'admin'))
+}
+
+entity "vehicles" as vehicles {
+  * vehicle_id : UUID <<PK>>
+  --
+  * vin : VARCHAR(17) <<UNIQUE>>
+  * make : VARCHAR(100)
+  * model : VARCHAR(100)
+  * year : INTEGER
+  * connection_status : VARCHAR(20)
+  last_seen_at : TIMESTAMP WITH TIME ZONE
+  metadata : JSONB
+  * created_at : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: connection_status CHECK (status IN ('connected', 'disconnected', 'error'))
+  Note: metadata JSONB stores flexible vehicle-specific attributes
+}
+
+entity "commands" as commands {
+  * command_id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  * vehicle_id : UUID <<FK>>
+  * command_name : VARCHAR(100)
+  * command_params : JSONB
+  * status : VARCHAR(20)
+  error_message : TEXT
+  * submitted_at : TIMESTAMP WITH TIME ZONE
+  completed_at : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: status CHECK (status IN ('pending', 'in_progress', 'completed', 'failed'))
+  Note: command_params JSONB stores command-specific parameters
+  Note: ON DELETE CASCADE for user_id and vehicle_id
+}
+
+entity "responses" as responses {
+  * response_id : UUID <<PK>>
+  --
+  * command_id : UUID <<FK>>
+  * response_payload : JSONB
+  * sequence_number : INTEGER
+  * is_final : BOOLEAN
+  * received_at : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: response_payload JSONB stores streaming response data
+  Note: ON DELETE CASCADE for command_id
+}
+
+entity "sessions" as sessions {
+  * session_id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  * refresh_token : VARCHAR(500) <<UNIQUE>>
+  * expires_at : TIMESTAMP WITH TIME ZONE
+  * created_at : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: ON DELETE CASCADE for user_id
+}
+
+entity "audit_logs" as audit_logs {
+  * log_id : UUID <<PK>>
+  --
+  user_id : UUID <<FK>>
+  vehicle_id : UUID <<FK>>
+  command_id : UUID <<FK>>
+  * action : VARCHAR(100)
+  * entity_type : VARCHAR(50)
+  entity_id : UUID
+  details : JSONB
+  ip_address : VARCHAR(45)
+  user_agent : TEXT
+  * timestamp : TIMESTAMP WITH TIME ZONE
+  ..
+  Note: Foreign keys are nullable to preserve audit history
+  Note: details JSONB stores event-specific information
+  Note: ON DELETE SET NULL for user_id, vehicle_id, command_id
+}
+
+' Relationships with cardinality
+users ||--o{ commands : "submits"
+users ||--o{ sessions : "has"
+users ||--o{ audit_logs : "generates"
+vehicles ||--o{ commands : "receives"
+vehicles ||--o{ audit_logs : "triggers"
+commands ||--o{ responses : "produces"
+commands ||--o{ audit_logs : "logs"
+
+note right of users
+  **Critical Indexes:**
+  - UNIQUE INDEX on username
+  - UNIQUE INDEX on email
+  - INDEX on role (for RBAC filtering)
+end note
+
+note right of vehicles
+  **Critical Indexes:**
+  - UNIQUE INDEX on vin
+  - INDEX on connection_status (for filtering connected vehicles)
+  - INDEX on last_seen_at (for monitoring)
+end note
+
+note right of commands
+  **Critical Indexes:**
+  - INDEX on user_id (for user command history)
+  - INDEX on vehicle_id (for vehicle command history)
+  - INDEX on status (for filtering by execution status)
+  - INDEX on submitted_at (for time-based queries)
+  - COMPOSITE INDEX on (vehicle_id, status) (common query pattern)
+end note
+
+note right of responses
+  **Critical Indexes:**
+  - INDEX on command_id (for retrieving command responses)
+  - COMPOSITE INDEX on (command_id, sequence_number) (ordered retrieval)
+end note
+
+note right of sessions
+  **Critical Indexes:**
+  - UNIQUE INDEX on refresh_token
+  - INDEX on user_id (for session management)
+  - INDEX on expires_at (for cleanup of expired sessions)
+end note
+
+note right of audit_logs
+  **Critical Indexes:**
+  - INDEX on user_id (for user audit trail)
+  - INDEX on vehicle_id (for vehicle audit trail)
+  - INDEX on command_id (for command audit trail)
+  - INDEX on action (for filtering by event type)
+  - INDEX on timestamp (for time-based queries)
+end note
+
+note bottom
+  **Total Critical Indexes: 21**
+
+  **Design Principles:**
+  - All primary keys use UUID with gen_random_uuid()
+  - All timestamps use TIMESTAMP WITH TIME ZONE
+  - JSONB used for flexible semi-structured data
+  - VARCHAR with CHECK constraints for enums (migration-friendly)
+  - Cascade deletes maintain referential integrity
+  - Audit logs use SET NULL to preserve history
+  - No soft deletes; hard deletes with proper cascade behavior
+end note
+
+@enduml
