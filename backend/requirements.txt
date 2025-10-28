@@ -1,0 +1,17 @@
+# Python dependencies for SOVD Command WebApp Backend
+# This file will be populated with specific package versions in future iterations.
+#
+# Expected dependencies:
+# - fastapi
+# - uvicorn
+# - sqlalchemy
+# - alembic
+# - psycopg2-binary
+# - redis
+# - python-jose
+# - passlib
+# - pydantic
+# - python-multipart
+# - grpcio
+# - grpcio-tools
+# - websockets

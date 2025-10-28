@@ -1,0 +1,15 @@
+---
+# Docker Compose configuration for SOVD Command WebApp
+# This file will be populated in iteration I1.T5 with service definitions
+# for frontend, backend, database, and Redis services.
+
+version: '3.8'
+
+services: {}
+  # Service definitions will be added here
+
+volumes: {}
+  # Volume definitions will be added here
+
+networks: {}
+  # Network definitions will be added here
