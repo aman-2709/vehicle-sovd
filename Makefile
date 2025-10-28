@@ -11,9 +11,6 @@ help:
 
 # Start all services with docker-compose
 up:
-	@if grep -q "placeholder:" docker-compose.yml 2>/dev/null; then \
-		echo "Note: Using placeholder configuration. Full services will be configured in I1.T5"; \
-	fi
 	@docker-compose up -d
 
 # Stop all services
