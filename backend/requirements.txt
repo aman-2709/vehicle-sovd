@@ -1,17 +1,28 @@
 # Python dependencies for SOVD Command WebApp - Backend
-# Minimal dependencies for docker-compose task I1.T5
-# Full pinned versions will be added in task I1.T6
+# Production dependencies with pinned versions (Task I1.T6)
 
-# Core FastAPI dependencies (minimal versions for container startup)
+# Core FastAPI dependencies
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
-# Database drivers (for future database connection)
+# Database - PostgreSQL ORM and migrations
+sqlalchemy>=2.0.0
+alembic>=1.12.0
 asyncpg>=0.29.0
-sqlalchemy[asyncio]>=2.0.0
 
-# Redis client (for future Redis connection)
+# Redis client for caching and session management
 redis>=5.0.0
 
-# Development dependencies
-python-dotenv>=1.0.0
+# Authentication and security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Data validation and settings
+pydantic>=2.4.0
+pydantic-settings>=2.0.0
+
+# File upload support
+python-multipart>=0.0.6
+
+# Structured logging
+structlog>=23.2.0

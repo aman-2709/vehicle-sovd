@@ -10,25 +10,24 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I1.T5",
+  "task_id": "I1.T6",
   "iteration_id": "I1",
   "iteration_goal": "Foundation, Architecture Artifacts & Database Schema",
-  "description": "Create complete `docker-compose.yml` for local development environment. Services: `db` (postgres:15 image, environment variables for database name `sovd`, user `sovd_user`, password `sovd_pass`, volume mount for persistence `db_data`), `redis` (redis:7 image, port 6379 exposed), `backend` (build from `./backend`, depends_on db and redis, environment variables for DATABASE_URL and REDIS_URL, volume mount `./backend:/app` for hot reload, port 8000 exposed), `frontend` (build from `./frontend`, volume mount `./frontend:/app`, port 3000 exposed). Configure health checks for db and redis. Add comments explaining each service configuration.",
-  "agent_type_hint": "SetupAgent",
-  "inputs": "Plan Section 3 (Directory Structure); Architecture Blueprint Section 3.9 (Deployment View - Development Environment).",
+  "description": "Create `backend/requirements.txt` with pinned versions of core dependencies: `fastapi>=0.104.0`, `uvicorn[standard]>=0.24.0`, `sqlalchemy>=2.0.0`, `alembic>=1.12.0`, `asyncpg>=0.29.0` (PostgreSQL async driver), `redis>=5.0.0`, `python-jose[cryptography]>=3.3.0` (JWT), `passlib[bcrypt]>=1.7.4` (password hashing), `pydantic>=2.4.0`, `pydantic-settings>=2.0.0` (config management), `python-multipart>=0.0.6` (file uploads), `structlog>=23.2.0` (logging). Create `backend/requirements-dev.txt` with dev dependencies: `pytest>=7.4.0`, `pytest-asyncio>=0.21.0`, `httpx>=0.25.0` (async test client), `pytest-cov>=4.1.0` (coverage), `ruff>=0.1.0`, `black>=23.11.0`, `mypy>=1.7.0`. Configure `backend/pyproject.toml` with Black (line-length=100), Ruff (select rules: E, F, I, N, W, UP), and mypy (strict mode) settings.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Technology Stack from Plan Section 2.",
   "target_files": [
-    "docker-compose.yml",
-    "backend/Dockerfile",
-    "frontend/Dockerfile"
+    "backend/requirements.txt",
+    "backend/requirements-dev.txt",
+    "backend/pyproject.toml"
   ],
   "input_files": [],
-  "deliverables": "Functional docker-compose.yml with all services; minimal Dockerfiles for backend and frontend (development mode); documented environment variables.",
-  "acceptance_criteria": "`docker-compose up` starts all 4 services without errors (db, redis, backend, frontend); PostgreSQL accessible on localhost:5432 with credentials from docker-compose.yml; Redis accessible on localhost:6379; Backend service can connect to database and redis (verified by logs); Volume mounts enable hot reload (changing files reflects without rebuild); Health checks pass for db and redis; `make up` in Makefile executes `docker-compose up -d`; `make down` executes `docker-compose down`",
+  "deliverables": "Complete Python dependency files with pinned versions; pyproject.toml with linter/formatter configurations.",
+  "acceptance_criteria": "`pip install -r backend/requirements.txt` succeeds without errors; `pip install -r backend/requirements-dev.txt` succeeds; All dependencies from Technology Stack included; Versions are pinned or use compatible release specifier (`>=` with minor version); `black backend/` runs without errors (even on empty directory); `ruff check backend/` runs without errors; `mypy backend/` runs (may show errors on empty directory, acceptable); `pyproject.toml` includes `[tool.black]`, `[tool.ruff]`, `[tool.mypy]` sections",
   "dependencies": [
-    "I1.T1",
-    "I1.T4"
+    "I1.T1"
   ],
-  "parallelizable": false,
+  "parallelizable": true,
   "done": false
 }
 ```
@@ -39,91 +38,114 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: deployment-view (from Architecture Blueprint Section 3.9)
+### Context: technology-stack (from 02_Architecture_Overview.md)
 
-Based on the Architecture Manifest, the Deployment View section covers the target environment, deployment strategy for development and production, and CI/CD pipeline details.
+```markdown
+<!-- anchor: technology-stack -->
+### 3.2. Technology Stack Summary
 
-**Key Requirements for Development Environment:**
+<!-- anchor: stack-overview -->
+#### Technology Selection Matrix
 
-1. **Docker Compose orchestration** for local development
-2. **Four core services:**
-   - **PostgreSQL 15+** - Primary relational database
-   - **Redis 7** - Cache and Pub/Sub messaging
-   - **Backend (FastAPI)** - Application server with hot reload
-   - **Frontend (React+Vite)** - Development server with HMR
-
-3. **Service Configuration Requirements:**
-   - Database: postgres:15 image, sovd database, sovd_user/sovd_pass credentials
-   - Redis: redis:7 image, port 6379, persistence enabled
-   - Backend: Built from ./backend, depends on db+redis, env vars for connections, port 8000
-   - Frontend: Built from ./frontend, port 3000, Vite dev server
-
-4. **Development Features:**
-   - Volume mounts for hot reload (backend: ./backend:/app, frontend: ./frontend:/app)
-   - Health checks for db and redis to ensure service readiness
-   - Network isolation via Docker networks
-   - Persistent volumes for database data
-
-### Context: technology-stack (from Architecture Blueprint Section 2)
-
-**Backend Stack:**
-- Python 3.11+
-- FastAPI (async web framework)
-- Uvicorn (ASGI server)
-- SQLAlchemy 2.0 (ORM)
-- Asyncpg (PostgreSQL async driver)
-- Redis Python client
-
-**Frontend Stack:**
-- React 18
-- TypeScript
-- Vite (build tool with HMR)
-- Node 20
-
-**Infrastructure:**
-- PostgreSQL 15+ (primary database)
-- Redis 7 (caching, session storage, Pub/Sub)
-- Docker/Docker Compose (local development)
-- Kubernetes/Helm (production deployment)
-
-### Context: directory-structure (from Plan Section 3)
-
-**Root Directory Structure:**
-```
-sovd-command-webapp/
-├── backend/               # Python FastAPI backend
-│   ├── app/              # Application code
-│   ├── tests/            # Backend tests
-│   ├── Dockerfile        # Development Dockerfile
-│   ├── requirements.txt  # Python dependencies
-│   └── pyproject.toml    # Python project config
-├── frontend/             # React TypeScript frontend
-│   ├── src/              # Source code
-│   ├── public/           # Static assets
-│   ├── tests/            # Frontend tests
-│   ├── Dockerfile        # Development Dockerfile
-│   └── package.json      # Node.js dependencies
-├── infrastructure/       # Deployment configs
-├── docs/                # Documentation
-├── scripts/             # Utility scripts
-├── tests/               # E2E tests
-├── docker-compose.yml   # Development orchestration
-├── Makefile            # Build automation
-└── README.md           # Project documentation
+| **Layer/Concern** | **Technology** | **Justification** |
+|-------------------|----------------|-------------------|
+| **Frontend Framework** | React 18 + TypeScript | Industry-standard component model; TypeScript provides type safety; extensive ecosystem; strong community support; meets requirement. |
+| **Frontend State Management** | React Context + React Query | React Query for server state (caching, sync); Context for auth/global UI state; avoids Redux complexity for this scale. |
+| **Frontend Build** | Vite | Fast dev server and build times; superior to CRA; excellent TypeScript support; optimized production bundles. |
+| **Frontend UI Library** | Material-UI (MUI) | Comprehensive component library; automotive industry precedent; accessibility built-in; professional appearance. |
+| **Backend Framework** | Python FastAPI | Modern async framework; automatic OpenAPI generation (requirement); excellent WebSocket support; superior performance for I/O-bound operations; type hints align with TypeScript frontend. |
+| **Backend Language** | Python 3.11+ | FastAPI requirement; strong async/await support; extensive library ecosystem; type hints for maintainability. |
+| **API Style** | REST (OpenAPI 3.1)| Requirements explicitly request OpenAPI/Swagger docs; RESTful design well-understood; mature tooling. |
+| **Real-Time Communication** | WebSocket | Requirement for streaming responses; bidirectional; well-supported in browsers and FastAPI. |
+| **Database** | PostgreSQL 15+ | Required by spec; ACID compliance for audit logs; excellent JSON support (JSONB for command params/responses); proven scalability; robust backup/replication. |
+| **Database ORM** | SQLAlchemy 2.0 + Alembic | Industry-standard Python ORM; async support; type-safe; Alembic for migrations. |
+| **Authentication** | JWT (JSON Web Tokens) | Stateless; scalable; industry standard; supported by FastAPI middleware. |
+| **Auth Library** | python-jose + passlib | JWT encoding/decoding; secure password hashing (bcrypt); widely adopted. |
+| **Vehicle Communication** | gRPC (primary) + WebSocket (fallback) | gRPC for efficiency and strong typing (protobuf); WebSocket fallback for firewall compatibility; both support streaming. |
+| **API Gateway/Proxy** | Nginx (production) + Uvicorn (dev) | Nginx for TLS termination, static file serving, load balancing; Uvicorn ASGI server for FastAPI. |
+| **Containerization** | Docker + Docker Compose | Required by spec; industry standard; excellent local dev experience. |
+| **Container Orchestration** | Kubernetes (K8s) | Cloud-agnostic; auto-scaling; health checks; self-healing; strong AWS EKS integration. |
+| **Logging** | structlog + JSON formatter | Structured logging for machine parsing; integrates with ELK/CloudWatch; correlation IDs for tracing. |
+| **Monitoring** | Prometheus + Grafana | Open-source; excellent Kubernetes integration; custom metrics for SOVD operations; alerting. |
+| **Distributed Tracing** | OpenTelemetry + Jaeger | Cloud-agnostic; trace requests across frontend → backend → vehicle; performance analysis. |
+| **Secrets Management** | AWS Secrets Manager (cloud) + Docker secrets (local) | Automatic rotation; IAM integration; audit logs; encrypted storage. |
+| **CI/CD** | GitHub Actions | Requirements specify CI pipeline; free for public repos; excellent Docker integration; marketplace actions. |
+| **Testing - Backend** | pytest + pytest-asyncio + httpx | Standard Python testing; async test support; FastAPI test client based on httpx. |
+| **Testing - Frontend** | Vitest + React Testing Library | Vite-native; fast; compatible with Jest patterns; RTL for component testing. |
+| **E2E Testing** | Playwright | Modern E2E testing; multi-browser; excellent debugging; auto-wait reduces flakiness. |
+| **Code Quality - Frontend** | ESLint + Prettier + TypeScript | Requirements specified; catches errors; consistent formatting; type safety. |
+| **Code Quality - Backend** | Ruff + Black + mypy | Requirements specified Ruff (linter); Black (formatter); mypy (type checking). |
+| **API Documentation** | Swagger UI (auto-generated) | Requirement; FastAPI generates automatically; interactive testing; OpenAPI 3.1 spec. |
+| **Cloud Platform (Primary)** | AWS | Strong automotive industry adoption; comprehensive service catalog; mature Kubernetes (EKS); IoT Core for vehicle connectivity. |
+| **Cloud Services - Compute** | EKS (Elastic Kubernetes Service) | Managed Kubernetes; auto-scaling; integrates with ALB, IAM, CloudWatch. |
+| **Cloud Services - Database** | RDS for PostgreSQL | Managed database; automated backups; read replicas; encryption at rest. |
+| **Cloud Services - Load Balancer** | ALB (Application Load Balancer) | Layer 7 LB; WebSocket support; TLS termination; health checks; AWS WAF integration. |
+| **Cloud Services - Object Storage** | S3 | Backup storage for audit log exports; static asset hosting (frontend build). |
+| **Cloud Services - Networking** | VPC + Private Subnets | Secure network isolation; NAT Gateway for outbound vehicle communication. |
 ```
 
-### Context: communication-patterns (from Architecture Blueprint Section 3.7)
+### Context: plan-technology-stack (from 01_Plan_Overview_and_Setup.md)
 
-**Internal Service Communication:**
-- Backend ↔ Database: PostgreSQL wire protocol over TCP
-- Backend ↔ Redis: Redis protocol over TCP
-- Frontend ↔ Backend: HTTP/REST over port 8000
-- Backend internal: Redis Pub/Sub for event-driven communication
+```markdown
+<!-- anchor: technology-stack -->
+*   **Technology Stack:**
+    *   **Frontend:** React 18, TypeScript, Material-UI (MUI), React Query (state management), Vite (build tool)
+    *   **Backend:** Python 3.11+, FastAPI, Uvicorn (ASGI server), SQLAlchemy 2.0 (ORM), Alembic (migrations)
+    *   **Database:** PostgreSQL 15+ (with JSONB for flexible command/response storage)
+    *   **Caching/Messaging:** Redis 7 (session storage, Pub/Sub for real-time events, caching)
+    *   **Vehicle Communication:** gRPC (primary) with WebSocket fallback for SOVD command transmission
+    *   **API Gateway:** Nginx (production - TLS termination, load balancing, static files)
+    *   **Authentication:** JWT (python-jose library, passlib for password hashing)
+    *   **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
+    *   **CI/CD:** GitHub Actions
+    *   **Monitoring:** Prometheus + Grafana, structlog for structured logging
+    *   **Tracing:** OpenTelemetry + Jaeger
+    *   **Secrets Management:** Docker secrets (local), AWS Secrets Manager (production)
+    *   **Testing:** pytest + pytest-asyncio + httpx (backend), Vitest + React Testing Library (frontend), Playwright (E2E)
+    *   **Code Quality:** Ruff + Black + mypy (backend), ESLint + Prettier + TypeScript (frontend)
+    *   **Deployment:** AWS EKS (primary cloud target), with cloud-agnostic design
+```
 
-**Connection Requirements:**
-- DATABASE_URL format: `postgresql+asyncpg://user:password@host:port/database`
-- REDIS_URL format: `redis://host:port/db`
-- All connections must be configurable via environment variables
+### Context: key-technology-decisions (from 02_Architecture_Overview.md)
+
+```markdown
+<!-- anchor: stack-rationale -->
+#### Key Technology Decisions
+
+**FastAPI over Node.js/Express:**
+- Superior async/await model for handling concurrent vehicle connections
+- Automatic OpenAPI generation saves development time
+- Native WebSocket support crucial for streaming responses
+- Type hints improve maintainability and align with TypeScript frontend philosophy
+- Performance benchmarks show FastAPI competitive with Node.js for I/O-bound operations
+
+**PostgreSQL over NoSQL:**
+- Requirements suggest relational data (vehicles, commands, responses with foreign keys)
+- ACID compliance critical for audit logs
+- JSONB columns provide flexibility for variable command parameters while maintaining query capability
+- Mature ecosystem for backups, replication, and monitoring
+
+**gRPC for Vehicle Communication:**
+- Efficient binary protocol reduces bandwidth (important for cellular connections)
+- Strong typing with protobuf prevents protocol errors
+- Native support for streaming (server-streaming for responses)
+- HTTP/2 multiplexing reduces connection overhead
+- WebSocket fallback handles restrictive firewall scenarios
+
+**Kubernetes over Simpler Orchestration:**
+- Future-proof: can scale from single instance to multi-region
+- Cloud-agnostic (can migrate between AWS EKS, GCP GKE, Azure AKS)
+- Rich ecosystem (Helm charts, operators, service mesh options)
+- Auto-scaling based on load
+- Self-healing for reliability
+
+**Prometheus/Grafana over Cloud-Native Monitoring:**
+- Cloud-agnostic (avoid vendor lock-in)
+- Powerful query language (PromQL) for custom SOVD metrics
+- Grafana provides automotive-specific dashboards
+- Open-source reduces costs
+- Can still integrate with CloudWatch for AWS-specific metrics
+```
 
 ---
 
@@ -133,313 +155,79 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-#### File: `docker-compose.yml` (Line 1-24)
-- **Summary:** This file currently contains a placeholder configuration with a single "hello-world" service. It includes the correct version (3.8), network definition (sovd-network), and volume definition (db_data).
-- **Recommendation:** You MUST replace the placeholder service with the four required services (db, redis, backend, frontend) while preserving the existing network and volume configurations.
-- **Important Notes:**
-  - The comments on lines 12-16 list exactly the services you need to add
-  - The network "sovd-network" is already defined and should be used by all services
-  - The volume "db_data" is already defined and should be mounted to PostgreSQL
+*   **File:** `backend/requirements.txt`
+    *   **Summary:** Currently contains minimal dependencies with comments indicating this file is a placeholder for I1.T6. Contains basic FastAPI, uvicorn, asyncpg, sqlalchemy, redis, and python-dotenv with minimal version constraints.
+    *   **Recommendation:** You MUST completely replace this file with the full pinned dependency list as specified in the task description. The current minimal dependencies were only for docker-compose startup in I1.T5.
 
-#### File: `backend/Dockerfile` (Line 1-62)
-- **Summary:** This is a well-structured development Dockerfile for the FastAPI backend. It uses python:3.11-slim base image, installs PostgreSQL client tools, sets up hot reload with uvicorn, and includes comprehensive health checks.
-- **Recommendation:** This Dockerfile is ALREADY COMPLETE and suitable for the task. You do NOT need to modify it. Reference it in docker-compose.yml with `build: ./backend` and `dockerfile: Dockerfile`.
-- **Key Features Already Implemented:**
-  - Hot reload enabled (line 61: `--reload` flag)
-  - Volume mount ready (watches /app directory)
-  - Health check configured (line 50-51)
-  - Port 8000 exposed (line 46)
-  - PostgreSQL and Redis client libraries supported (line 22-27)
+*   **File:** `backend/pyproject.toml`
+    *   **Summary:** Already has a basic structure with tool configurations for black, ruff, mypy, pytest, and coverage. Line length is set to 100, target Python version is 3.11, and basic linting rules are configured.
+    *   **Recommendation:** You SHOULD review and ensure the existing configuration matches the task requirements. You MAY need to enhance the `[tool.ruff.lint]` section to include the specific rule codes (E, F, I, N, W, UP) and ensure mypy is configured with strict mode settings.
 
-#### File: `frontend/Dockerfile` (Line 1-57)
-- **Summary:** This is a well-configured development Dockerfile for the React frontend using Node 20 Alpine. It includes Vite dev server setup, HMR support, and health checks.
-- **Recommendation:** This Dockerfile is ALREADY COMPLETE and ready for use. Reference it in docker-compose.yml with `build: ./frontend` and `dockerfile: Dockerfile`.
-- **Key Features Already Implemented:**
-  - Vite dev server with HMR (line 56)
-  - Host 0.0.0.0 for Docker networking (line 56)
-  - Port 3000 exposed (line 42)
-  - Health check configured (line 46-47)
-  - Volume mount ready (watches /app directory)
+*   **File:** `backend/Dockerfile`
+    *   **Summary:** This is the development Dockerfile that installs dependencies from requirements.txt. It has a fallback `|| true` in case requirements.txt is empty or minimal.
+    *   **Recommendation:** After updating requirements.txt, this Dockerfile will properly install all dependencies during the next `docker-compose up --build`. No changes to the Dockerfile are needed for this task.
 
-#### File: `Makefile` (Line 1-41)
-- **Summary:** The Makefile contains predefined targets for common operations. The `up` and `down` targets are already configured correctly.
-- **Recommendation:** You MUST ensure your docker-compose.yml works with the existing Makefile commands. Specifically:
-  - Line 14: `make up` runs `docker-compose up -d` (detached mode)
-  - Line 18: `make down` runs `docker-compose down`
-- **Important:** The -d flag means services should run in background. Ensure your services are configured to handle this properly.
+*   **File:** `backend/app/main.py`
+    *   **Summary:** Contains a minimal FastAPI application with a health check endpoint and CORS middleware configured for the frontend.
+    *   **Recommendation:** This file will remain unchanged for this task. Future tasks will add more functionality to this application entry point.
 
-#### File: `scripts/init_db.sh` (Line 1-364)
-- **Summary:** This is a comprehensive database initialization script that connects to PostgreSQL, executes the schema SQL file, and verifies the setup. It supports both individual connection parameters and DATABASE_URL.
-- **Recommendation:** Your docker-compose.yml MUST provide the correct PostgreSQL connection parameters that this script expects. The script defaults are:
-  - POSTGRES_HOST: localhost (line 31)
-  - POSTGRES_PORT: 5432 (line 32)
-  - POSTGRES_DB: sovd (line 33)
-  - POSTGRES_USER: postgres (line 34)
-  - POSTGRES_PASSWORD: [required via env] (line 35)
-- **Critical:** The script looks for the SQL file at `$PROJECT_ROOT/docs/api/initial_schema.sql` (line 44). This file EXISTS and is ready.
+*   **File:** `docker-compose.yml`
+    *   **Summary:** Orchestrates the complete development environment including db (PostgreSQL), redis, backend, and frontend services. The backend service mounts the source code for hot reload.
+    *   **Recommendation:** No changes needed to docker-compose.yml for this task. The backend service will automatically pick up the new dependencies when rebuilt.
 
-#### File: `docs/api/initial_schema.sql` (Line 1-367)
-- **Summary:** This is a complete, production-ready SQL schema with 6 tables (users, vehicles, commands, responses, sessions, audit_logs), 21 indexes, and seed data for 2 users and 2 vehicles.
-- **Recommendation:** This schema is ready for use. Your docker-compose.yml should ensure PostgreSQL is running with the correct database name (sovd) so this script can be executed successfully.
-- **Important:** The seed data includes:
-  - Admin user: admin/admin123 (UUID: 00000000-0000-0000-0000-000000000001)
-  - Engineer user: engineer/engineer123 (UUID: 00000000-0000-0000-0000-000000000002)
-  - Two test vehicles with VINs: TESTVIN0000000001, TESTVIN0000000002
-
-#### File: `README.md` (Line 53-241)
-- **Summary:** The README contains detailed documentation about the expected docker-compose setup, including service descriptions, ports, credentials, and usage examples.
-- **Recommendation:** You MUST ensure your docker-compose.yml matches ALL the specifications documented in the README, particularly:
-  - Database credentials: sovd_user / sovd_pass (line 80, 91)
-  - Database name: sovd (line 90)
-  - Port mappings: frontend:3000, backend:8000, db:5432, redis:6379 (lines 77-81)
-  - Volume names: sovd-db-data, sovd-redis-data (lines 92, 98)
-  - Service names: db, redis, backend, frontend (lines 87-107)
-- **Critical:** Lines 87-111 provide the EXACT service specifications you must implement.
+*   **File:** `Makefile`
+    *   **Summary:** Contains targets for up, down, test, lint, and logs. The lint target already runs ruff, black, and mypy on the backend code.
+    *   **Recommendation:** You can use `make lint` after completing this task to verify that the linting tools work correctly with the empty codebase.
 
 ### Implementation Tips & Notes
 
-#### Tip #1: Environment Variable Configuration
-Your docker-compose.yml MUST set the following environment variables for the backend service:
-- `DATABASE_URL`: Should be in the format `postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd`
-- `REDIS_URL`: Should be in the format `redis://redis:6379/0`
-- `PYTHONUNBUFFERED`: Set to `1` (already in Dockerfile but can be reinforced)
+*   **Tip:** The pyproject.toml file already exists with reasonable defaults. You should **enhance** it rather than replace it completely. Specifically, verify that:
+    - `[tool.black]` section has `line-length = 100` (already present)
+    - `[tool.ruff.lint]` section has `select = ["E", "F", "I", "N", "W", "UP"]` (currently present, verify exact match)
+    - `[tool.mypy]` section has strict mode settings like `disallow_untyped_defs = true` (already present)
 
-Note: Use the Docker service name (`db`, `redis`) as hostnames, NOT `localhost`. Docker Compose creates a network where services can reference each other by name.
+*   **Tip:** For requirements.txt, the task specifies "pinned versions" which means using `>=` with specific versions. The current file uses this format already, so you should follow the same pattern but with the complete list of dependencies.
 
-#### Tip #2: Service Dependencies and Health Checks
-The README documentation (lines 87-111) specifies that:
-- Backend depends on: db, redis (line 104)
-- Frontend depends on: backend (line 110)
+*   **Tip:** The task requires `pydantic-settings>=2.0.0` which is the new package name in Pydantic v2. Don't use the old `pydantic[dotenv]` syntax.
 
-You MUST use `depends_on` with health check conditions to ensure proper startup order:
-```yaml
-depends_on:
-  db:
-    condition: service_healthy
-  redis:
-    condition: service_healthy
+*   **Note:** The acceptance criteria states that running `black backend/` and `ruff check backend/` should succeed even on an empty directory. The current backend/app/ directory has minimal code (just main.py and __init__.py files), so these tools should run successfully once installed.
+
+*   **Note:** The task specifies `python-jose[cryptography]>=3.3.0` with the cryptography extra, and `passlib[bcrypt]>=1.7.4` with the bcrypt extra. Make sure to include the extras in square brackets.
+
+*   **Note:** The task mentions `python-multipart>=0.0.6` for file uploads. This is a FastAPI dependency for handling multipart form data, which will be needed for future features.
+
+*   **Warning:** After updating requirements.txt, you will need to rebuild the backend Docker container with `docker-compose up -d --build backend` to install the new dependencies. The acceptance criteria require that the pip install commands succeed, which can be tested by running them inside the container or locally.
+
+*   **Best Practice:** Create requirements-dev.txt as a separate file that includes ALL development dependencies. These should NOT be installed in production Docker builds. The current Dockerfile only installs from requirements.txt, which is correct.
+
+*   **Best Practice:** The pyproject.toml file should be comprehensive enough to configure all the development tools mentioned (black, ruff, mypy, pytest). The existing configuration is a good foundation, but verify each tool section against the task requirements.
+
+*   **Documentation Note:** The README.md mentions running tests and linters with `make test` and `make lint`. After this task, these commands should work correctly with the newly installed tools.
+
+### File Creation Order
+
+1. **First:** Update `backend/requirements.txt` with the complete list of pinned production dependencies
+2. **Second:** Create `backend/requirements-dev.txt` with development and testing dependencies
+3. **Third:** Enhance `backend/pyproject.toml` to ensure all tool configurations meet the task specifications
+4. **Finally:** Test that the files are correct by attempting to install dependencies (either locally or by rebuilding the Docker container)
+
+### Acceptance Criteria Verification
+
+After completing this task, you should verify:
+
+1. ✅ `pip install -r backend/requirements.txt` succeeds without errors
+2. ✅ `pip install -r backend/requirements-dev.txt` succeeds without errors
+3. ✅ All dependencies from the Technology Stack are included
+4. ✅ Versions use `>=` with specific minor versions
+5. ✅ `black backend/` runs without errors
+6. ✅ `ruff check backend/` runs without errors
+7. ✅ `mypy backend/` runs (errors on empty directory are acceptable)
+8. ✅ `pyproject.toml` includes all required tool sections
+
+The easiest way to verify these is to rebuild the backend container and run the make targets:
+```bash
+docker-compose up -d --build backend
+docker-compose exec backend black app/
+docker-compose exec backend ruff check app/
+docker-compose exec backend mypy app/
 ```
-
-This ensures the backend waits for db and redis to be healthy before starting.
-
-#### Tip #3: Volume Mounts for Hot Reload
-The Dockerfiles are configured to watch the /app directory for changes. Your docker-compose.yml MUST mount:
-- Backend: `./backend:/app` (enables uvicorn --reload to detect changes)
-- Frontend: `./frontend:/app` (enables Vite HMR to detect changes)
-
-IMPORTANT: Mount only the application directory, not the entire project root. This prevents unnecessary file watching and improves performance.
-
-#### Tip #4: PostgreSQL Configuration
-Based on the init_db.sh script analysis:
-- The database must be created by PostgreSQL on startup
-- Use the `POSTGRES_DB` environment variable to auto-create the database
-- The credentials MUST match what's expected: sovd_user / sovd_pass
-- The database name MUST be: sovd
-
-PostgreSQL official image automatically creates a database if you provide these environment variables:
-- `POSTGRES_DB=sovd`
-- `POSTGRES_USER=sovd_user`
-- `POSTGRES_PASSWORD=sovd_pass`
-
-#### Tip #5: Redis Persistence
-The README mentions "AOF persistence enabled" (line 97). You SHOULD add Redis command arguments to enable AOF:
-```yaml
-command: redis-server --appendonly yes
-```
-
-This ensures Redis data is persisted to the sovd-redis-data volume.
-
-#### Tip #6: Health Check Configuration
-Both Dockerfiles include health checks, but docker-compose.yml needs its own health check definitions for dependency management:
-
-For PostgreSQL (db service):
-```yaml
-healthcheck:
-  test: ["CMD-SHELL", "pg_isready -U sovd_user -d sovd"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-```
-
-For Redis (redis service):
-```yaml
-healthcheck:
-  test: ["CMD", "redis-cli", "ping"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-```
-
-These checks ensure services are truly ready before dependents start.
-
-#### Warning #1: Volume Name Consistency
-The README specifies volume names as `sovd-db-data` and `sovd-redis-data` (lines 92, 98). However, your placeholder docker-compose.yml only defines `db_data`. You MUST:
-1. Rename the existing volume from `db_data` to `sovd-db-data`
-2. Add a new volume `sovd-redis-data` for Redis
-3. Update the mount paths accordingly
-
-#### Warning #2: Port Conflicts
-The README troubleshooting section (lines 182-185) warns about port conflicts. Your docker-compose.yml SHOULD include clear comments about which ports are exposed and why, to help users identify conflicts quickly.
-
-#### Note #1: Network Configuration
-The placeholder docker-compose.yml defines a bridge network `sovd-network`. You SHOULD:
-1. Keep this network definition
-2. Add all four services to this network (either explicitly or by default)
-3. This enables service-to-service communication via DNS names
-
-#### Note #2: Restart Policies
-For development, services SHOULD have restart policies to handle transient failures:
-- Use `restart: unless-stopped` for db and redis (infrastructure services)
-- Use `restart: on-failure` for backend and frontend (application services)
-
-This ensures the development environment is resilient to temporary issues.
-
-#### Note #3: Comments and Documentation
-The task description explicitly requires: "Add comments explaining each service configuration." You MUST add:
-1. A header comment explaining the purpose of the file
-2. Per-service comments explaining each service's role
-3. Comments for critical configuration options (environment variables, volumes, health checks)
-
-#### Note #4: YAML Best Practices
-Follow these YAML formatting standards:
-- Use 2-space indentation (consistent with placeholder)
-- Use `version: '3.8'` (already present)
-- Keep the file organized: services, networks, volumes (in that order)
-- Use quotes for string values with special characters
-- Use YAML anchors/aliases if there's repeated configuration (optional but recommended)
-
----
-
-## 4. Validation Checklist
-
-Before completing the task, verify that your docker-compose.yml meets ALL these criteria:
-
-### Service Configuration
-- [ ] Four services defined: db, redis, backend, frontend
-- [ ] All services connected to sovd-network
-- [ ] PostgreSQL: postgres:15 image, sovd database, sovd_user/sovd_pass
-- [ ] Redis: redis:7 image, port 6379, AOF persistence enabled
-- [ ] Backend: builds from ./backend, ports 8000:8000, volume mounted
-- [ ] Frontend: builds from ./frontend, ports 3000:3000, volume mounted
-
-### Dependencies and Health Checks
-- [ ] db service has pg_isready health check
-- [ ] redis service has redis-cli ping health check
-- [ ] backend depends_on db and redis with service_healthy condition
-- [ ] frontend depends_on backend (optional: with service_healthy condition)
-
-### Environment Variables
-- [ ] Backend has DATABASE_URL set to postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd
-- [ ] Backend has REDIS_URL set to redis://redis:6379/0
-- [ ] PostgreSQL has POSTGRES_DB=sovd, POSTGRES_USER=sovd_user, POSTGRES_PASSWORD=sovd_pass
-
-### Volumes and Persistence
-- [ ] Volume sovd-db-data defined and mounted to /var/lib/postgresql/data in db service
-- [ ] Volume sovd-redis-data defined and mounted to /data in redis service
-- [ ] Backend source mounted: ./backend:/app
-- [ ] Frontend source mounted: ./frontend:/app
-
-### Documentation
-- [ ] Header comment explaining the file's purpose
-- [ ] Each service has explanatory comments
-- [ ] Critical configuration options are documented
-- [ ] Matches specifications in README.md (lines 87-111)
-
-### Integration with Existing Files
-- [ ] Works with `make up` (runs docker-compose up -d)
-- [ ] Works with `make down` (runs docker-compose down)
-- [ ] Compatible with scripts/init_db.sh expectations
-- [ ] Backend Dockerfile not modified (already complete)
-- [ ] Frontend Dockerfile not modified (already complete)
-
-### Acceptance Criteria Validation
-- [ ] `docker-compose up` starts all 4 services without errors
-- [ ] PostgreSQL accessible on localhost:5432 with credentials sovd_user/sovd_pass
-- [ ] Redis accessible on localhost:6379
-- [ ] Backend can connect to database and redis (check logs)
-- [ ] Volume mounts enable hot reload (test by editing a file)
-- [ ] Health checks pass for db and redis (check with `docker-compose ps`)
-
----
-
-## 5. Quick Reference: Expected Service Configuration
-
-Use this as a quick reference for the exact specifications required:
-
-### Database Service (db)
-```
-Image: postgres:15
-Container Name: sovd-db (optional)
-Environment:
-  - POSTGRES_DB=sovd
-  - POSTGRES_USER=sovd_user
-  - POSTGRES_PASSWORD=sovd_pass
-Ports: 5432:5432
-Volume: sovd-db-data:/var/lib/postgresql/data
-Healthcheck: pg_isready -U sovd_user -d sovd
-Restart: unless-stopped
-Network: sovd-network
-```
-
-### Cache Service (redis)
-```
-Image: redis:7
-Container Name: sovd-redis (optional)
-Command: redis-server --appendonly yes
-Ports: 6379:6379
-Volume: sovd-redis-data:/data
-Healthcheck: redis-cli ping
-Restart: unless-stopped
-Network: sovd-network
-```
-
-### Backend Service (backend)
-```
-Build: ./backend
-Context: ./backend
-Dockerfile: Dockerfile
-Container Name: sovd-backend (optional)
-Environment:
-  - DATABASE_URL=postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd
-  - REDIS_URL=redis://redis:6379/0
-Ports: 8000:8000
-Volume: ./backend:/app
-Depends On: db (healthy), redis (healthy)
-Restart: on-failure
-Network: sovd-network
-```
-
-### Frontend Service (frontend)
-```
-Build: ./frontend
-Context: ./frontend
-Dockerfile: Dockerfile
-Container Name: sovd-frontend (optional)
-Environment:
-  - VITE_API_URL=http://localhost:8000 (optional)
-Ports: 3000:3000
-Volume: ./frontend:/app
-Depends On: backend
-Restart: on-failure
-Network: sovd-network
-```
-
-### Networks
-```
-sovd-network:
-  driver: bridge
-```
-
-### Volumes
-```
-sovd-db-data:
-  driver: local
-sovd-redis-data:
-  driver: local
-```
-
----
-
-## End of Task Briefing Package
-
-This comprehensive package provides everything you need to successfully complete task I1.T5. Review all sections carefully, follow the strategic guidance, and validate your implementation against the checklist before submission.
