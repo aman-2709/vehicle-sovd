@@ -20,6 +20,8 @@ __pycache__/
 
 # Database
 db_data/
+*.db
+*.db-journal
 
 # IDE
 .vscode/
