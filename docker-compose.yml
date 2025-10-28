@@ -1,23 +1,125 @@
 ---
 # Docker Compose configuration for SOVD Command WebApp
-# This file will be populated in task I1.T5
-# Placeholder for local development environment orchestration
+# Local development environment orchestration for all services
+# Includes: PostgreSQL database, Redis cache, FastAPI backend, React frontend
 
 version: '3.8'
 
 services:
-  placeholder:
-    image: hello-world
-    # This is a placeholder service. Actual services will be defined in I1.T5
-    # Services to be added:
-    # - frontend (React app)
-    # - backend (FastAPI app)
-    # - db (PostgreSQL)
-    # - redis (Redis cache/pub-sub)
+  # PostgreSQL Database Service
+  # Primary relational database for storing vehicle data, commands, sessions, and audit logs
+  db:
+    image: postgres:15
+    container_name: sovd-db
+    restart: unless-stopped
+    environment:
+      # Database credentials - matches documentation in README.md
+      POSTGRES_DB: sovd                  # Database name
+      POSTGRES_USER: sovd_user          # Database user
+      POSTGRES_PASSWORD: sovd_pass      # Database password
+    ports:
+      - "5432:5432"  # Expose PostgreSQL on localhost:5432
+    volumes:
+      # Persist database data across container restarts
+      - sovd-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # Verify PostgreSQL is ready to accept connections
+      test: ["CMD-SHELL", "pg_isready -U sovd_user -d sovd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sovd-network
 
+  # Redis Cache and Pub/Sub Service
+  # Used for session storage, caching, and event-driven communication
+  redis:
+    image: redis:7
+    container_name: sovd-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes  # Enable AOF persistence
+    ports:
+      - "6379:6379"  # Expose Redis on localhost:6379
+    volumes:
+      # Persist Redis data across container restarts
+      - sovd-redis-data:/data
+    healthcheck:
+      # Verify Redis is responding to commands
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sovd-network
+
+  # FastAPI Backend Service
+  # Python application server handling API requests and business logic
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sovd-backend
+    restart: on-failure
+    environment:
+      # Database connection string for SQLAlchemy with asyncpg driver
+      # Uses Docker service name 'db' as hostname (not localhost)
+      DATABASE_URL: postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd
+
+      # Redis connection string
+      # Uses Docker service name 'redis' as hostname (not localhost)
+      REDIS_URL: redis://redis:6379/0
+
+      # Python configuration
+      PYTHONUNBUFFERED: 1  # Ensure Python output is sent straight to terminal
+    ports:
+      - "8000:8000"  # Expose backend API on localhost:8000
+    volumes:
+      # Mount source code for hot reload (uvicorn --reload watches this directory)
+      - ./backend:/app
+    depends_on:
+      # Wait for database and Redis to be healthy before starting
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sovd-network
+
+  # React Frontend Service
+  # Vite development server with Hot Module Replacement (HMR)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sovd-frontend
+    restart: on-failure
+    environment:
+      # API endpoint for frontend to connect to backend
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"  # Expose frontend on localhost:3000
+    volumes:
+      # Mount source code for hot reload (Vite watches this directory)
+      - ./frontend:/app
+    depends_on:
+      # Start frontend after backend is available
+      - backend
+    networks:
+      - sovd-network
+
+# Network Configuration
+# Bridge network allows services to communicate using service names as hostnames
 networks:
   sovd-network:
     driver: bridge
 
+# Volume Configuration
+# Named volumes for persistent data storage
 volumes:
-  db_data:
+  # PostgreSQL data persistence
+  sovd-db-data:
+    driver: local
+
+  # Redis data persistence (AOF logs)
+  sovd-redis-data:
+    driver: local
