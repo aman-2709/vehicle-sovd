@@ -41,11 +41,10 @@ if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 
 # Add your model's MetaData object here for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-# NOTE: Since no ORM models exist yet (they will be created in task I1.T9),
-# we set target_metadata to None and will create the initial migration manually.
-target_metadata = None
+# Import all models to ensure they are registered with Base.metadata
+from app.models import Base
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
