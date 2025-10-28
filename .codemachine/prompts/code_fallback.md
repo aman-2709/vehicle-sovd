@@ -1,77 +1,177 @@
 # Code Refinement Task
 
-The previous code submission did not pass verification. You must fix the following issues and resubmit your work.
+The previous code submission did not pass verification. The PlantUML diagram files required by task I1.T2 have not been created.
 
 ---
 
 ## Original Task Description
 
-**Task ID:** I1.T1
-**Iteration Goal:** Foundation, Architecture Artifacts & Database Schema
+Create PlantUML source files for Component Diagram (C4 Level 3 - Application Server internal components) and Container Diagram (C4 Level 2 - deployable containers). Component diagram must include: API Router, Auth Controller, Vehicle Controller, Command Controller, Auth Service, Vehicle Service, Command Service, Audit Service, SOVD Protocol Handler, Repository Layer (Vehicle/Command/Response/User repositories), Shared Kernel. Container diagram must include: Web App (React SPA), API Gateway (Nginx), Application Server (FastAPI), WebSocket Server (FastAPI embedded), Vehicle Connector, PostgreSQL, Redis. Include all relationships and communication protocols.
 
-**Description:** Create complete directory structure as defined in Section 3 of the plan. Initialize Git repository with `.gitignore`. Create root-level `README.md` with project overview and quick-start instructions. Create `Makefile` with targets: `up` (start docker-compose), `down` (stop services), `test` (run all tests), `lint` (run all linters), `logs` (view logs). Set up empty configuration files: `docker-compose.yml`, `.github/workflows/ci-cd.yml`, `frontend/package.json`, `backend/requirements.txt`, `backend/pyproject.toml`.
+**Target Files:**
+- `docs/diagrams/component_diagram.puml`
+- `docs/diagrams/container_diagram.puml`
 
 **Acceptance Criteria:**
-- Directory structure matches Plan Section 3 exactly
-- `make up` displays help message or runs docker-compose (even if empty)
-- `README.md` includes: project title, goal summary, tech stack list, `make up` quick-start
-- `.gitignore` excludes: `node_modules/`, `__pycache__/`, `.env`, `*.pyc`, `db_data/`, `.vscode/`, `.idea/`
-- Git repository initialized with initial commit
+- PlantUML files compile without errors (test with `plantuml -testdot` or online renderer)
+- Component diagram shows all modules listed in description with correct dependencies
+- Container diagram shows all containers with communication protocols labeled
+- Diagrams match Architecture Blueprint diagrams in Sections 3.4 and 3.5
+- Files committed to `docs/diagrams/` directory
 
 ---
 
 ## Issues Detected
 
-*   **Critical Error:** The `make up` command fails with error: "In file './docker-compose.yml', service must be a mapping, not a NoneType." This violates the acceptance criteria which states "`make up` displays help message or runs docker-compose (even if empty)".
-
-*   **Docker Compose Invalid YAML:** The `docker-compose.yml` file at lines 8-13 has an empty `services:` section with only comments. Docker Compose requires either `services: {}` (empty mapping) or at least one service definition. The current structure is invalid YAML for Docker Compose.
-
-*   **Makefile Error Handling:** The Makefile's `up` target (line 14) directly runs `docker-compose up -d` without any error handling or validation. According to the acceptance criteria, it should "display help message or run docker-compose (even if empty)", meaning it should handle the case where docker-compose.yml is not yet fully configured.
+* **Missing Files:** Neither `docs/diagrams/component_diagram.puml` nor `docs/diagrams/container_diagram.puml` exist in the repository.
+* **Task Not Started:** The task appears to have not been started. The `docs/diagrams/` directory exists but is empty except for a `rendered/` subdirectory.
 
 ---
 
 ## Best Approach to Fix
 
-You MUST fix the docker-compose.yml and Makefile files to satisfy the acceptance criteria:
+You MUST create two PlantUML files in the `docs/diagrams/` directory. Follow these specific instructions:
 
-### 1. Fix docker-compose.yml Structure
+### 1. Create Container Diagram (`docs/diagrams/container_diagram.puml`)
 
-Replace the invalid empty services section with a valid placeholder structure. The file should have valid YAML syntax that allows `docker-compose up` to run without errors (even if it doesn't start any services yet). Use one of these approaches:
+This diagram must show the C4 Level 2 architecture with all deployable containers:
 
-**Option A (Recommended):** Create a minimal placeholder service:
-```yaml
-services:
-  placeholder:
-    image: hello-world
-    # This is a placeholder service. Actual services will be defined in I1.T5
+**Required Containers:**
+- Web App (React SPA) - served by Nginx on port 3000 (dev), 80/443 (prod)
+- API Gateway (Nginx) - reverse proxy, TLS termination, routes /api/* to Application Server
+- Application Server (FastAPI) - main backend application on port 8000
+- WebSocket Server (embedded in Application Server, not separate) - handles /ws/responses/{command_id}
+- Vehicle Connector (initially part of Application Server) - gRPC client for vehicle communication
+- PostgreSQL Database - port 5432, primary data store
+- Redis Cache - port 6379, session storage, caching, Pub/Sub
+
+**Required Communication Flows (with protocols):**
+- User → Web App: HTTPS
+- Web App → API Gateway: HTTPS, REST API calls, WebSocket upgrade
+- API Gateway → Application Server: HTTP (reverse proxy)
+- Application Server → PostgreSQL: PostgreSQL protocol (asyncpg)
+- Application Server → Redis: Redis protocol, Pub/Sub
+- Application Server (Vehicle Connector) → Vehicle: gRPC over TLS
+- Application Server → WebSocket Clients: WebSocket (ws:// or wss://)
+- Redis Pub/Sub → Application Server: Internal event bus
+
+**PlantUML Structure:**
+- Use `@startuml` and `@enduml` tags
+- Add a title: `title SOVD Command WebApp - Container Diagram (C4 Level 2)`
+- Use appropriate PlantUML elements: `component`, `database`, `cloud`, `rectangle`
+- Add technology stereotypes (e.g., `<<React>>`, `<<FastAPI>>`, `<<PostgreSQL>>`)
+- Label all arrows with protocols
+- Use `-->` for synchronous communication, `..>` for asynchronous
+- Add notes where needed for clarifications (e.g., "WebSocket server embedded in FastAPI")
+
+### 2. Create Component Diagram (`docs/diagrams/component_diagram.puml`)
+
+This diagram must show the internal structure of the Application Server (FastAPI) only - C4 Level 3:
+
+**Required Components by Layer:**
+
+**API Router Layer:**
+- Auth Controller (`app/api/v1/auth.py`) - POST /login, POST /refresh, POST /logout, GET /me
+- Vehicle Controller (`app/api/v1/vehicles.py`) - GET /vehicles, GET /vehicles/{id}, GET /vehicles/{id}/status
+- Command Controller (`app/api/v1/commands.py`) - POST /commands, GET /commands/{id}, GET /commands, GET /commands/{id}/responses
+- WebSocket Handler (`app/api/v1/websocket.py`) - /ws/responses/{command_id}
+
+**Service Layer:**
+- Auth Service (`app/services/auth_service.py`) - JWT generation/validation, password hashing, user authentication
+- Vehicle Service (`app/services/vehicle_service.py`) - Vehicle management, status queries, caching
+- Command Service (`app/services/command_service.py`) - Command submission, validation, orchestration, status tracking
+- Audit Service (`app/services/audit_service.py`) - Audit logging for critical operations
+- WebSocket Manager (`app/services/websocket_manager.py`) - WebSocket connection lifecycle, broadcasting, Redis Pub/Sub listener
+
+**Integration/Connector Layer:**
+- SOVD Protocol Handler (`app/services/sovd_protocol_handler.py`) - SOVD 2.0 command validation, encoding/decoding, schema validation
+- Vehicle Connector (`app/connectors/vehicle_connector.py`) - gRPC client, command execution, response streaming, retry logic
+
+**Repository Layer:**
+- User Repository (`app/repositories/user_repository.py`)
+- Vehicle Repository (`app/repositories/vehicle_repository.py`)
+- Command Repository (`app/repositories/command_repository.py`)
+- Response Repository (`app/repositories/response_repository.py`)
+- Session Repository (`app/repositories/session_repository.py`)
+- Audit Log Repository (`app/repositories/audit_log_repository.py`)
+
+**Shared Kernel:**
+- Database Module (`app/database.py`) - async engine, session factory
+- Config Module (`app/config.py`) - Pydantic Settings
+- Dependencies Module (`app/dependencies.py`) - get_current_user, require_role (RBAC)
+- Middleware (`app/middleware/`) - logging_middleware.py, error_handling_middleware.py
+- Utils (`app/utils/`) - logging.py, error_codes.py
+
+**Required Dependencies (arrows):**
+- Auth Controller → Auth Service
+- Vehicle Controller → Vehicle Service
+- Command Controller → Command Service
+- WebSocket Handler → WebSocket Manager, Redis Pub/Sub
+- Auth Service → User Repository, Session Repository, Redis
+- Vehicle Service → Vehicle Repository, Redis
+- Command Service → Command Repository, Response Repository, SOVD Protocol Handler, Vehicle Connector, Audit Service
+- Audit Service → Audit Log Repository
+- WebSocket Manager → Redis Pub/Sub
+- SOVD Protocol Handler → (no database dependencies, pure logic)
+- Vehicle Connector → Response Repository
+- All Repositories → Database Module (from Shared Kernel)
+- All Services → Config Module, Dependencies Module
+
+**PlantUML Structure:**
+- Use `@startuml` and `@enduml` tags
+- Add a title: `title SOVD Command WebApp - Component Diagram (C4 Level 3 - Application Server)`
+- Organize components into packages/layers: `package "API Router Layer"`, `package "Service Layer"`, etc.
+- Use `component` for each module
+- Show dependencies with arrows (`-->`)
+- Add file path annotations (e.g., `[Auth Controller\n(app/api/v1/auth.py)]`)
+- Use different colors or styles to distinguish layers
+
+### 3. Validation Steps
+
+After creating both files:
+1. Verify PlantUML syntax is valid (test at http://www.plantuml.com/plantuml/)
+2. Ensure all components from the requirements are present
+3. Verify all communication protocols are labeled
+4. Check that dependency arrows are correct (no circular dependencies within layers, proper layering)
+5. Confirm file paths are correct: `docs/diagrams/component_diagram.puml` and `docs/diagrams/container_diagram.puml`
+
+### 4. Critical Reminders
+
+- The WebSocket Server is NOT a separate container - it's embedded in the FastAPI Application Server
+- The Vehicle Connector is initially part of the Application Server (can be shown as a component within or with a note indicating future separation potential)
+- Include ALL 6 repositories in the component diagram
+- Show the Shared Kernel as a separate package that other components depend on
+- Match terminology exactly as specified in the architecture documentation
+
+### 5. Example PlantUML Snippet (Container Diagram starter)
+
+```plantuml
+@startuml
+!define RECTANGLE class
+
+title SOVD Command WebApp - Container Diagram (C4 Level 2)
+
+skinparam componentStyle rectangle
+
+component "Web App\n<<React SPA>>" as WebApp
+component "API Gateway\n<<Nginx>>" as Gateway
+component "Application Server\n<<FastAPI>>" as AppServer
+database "PostgreSQL\n<<Database>>" as DB
+database "Redis\n<<Cache>>" as Cache
+cloud "Vehicle" as Vehicle
+
+WebApp -down-> Gateway : HTTPS
+Gateway -down-> AppServer : HTTP
+AppServer -down-> DB : PostgreSQL Protocol
+AppServer -down-> Cache : Redis Protocol
+AppServer -right-> Vehicle : gRPC/TLS
+
+note right of AppServer
+  WebSocket Server embedded
+  Vehicle Connector included
+end note
+
+@enduml
 ```
 
-**Option B:** Use empty mapping syntax:
-```yaml
-services: {}
-# Service definitions will be added in I1.T5
-```
-
-### 2. Update Makefile Error Handling
-
-Modify the `up` target in the Makefile to check if docker-compose.yml is properly configured and provide a helpful message. The target should gracefully handle the case where services are not yet defined:
-
-```makefile
-up:
-	@if grep -q "placeholder:" docker-compose.yml 2>/dev/null; then \
-		echo "Note: Using placeholder configuration. Full services will be configured in I1.T5"; \
-	fi
-	@docker-compose up -d
-```
-
-This ensures `make up` will run successfully and inform the user about the placeholder status, satisfying the acceptance criteria requirement.
-
-### 3. Verify the Fix
-
-After making these changes:
-1. Run `make up` and confirm it executes without errors
-2. Run `make down` to clean up
-3. Ensure the changes don't break any existing functionality
-4. Create a new git commit if the previous commit needs to be amended, or amend the existing commit if appropriate
-
-The fix must ensure that `make up` runs successfully (even with a placeholder configuration) as specified in the acceptance criteria.
+This is just a starter - you must expand it to include all containers, all communication flows, and all protocols as specified above. Create a similar comprehensive structure for the component diagram.
