@@ -1,2 +1,4 @@
 .codemachine/memory
+.codemachine/artifacts
+.codemachine/template.json
 node_modules
