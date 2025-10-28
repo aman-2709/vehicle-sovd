@@ -6,11 +6,14 @@
 version: '3.8'
 
 services:
-  # Services will be defined here:
-  # - frontend (React app)
-  # - backend (FastAPI app)
-  # - db (PostgreSQL)
-  # - redis (Redis cache/pub-sub)
+  placeholder:
+    image: hello-world
+    # This is a placeholder service. Actual services will be defined in I1.T5
+    # Services to be added:
+    # - frontend (React app)
+    # - backend (FastAPI app)
+    # - db (PostgreSQL)
+    # - redis (Redis cache/pub-sub)
 
 networks:
   sovd-network:
