@@ -1,23 +1,31 @@
 ---
-# GitHub Actions CI/CD Pipeline for SOVD Command WebApp
-# This file will be configured with build, test, and deployment workflows.
+# CI/CD Pipeline for SOVD Command WebApp
+# This workflow will be fully configured in a future iteration
+# Placeholder for GitHub Actions automation
 
 name: CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches: [ main, master, develop ]
   pull_request:
-    branches:
-      - master
-      - main
+    branches: [ main, master, develop ]
 
 jobs:
-  # Job definitions will be added here
   placeholder:
     runs-on: ubuntu-latest
     steps:
-      - name: Placeholder
-        run: echo "CI/CD pipeline will be configured in future iterations"
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Placeholder step
+        run: echo "CI/CD pipeline to be configured"
+
+  # Future jobs will include:
+  # - backend-lint
+  # - backend-test
+  # - frontend-lint
+  # - frontend-test
+  # - e2e-test
+  # - build-images
+  # - deploy

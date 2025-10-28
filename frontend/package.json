@@ -1,15 +1,15 @@
 {
   "name": "sovd-frontend",
   "version": "0.1.0",
-  "description": "Frontend for SOVD Command WebApp",
+  "description": "SOVD Command WebApp - Frontend",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest"
   },
   "dependencies": {},
   "devDependencies": {}

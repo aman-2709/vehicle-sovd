@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A secure, cloud-based web application that enables automotive engineers to remotely execute SOVD (Service-Oriented Vehicle Diagnostics) 2.0 commands on connected vehicles and view real-time responses through a modern, unified interface.
+This project develops a secure, cloud-based web application that enables automotive engineers to remotely execute SOVD (Service-Oriented Vehicle Diagnostics) 2.0 commands on connected vehicles and view real-time responses through a modern, unified interface.
 
 ## Goals
 
@@ -21,60 +21,48 @@ A secure, cloud-based web application that enables automotive engineers to remot
 ## Technology Stack
 
 ### Frontend
-- React 18
-- TypeScript
-- Material-UI (MUI)
-- React Query (state management)
-- Vite (build tool)
-- Vitest + React Testing Library (testing)
-- ESLint + Prettier (code quality)
+- **Framework:** React 18 with TypeScript
+- **UI Library:** Material-UI (MUI)
+- **State Management:** React Query
+- **Build Tool:** Vite
+- **Code Quality:** ESLint, Prettier, TypeScript
 
 ### Backend
-- Python 3.11+
-- FastAPI
-- Uvicorn (ASGI server)
-- SQLAlchemy 2.0 (ORM)
-- Alembic (database migrations)
-- pytest + pytest-asyncio + httpx (testing)
-- Ruff + Black + mypy (code quality)
-
-### Database & Caching
-- PostgreSQL 15+ (with JSONB support)
-- Redis 7 (session storage, Pub/Sub, caching)
-
-### Communication
-- gRPC (primary vehicle communication)
-- WebSocket (fallback & real-time streaming)
-- JWT authentication (python-jose, passlib)
+- **Framework:** Python 3.11+ with FastAPI
+- **Server:** Uvicorn (ASGI)
+- **ORM:** SQLAlchemy 2.0
+- **Migrations:** Alembic
+- **Authentication:** JWT (python-jose, passlib)
+- **Code Quality:** Ruff, Black, mypy
 
 ### Infrastructure
-- Docker & Docker Compose (local development)
-- Kubernetes/Helm (production deployment)
-- Nginx (API gateway, TLS termination, load balancing)
-- AWS EKS (primary cloud target)
+- **Database:** PostgreSQL 15+
+- **Cache/Messaging:** Redis 7
+- **Vehicle Communication:** gRPC (primary), WebSocket (fallback)
+- **API Gateway:** Nginx (production)
+- **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
+- **CI/CD:** GitHub Actions
+- **Monitoring:** Prometheus + Grafana, structlog
+- **Tracing:** OpenTelemetry + Jaeger
 
-### Observability
-- Prometheus + Grafana (monitoring)
-- OpenTelemetry + Jaeger (tracing)
-- structlog (structured logging)
-
-### CI/CD
-- GitHub Actions
-- Playwright (E2E testing)
+### Testing
+- **Backend:** pytest, pytest-asyncio, httpx
+- **Frontend:** Vitest, React Testing Library
+- **E2E:** Playwright
 
 ## Quick Start
 
 ### Prerequisites
 - Docker and Docker Compose installed
-- Make (optional, for convenience commands)
+- Make utility installed
 
-### Running the Application
+### Getting Started
 
 ```bash
-# Start all services
+# Start all services (frontend, backend, database, redis)
 make up
 
-# View logs
+# View logs from all services
 make logs
 
 # Run tests
@@ -87,39 +75,37 @@ make lint
 make down
 ```
 
-### Without Make
-
-```bash
-# Start services
-docker-compose up -d
-
-# Stop services
-docker-compose down
-```
+The application will be available at:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API Documentation: http://localhost:8000/docs
 
 ## Project Structure
 
 ```
 sovd-command-webapp/
-├── frontend/           # React TypeScript frontend
-├── backend/            # FastAPI Python backend
-├── infrastructure/     # Docker, Kubernetes, Helm charts
-├── docs/               # Documentation and diagrams
-├── scripts/            # Development and utility scripts
-└── tests/              # End-to-end tests
+├── frontend/          # React TypeScript frontend
+├── backend/           # FastAPI Python backend
+├── infrastructure/    # IaC and deployment configs
+├── docs/             # Documentation and diagrams
+├── scripts/          # Development and utility scripts
+└── tests/            # End-to-end tests
 ```
 
 ## Documentation
 
-- Architecture documentation: `docs/architecture/`
-- API specifications: `docs/api/`
-- Operational runbooks: `docs/runbooks/`
-- User guides: `docs/user-guides/`
+Detailed documentation is available in the `docs/` directory:
+- Architecture: `docs/architecture/`
+- API Specifications: `docs/api/`
+- Operational Runbooks: `docs/runbooks/`
+- User Guides: `docs/user-guides/`
 
 ## Development
 
-This project follows a modular monolith architecture with clear service boundaries. For detailed development guidelines, see the documentation in the `docs/` directory.
+See individual component READMEs for detailed development instructions:
+- [Frontend Development](frontend/README.md)
+- [Backend Development](backend/README.md)
 
 ## License
 
-Proprietary - All rights reserved
+[To be determined]

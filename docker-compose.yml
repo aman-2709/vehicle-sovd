@@ -1,15 +1,20 @@
 ---
 # Docker Compose configuration for SOVD Command WebApp
-# This file will be populated in iteration I1.T5 with service definitions
-# for frontend, backend, database, and Redis services.
+# This file will be populated in task I1.T5
+# Placeholder for local development environment orchestration
 
 version: '3.8'
 
-services: {}
-  # Service definitions will be added here
+services:
+  # Services will be defined here:
+  # - frontend (React app)
+  # - backend (FastAPI app)
+  # - db (PostgreSQL)
+  # - redis (Redis cache/pub-sub)
 
-volumes: {}
-  # Volume definitions will be added here
+networks:
+  sovd-network:
+    driver: bridge
 
-networks: {}
-  # Network definitions will be added here
+volumes:
+  db_data:
