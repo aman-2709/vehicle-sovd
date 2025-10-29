@@ -20,6 +20,7 @@ passlib[bcrypt]>=1.7.4
 # Data validation and settings
 pydantic>=2.4.0
 pydantic-settings>=2.0.0
+jsonschema>=4.20.0
 
 # File upload support
 python-multipart>=0.0.6

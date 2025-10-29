@@ -34,7 +34,7 @@ async def submit_command(
     Submit a new command to a vehicle.
 
     Requires authentication and engineer/admin role.
-    Validates vehicle existence before creating command.
+    Validates vehicle existence and SOVD command format before creating command.
 
     Args:
         request: Command submission request
@@ -45,7 +45,7 @@ async def submit_command(
         CommandResponse with command details
 
     Raises:
-        HTTPException 400: Vehicle not found
+        HTTPException 400: Vehicle not found or invalid SOVD command
         HTTPException 401: Not authenticated
         HTTPException 403: Insufficient permissions
     """
@@ -67,11 +67,14 @@ async def submit_command(
 
     if command is None:
         logger.warning(
-            "api_submit_command_failed_vehicle_not_found",
+            "api_submit_command_failed",
             user_id=str(current_user.user_id),
             vehicle_id=str(request.vehicle_id),
         )
-        raise HTTPException(status_code=400, detail="Vehicle not found")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid command: vehicle not found or command validation failed"
+        )
 
     logger.info(
         "api_submit_command_success",

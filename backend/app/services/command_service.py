@@ -13,6 +13,7 @@ from app.connectors import vehicle_connector
 from app.models.command import Command
 from app.models.response import Response
 from app.repositories import command_repository, response_repository, vehicle_repository
+from app.services import sovd_protocol_handler
 
 logger = structlog.get_logger(__name__)
 
@@ -55,6 +56,17 @@ async def submit_command(
         logger.warning(
             "command_submission_failed_vehicle_not_found",
             vehicle_id=str(vehicle_id),
+            user_id=str(user_id),
+        )
+        return None
+
+    # Validate SOVD command
+    validation_error = sovd_protocol_handler.validate_command(command_name, command_params)
+    if validation_error:
+        logger.warning(
+            "command_submission_failed_invalid_sovd_command",
+            command_name=command_name,
+            validation_error=validation_error,
             user_id=str(user_id),
         )
         return None
