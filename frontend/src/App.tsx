@@ -11,7 +11,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/VehiclesPage';
-import CommandsPage from './pages/CommandsPage';
+import CommandPage from './pages/CommandPage';
 import HistoryPage from './pages/HistoryPage';
 
 const App: React.FC = () => {
@@ -56,7 +56,7 @@ const App: React.FC = () => {
         path="/commands"
         element={
           <ProtectedRoute>
-            <CommandsPage />
+            <CommandPage />
           </ProtectedRoute>
         }
       />

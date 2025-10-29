@@ -18,6 +18,7 @@ import type {
   VehicleStatusResponse,
   VehicleListParams,
 } from '../types/vehicle';
+import type { CommandSubmitRequest, CommandResponse } from '../types/command';
 
 // Get API base URL from environment variable or default to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -221,6 +222,20 @@ export const vehicleAPI = {
     const response = await apiClient.get<VehicleStatusResponse>(
       `/api/v1/vehicles/${vehicleId}/status`
     );
+    return response.data;
+  },
+};
+
+// Command API methods
+export const commandAPI = {
+  /**
+   * Submit a new command to a vehicle.
+   *
+   * @param request - Command submission request with vehicle_id, command_name, and command_params
+   * @returns Command response object with command_id and status
+   */
+  submitCommand: async (request: CommandSubmitRequest): Promise<CommandResponse> => {
+    const response = await apiClient.post<CommandResponse>('/api/v1/commands', request);
     return response.data;
   },
 };
