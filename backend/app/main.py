@@ -14,7 +14,7 @@ Provides:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth, commands, vehicles
+from app.api.v1 import auth, commands, vehicles, websocket
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.utils.logging import configure_logging
 
@@ -46,6 +46,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(vehicles.router, prefix="/api/v1", tags=["vehicles"])
 app.include_router(commands.router, prefix="/api/v1", tags=["commands"])
+app.include_router(websocket.router, tags=["websocket"])
 
 
 @app.get("/health")

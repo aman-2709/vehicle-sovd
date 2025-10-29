@@ -251,6 +251,7 @@ async def execute_command(
             await redis_client.aclose()
 
         # Update command status to 'completed'
+        completed_at = datetime.now(timezone.utc)
         async with async_session_maker() as db_session:
             # Get command to extract user_id for audit logging
             command = await command_repository.get_command_by_id(db_session, command_id)
@@ -259,8 +260,35 @@ async def execute_command(
                 db=db_session,
                 command_id=command_id,
                 status="completed",
-                completed_at=datetime.now(timezone.utc),
+                completed_at=completed_at,
             )
+
+        # Publish status event to Redis Pub/Sub
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
+        try:
+            channel = f"response:{command_id}"
+            status_event = {
+                "event": "status",
+                "command_id": str(command_id),
+                "status": "completed",
+                "completed_at": completed_at.isoformat(),
+            }
+
+            await redis_client.publish(channel, json.dumps(status_event))
+
+            logger.info(
+                "mock_command_status_event_published",
+                command_id=str(command_id),
+                channel=channel,
+                status="completed"
+            )
+        finally:
+            await redis_client.aclose()
+
+        # Log audit event for command completion
+        async with async_session_maker() as db_session:
+            # Get command again for audit logging
+            command = await command_repository.get_command_by_id(db_session, command_id)
 
             # Log audit event for command completion
             if command:
@@ -297,6 +325,7 @@ async def execute_command(
 
         # Update command status to 'failed' on unexpected errors
         try:
+            failed_at = datetime.now(timezone.utc)
             async with async_session_maker() as db_session:
                 # Get command to extract user_id for audit logging
                 command = await command_repository.get_command_by_id(db_session, command_id)
@@ -306,8 +335,34 @@ async def execute_command(
                     command_id=command_id,
                     status="failed",
                     error_message=str(e),
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=failed_at,
                 )
+
+            # Publish error event to Redis Pub/Sub
+            redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
+            try:
+                channel = f"response:{command_id}"
+                error_event = {
+                    "event": "error",
+                    "command_id": str(command_id),
+                    "error_message": str(e),
+                    "failed_at": failed_at.isoformat(),
+                }
+
+                await redis_client.publish(channel, json.dumps(error_event))
+
+                logger.info(
+                    "mock_command_error_event_published",
+                    command_id=str(command_id),
+                    channel=channel,
+                )
+            finally:
+                await redis_client.aclose()
+
+            # Log audit event for command failure
+            async with async_session_maker() as db_session:
+                # Get command again for audit logging
+                command = await command_repository.get_command_by_id(db_session, command_id)
 
                 # Log audit event for command failure
                 if command:

@@ -10,30 +10,27 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I2.T10",
-  "iteration_id": "I2",
-  "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
-  "description": "Expand integration tests in `backend/tests/integration/` to achieve 80%+ coverage for all implemented modules. Write comprehensive test scenarios: authentication flows (login success/failure, token refresh, logout, protected endpoints), vehicle API (listing with filters, pagination, caching), command API (submission, validation errors, retrieval, response listing), audit logging (verify audit records created). Use pytest fixtures for database setup/teardown, test users, test vehicles. Configure pytest-cov to generate coverage report. Add `make test` target to Makefile to run `pytest --cov=app --cov-report=html --cov-report=term`. Ensure all tests pass and coverage meets 80% threshold. Fix any failing tests or bugs discovered.",
+  "task_id": "I3.T1",
+  "iteration_id": "I3",
+  "iteration_goal": "Real-Time WebSocket Communication & Frontend Foundation",
+  "description": "Implement WebSocket endpoint in `backend/app/api/v1/websocket.py` at path `/ws/responses/{command_id}`. WebSocket connection requires JWT authentication via query parameter `?token={jwt}`. Implement connection lifecycle: 1) Validate JWT on connect (disconnect with error if invalid), 2) Subscribe to Redis Pub/Sub channel `response:{command_id}`, 3) Listen for response events from Redis, 4) Forward events to WebSocket client as JSON messages (format: `{\"event\": \"response\", \"command_id\": \"...\", \"response\": {...}}`), 5) Handle status change events (`{\"event\": \"status\", \"status\": \"completed\"}`), 6) Handle errors (`{\"event\": \"error\", \"error_message\": \"...\"}`), 7) Unsubscribe and close on client disconnect. Implement WebSocket connection manager in `backend/app/services/websocket_manager.py` to track active connections and handle broadcasting. Update mock vehicle connector (I2.T5) to publish response events to Redis channel. Write integration tests in `backend/tests/integration/test_websocket.py` using WebSocket test client.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "All implemented backend modules from I2.T1-I2.T7.",
+  "inputs": "Architecture Blueprint Section 3.7 (WebSocket Protocol); Section 3.8 (Communication Patterns - Event-Driven Internal).",
   "target_files": [
-    "backend/tests/integration/test_auth_api.py",
-    "backend/tests/integration/test_vehicle_api.py",
-    "backend/tests/integration/test_command_api.py",
-    "backend/tests/conftest.py",
-    "Makefile"
+    "backend/app/api/v1/websocket.py",
+    "backend/app/services/websocket_manager.py",
+    "backend/app/connectors/vehicle_connector.py",
+    "backend/tests/integration/test_websocket.py"
   ],
-  "input_files": [],
-  "deliverables": "Comprehensive integration test suite; coverage report showing 80%+ coverage; all tests passing.",
-  "acceptance_criteria": "`make test` (or `pytest`) runs all tests successfully (0 failures); Coverage report shows ≥80% line coverage for `backend/app/` directory; Integration tests cover all API endpoints with success and error cases; Tests verify audit log creation for key events; Tests verify Redis caching behavior for vehicle status; Fixtures provide clean database state for each test; Coverage HTML report generated in `backend/htmlcov/` directory; Coverage summary displayed in terminal output; No flaky tests (tests pass consistently on multiple runs)",
+  "input_files": [
+    "backend/app/dependencies.py",
+    "backend/app/connectors/vehicle_connector.py"
+  ],
+  "deliverables": "Functional WebSocket endpoint with JWT auth; Redis Pub/Sub integration; connection manager; integration tests.",
+  "acceptance_criteria": "WebSocket client can connect to `ws://localhost:8000/ws/responses/{command_id}?token={valid_jwt}`; Connection rejected if JWT invalid or missing (WebSocket close with error code); After submitting command via REST API, WebSocket client receives response events in real-time; Response events match format: `{\"event\": \"response\", \"response\": {...}, \"sequence_number\": 1}`; Status event received when command completes: `{\"event\": \"status\", \"status\": \"completed\"}`; Multiple WebSocket clients can subscribe to same command (verify with 2 concurrent connections); Client disconnect unsubscribes from Redis (no memory leak); Integration tests verify: successful connection, event delivery, auth rejection; No errors in logs during WebSocket operations; No linter errors",
   "dependencies": [
     "I2.T1",
-    "I2.T2",
-    "I2.T3",
-    "I2.T4",
-    "I2.T5",
-    "I2.T6",
-    "I2.T7"
+    "I2.T5"
   ],
   "parallelizable": false,
   "done": false
@@ -46,87 +43,83 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: unit-testing (from 03_Verification_and_Glossary.md)
+### Context: WebSocket Protocol (from 04_Behavior_and_Communication.md)
 
 ```markdown
-#### Unit Testing
+**WebSocket Protocol**
 
-**Backend (Python/pytest)**
-*   **Scope**: Individual functions and classes in services, repositories, utilities, and protocol handlers
-*   **Framework**: pytest with pytest-asyncio for async code
-*   **Coverage Target**: ≥80% line coverage for all modules
-*   **Key Areas**:
-    *   Auth service: JWT generation/validation, password hashing, RBAC logic
-    *   Vehicle service: Filtering, caching logic
-    *   Command service: Status transitions, validation
-    *   SOVD protocol handler: Command validation, encoding/decoding
-    *   Audit service: Log record creation
-    *   Mock vehicle connector: Response generation
-*   **Mocking**: Use pytest fixtures and `unittest.mock` for database, Redis, external dependencies
-*   **Execution**: `pytest backend/tests/unit/` or `make test`
+Connection: wss://api.sovd.example.com/ws/responses/{command_id}?token={jwt}
+
+Client → Server (subscribe):
+{
+  "action": "subscribe",
+  "command_id": "uuid"
+}
+
+Server → Client (response event):
+{
+  "event": "response",
+  "command_id": "uuid",
+  "response": {
+    "response_id": "uuid",
+    "response_payload": { "dtcCode": "P0420", ... },
+    "sequence_number": 1,
+    "is_final": false,
+    "received_at": "2025-10-28T10:00:01Z"
+  }
+}
+
+Server → Client (status event):
+{
+  "event": "status",
+  "command_id": "uuid",
+  "status": "completed",
+  "completed_at": "2025-10-28T10:00:01.5Z"
+}
+
+Server → Client (error event):
+{
+  "event": "error",
+  "command_id": "uuid",
+  "error_message": "Vehicle connection timeout"
+}
 ```
 
-### Context: integration-testing (from 03_Verification_and_Glossary.md)
+### Context: Asynchronous Streaming Pattern (from 04_Behavior_and_Communication.md)
 
 ```markdown
-#### Integration Testing
+**2. Asynchronous Streaming (WebSocket)**
 
-**Backend API Integration Tests**
-*   **Scope**: API endpoints with database and Redis integration (using test containers or docker-compose services)
-*   **Framework**: pytest with httpx async test client
-*   **Key Scenarios**:
-    *   Authentication flow: login, token refresh, logout, protected endpoint access
-    *   Vehicle API: listing, filtering, pagination, caching behavior
-    *   Command API: submission, retrieval, response listing, validation errors
-    *   WebSocket: connection establishment, event delivery, authentication
-    *   Error scenarios: validation errors, timeouts, database failures
-    *   Audit logging: verify audit records created for all actions
-*   **Test Data**: Use test fixtures for users, vehicles, commands (seed before tests, clean after)
-*   **Execution**: `pytest backend/tests/integration/` (requires running docker-compose for db and redis)
+Used for:
+- Real-time command execution status updates
+- Streaming command responses (multi-part responses from vehicle)
+- Live vehicle connection status notifications
+
+**Flow:**
+1. Client establishes WebSocket connection with auth token
+2. Client subscribes to specific channels (e.g., command response stream)
+3. Server pushes updates as they arrive from vehicle
+4. Client renders updates progressively
+5. Connection remains open for multiple commands
+
+**Example:** WebSocket at `wss://api.sovd.example.com/ws/responses/{command_id}`
 ```
 
-### Context: code-quality-gates (from 03_Verification_and_Glossary.md)
+### Context: Event-Driven Internal Communication (from 04_Behavior_and_Communication.md)
 
 ```markdown
-### 5.3. Code Quality Gates
+**3. Event-Driven (Internal via Redis Pub/Sub)**
 
-#### Quality Metrics & Enforcement
+Used internally between backend components:
+- Vehicle Connector publishes response events → WebSocket Server consumes
+- Decouples command execution from response delivery
+- Enables horizontal scaling of both components
 
-**Code Coverage**
-*   **Requirement**: ≥80% line coverage for both backend and frontend
-*   **Enforcement**: CI pipeline fails if coverage drops below threshold
-*   **Reporting**: HTML coverage reports generated and uploaded as artifacts
-*   **Tool**: pytest-cov (backend), Vitest coverage (frontend)
-```
-
-### Context: task-i2-t10 (from 02_Iteration_I2.md)
-
-```markdown
-**Task 2.10: Integration Testing and Coverage Report**
-*   **Task ID:** `I2.T10`
-*   **Description:** Expand integration tests in `backend/tests/integration/` to achieve 80%+ coverage for all implemented modules. Write comprehensive test scenarios: authentication flows (login success/failure, token refresh, logout, protected endpoints), vehicle API (listing with filters, pagination, caching), command API (submission, validation errors, retrieval, response listing), audit logging (verify audit records created). Use pytest fixtures for database setup/teardown, test users, test vehicles. Configure pytest-cov to generate coverage report. Add `make test` target to Makefile to run `pytest --cov=app --cov-report=html --cov-report=term`. Ensure all tests pass and coverage meets 80% threshold. Fix any failing tests or bugs discovered.
-*   **Agent Type Hint:** `BackendAgent`
-*   **Inputs:** All implemented backend modules from I2.T1-I2.T7.
-*   **Input Files:** [All backend source files in `backend/app/`]
-*   **Target Files:**
-    *   `backend/tests/integration/test_auth_api.py` (expand)
-    *   `backend/tests/integration/test_vehicle_api.py` (expand)
-    *   `backend/tests/integration/test_command_api.py` (expand)
-    *   `backend/tests/conftest.py` (shared fixtures)
-    *   Updates to `Makefile` (add test target)
-*   **Deliverables:** Comprehensive integration test suite; coverage report showing 80%+ coverage; all tests passing.
-*   **Acceptance Criteria:**
-    *   `make test` (or `pytest`) runs all tests successfully (0 failures)
-    *   Coverage report shows ≥80% line coverage for `backend/app/` directory
-    *   Integration tests cover all API endpoints with success and error cases
-    *   Tests verify audit log creation for key events
-    *   Tests verify Redis caching behavior for vehicle status
-    *   Fixtures provide clean database state for each test
-    *   Coverage HTML report generated in `backend/htmlcov/` directory
-    *   Coverage summary displayed in terminal output
-    *   No flaky tests (tests pass consistently on multiple runs)
-*   **Dependencies:** All I2 tasks (requires complete backend implementation)
-*   **Parallelizable:** No (final validation task for iteration)
+**Flow:**
+1. Vehicle Connector receives response from vehicle
+2. Publishes event to Redis channel: `response:{command_id}`
+3. WebSocket Server (subscribed to channel) receives event
+4. Pushes to connected WebSocket clients
 ```
 
 ---
@@ -135,138 +128,236 @@ The following are the relevant sections from the architecture and plan documents
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### Current Test Coverage Status
-
-**Overall Coverage: 88% (ALREADY EXCEEDS 80% THRESHOLD)**
-
-**Current Status:**
-- Total statements: 939
-- Missed statements: 108
-- Coverage: 88%
-- **CRITICAL**: 3 tests are currently FAILING in `tests/unit/test_command_service.py`
-
-**Files with Low Coverage (Below 80%):**
-1. `app/repositories/command_repository.py`: 26% coverage (38 statements, 28 missed)
-2. `app/repositories/response_repository.py`: 47% coverage (15 statements, 8 missed)
-3. `app/repositories/vehicle_repository.py`: 31% coverage (29 statements, 20 missed)
-4. `app/services/command_service.py`: 58% coverage (43 statements, 18 missed)
-5. `app/database.py`: 69% coverage (16 statements, 5 missed)
-6. `app/main.py`: 77% coverage (26 statements, 6 missed)
-
 ### Relevant Existing Code
 
+*   **File:** `backend/app/dependencies.py`
+    *   **Summary:** This file contains JWT authentication logic with `get_current_user()` dependency that validates JWT tokens and retrieves user records from the database. It uses FastAPI's `HTTPBearer` security scheme.
+    *   **Recommendation:** You CANNOT directly use the existing `get_current_user()` dependency for WebSocket authentication because it expects tokens in the `Authorization` header, but WebSockets pass tokens via query parameters. You MUST create a new authentication function specifically for WebSocket that:
+        1. Extracts the token from the query parameter `?token={jwt}`
+        2. Calls the existing `verify_access_token()` function from `app.services.auth_service`
+        3. Validates the user_id and fetches the user from the database
+        4. Returns the User object or raises a WebSocket exception
+    *   **Warning:** The existing `get_current_user()` dependency uses `HTTPAuthorizationCredentials` which won't work for WebSocket connections. You need to implement custom authentication logic.
+
+*   **File:** `backend/app/connectors/vehicle_connector.py`
+    *   **Summary:** This file already implements the mock vehicle connector with Redis publishing functionality. The `execute_command()` function publishes response events to Redis Pub/Sub on the channel `response:{command_id}` at line 233-243.
+    *   **Recommendation:** The vehicle connector is ALREADY publishing events to Redis correctly. You DO NOT need to modify it for basic functionality. The event format includes:
+        ```python
+        {
+            "event": "response",
+            "command_id": str(command_id),
+            "response_id": str(response.response_id),
+            "response_payload": response_payload,
+            "sequence_number": 1,
+            "is_final": True,
+        }
+        ```
+    *   **Note:** At line 254-263, the connector also updates command status to "completed". You MAY want to publish a status event to Redis here as well for the WebSocket to pick up and forward to clients.
+
+*   **File:** `backend/app/config.py`
+    *   **Summary:** Configuration module using Pydantic Settings. Contains `REDIS_URL`, `DATABASE_URL`, `JWT_SECRET`, and other settings.
+    *   **Recommendation:** You MUST import `settings` from this module to access the Redis URL: `from app.config import settings`. Use `settings.REDIS_URL` when creating Redis connections.
+
+*   **File:** `backend/app/main.py`
+    *   **Summary:** FastAPI application entry point. Currently includes REST API routers for auth, vehicles, and commands (lines 46-48). Uses CORS middleware and logging middleware.
+    *   **Recommendation:** You MUST register your WebSocket router in this file. Add the following after line 48:
+        ```python
+        from app.api.v1 import websocket
+        app.include_router(websocket.router, tags=["websocket"])
+        ```
+    *   **Note:** WebSocket endpoints don't use the `/api/v1` prefix by convention. The endpoint should be at `/ws/responses/{command_id}`.
+
 *   **File:** `backend/tests/conftest.py`
-    *   **Summary:** This file contains pytest fixtures for database sessions and async HTTP clients. It uses SQLite for testing (file-based at `./test.db`) and creates only the `users` and `sessions` tables since other tables require PostgreSQL-specific JSONB types.
-    *   **Recommendation:** You MUST continue using this fixture pattern. The audit service is already mocked here (`patch("app.services.audit_service.log_audit_event")`), which is why audit tests pass even though the audit_logs table isn't created.
-    *   **WARNING:** The conftest currently uses a **function-scoped** db_session fixture, which means each test gets a fresh database. This is good for isolation but tests are currently using SQLite instead of the real PostgreSQL database.
+    *   **Summary:** Pytest configuration with fixtures for database sessions and async HTTP client. Uses SQLite for testing and mocks the audit service.
+    *   **Recommendation:** You SHOULD reuse the existing `async_client` fixture pattern for WebSocket tests. However, for WebSocket testing, you'll need to use httpx's WebSocket support or FastAPI's `TestClient` with WebSocket mode.
+    *   **Tip:** The `async_client` fixture already sets up dependency overrides for the database. You can extend this pattern for WebSocket tests.
 
-*   **File:** `backend/tests/integration/test_auth_api.py`
-    *   **Summary:** This is an EXCELLENT reference implementation with 857 lines of comprehensive auth endpoint tests. It includes multiple test classes covering all endpoints, edge cases, and error paths.
-    *   **Recommendation:** Use this file as your GOLD STANDARD template for test structure. Notice how it:
-        - Organizes tests by endpoint into classes
-        - Tests both success and failure paths
-        - Includes edge cases (expired tokens, malformed headers, missing fields)
-        - Has an end-to-end flow test
-        - Verifies database state after operations
-
-*   **File:** `backend/tests/integration/test_vehicle_api.py`
-    *   **Summary:** Contains 450 lines of vehicle API tests covering listing, filtering, pagination, and caching scenarios.
-    *   **Recommendation:** This file already has good coverage. Review it to ensure caching tests are comprehensive.
-
-*   **File:** `backend/tests/integration/test_command_api.py`
-    *   **Summary:** Contains 747 lines of command API tests.
-    *   **Recommendation:** Review this file carefully - the low coverage of `command_repository.py` (26%) and `command_service.py` (58%) suggests missing test coverage for command filtering, pagination, and status update scenarios.
-
-*   **File:** `backend/app/repositories/command_repository.py`
-    *   **Summary:** Contains 4 key functions: `create_command`, `get_command_by_id`, `update_command_status`, and `get_commands` (with filtering by vehicle_id, user_id, status, and pagination).
-    *   **CRITICAL:** The `get_commands` function (lines 102-136) has VERY LOW coverage. This function handles filtering and pagination logic that MUST be tested.
-    *   **Recommendation:** You MUST write integration tests that exercise all filter combinations and pagination scenarios for this function.
-
-*   **File:** `backend/app/repositories/vehicle_repository.py`
-    *   **Summary:** Contains 4 functions: `get_all_vehicles` (with status_filter, search_term, pagination), `get_vehicle_by_id`, `get_vehicle_by_vin`, and `update_vehicle_status`.
-    *   **CRITICAL:** Only 31% coverage - the filtering and search logic is likely not being tested.
-    *   **Recommendation:** Write tests that exercise the VIN search (partial match, case-insensitive) and status filtering with various combinations.
-
-*   **File:** `backend/app/repositories/response_repository.py`
-    *   **Summary:** Low coverage at 47%. This repository handles command response storage.
-    *   **Recommendation:** Add tests for response creation and retrieval scenarios, especially for multi-response commands.
-
-*   **File:** `backend/app/services/command_service.py`
-    *   **Summary:** Only 58% coverage. This service orchestrates command submission, validation, and async execution via the vehicle connector.
-    *   **CRITICAL:** Missing coverage likely includes error paths, status transitions, and interaction with the vehicle connector.
-    *   **Recommendation:** Add tests for command validation failures, vehicle connector errors, and status update scenarios.
+*   **File:** `backend/requirements.txt`
+    *   **Summary:** Contains all required dependencies including `redis>=5.0.0`, `fastapi>=0.104.0`, and `structlog>=23.2.0`.
+    *   **Recommendation:** FastAPI 0.104.0+ includes native WebSocket support. You SHOULD use `from fastapi import WebSocket, WebSocketDisconnect` for WebSocket handling. You do NOT need to install additional libraries.
+    *   **Note:** For Redis async support, use `redis.asyncio` module: `import redis.asyncio as redis`. This is already available with the `redis>=5.0.0` package.
 
 ### Implementation Tips & Notes
 
-*   **Tip #1 - Failing Tests**: You have 3 FAILING tests in `tests/unit/test_command_service.py`. These MUST be fixed first before claiming task completion:
-    - `test_submit_command_success`
-    - `test_submit_command_vehicle_not_found`
-    - `test_submit_command_empty_params`
+*   **Tip: WebSocket Authentication Pattern**
+    ```python
+    from fastapi import WebSocket, WebSocketDisconnect, status
+    from app.services.auth_service import verify_access_token
+    from app.repositories.user_repository import get_user_by_id
 
-*   **Tip #2 - Coverage Already Met**: The OVERALL coverage is 88%, which already exceeds the 80% threshold. However, several individual modules are below 80%. You should focus on:
-    1. Fixing the 3 failing unit tests
-    2. Adding integration tests to cover the low-coverage repository functions
-    3. Ensuring the Makefile `test` target runs with coverage reporting
+    async def authenticate_websocket(websocket: WebSocket, token: str | None, db: AsyncSession) -> User | None:
+        """Authenticate WebSocket connection using JWT from query parameter."""
+        if not token:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return None
 
-*   **Tip #3 - Makefile Update**: The current Makefile `test` target at line 21-27 does NOT include the `--cov` flags required by the acceptance criteria. You MUST update it to:
-    ```makefile
-    test:
-        @echo "Running backend tests with coverage..."
-        @cd backend && pytest --cov=app --cov-report=html --cov-report=term
+        payload = verify_access_token(token)
+        if not payload:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return None
+
+        user_id = uuid.UUID(payload.get("user_id"))
+        user = await get_user_by_id(db, user_id)
+        if not user or not user.is_active:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return None
+
+        return user
     ```
 
-*   **Tip #4 - SQLite vs PostgreSQL**: The current test setup uses SQLite, which means:
-    - JSONB fields cannot be tested (audit_logs, command_params, response_payload)
-    - The audit service is mocked in conftest.py
-    - This is ACCEPTABLE for the current iteration since the task focuses on integration testing of APIs, not database implementation details
+*   **Tip: Redis Pub/Sub Pattern**
+    The Redis async client supports pub/sub with `pubsub()` method. Here's the recommended pattern:
+    ```python
+    redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe(f"response:{command_id}")
 
-*   **Tip #5 - Redis Caching**: The vehicle service uses Redis caching (see requirement "Tests verify Redis caching behavior for vehicle status"). Make sure `test_vehicle_api.py` has tests that verify:
-    - First request to `/vehicles/{id}/status` fetches from database
-    - Second request within TTL (30 seconds) hits cache
-    - Cache invalidation after TTL expiry
+    async for message in pubsub.listen():
+        if message["type"] == "message":
+            data = json.loads(message["data"])
+            # Forward to WebSocket client
+            await websocket.send_json(data)
 
-*   **Tip #6 - Audit Logging**: Since the audit service is mocked in conftest, tests should verify that `log_audit_event` was CALLED with correct parameters, not that actual database records were created. Check `test_auth_api.py` for examples if needed.
+    # Cleanup
+    await pubsub.unsubscribe(f"response:{command_id}")
+    await pubsub.close()
+    await redis_client.close()
+    ```
 
-*   **Warning #1 - Test Isolation**: Each test should be independent and not rely on data from previous tests. The current `db_session` fixture (function-scoped) provides good isolation.
+*   **Tip: WebSocket Connection Manager Pattern**
+    You need to implement a connection manager to track active WebSocket connections. The manager should:
+    1. Store connections in a dictionary keyed by `command_id`
+    2. Support multiple clients subscribing to the same command
+    3. Handle broadcasting events to all subscribed clients
+    4. Clean up connections on disconnect
 
-*   **Warning #2 - Async Patterns**: ALL repository and service functions are async. Make sure all test functions are marked with `@pytest.mark.asyncio` and use `await` correctly.
+    Example structure:
+    ```python
+    class WebSocketManager:
+        def __init__(self):
+            self.active_connections: dict[str, list[WebSocket]] = {}
 
-*   **Note #1 - Test Organization**: Follow the pattern in `test_auth_api.py` of organizing tests into classes by endpoint or feature area. This makes tests easier to navigate and maintain.
+        async def connect(self, command_id: str, websocket: WebSocket):
+            if command_id not in self.active_connections:
+                self.active_connections[command_id] = []
+            self.active_connections[command_id].append(websocket)
 
-*   **Note #2 - Coverage HTML Report**: The coverage HTML report is generated in `backend/htmlcov/` and includes detailed line-by-line coverage highlighting. Use this to identify exactly which lines need test coverage.
+        async def disconnect(self, command_id: str, websocket: WebSocket):
+            if command_id in self.active_connections:
+                self.active_connections[command_id].remove(websocket)
+                if not self.active_connections[command_id]:
+                    del self.active_connections[command_id]
 
-### Action Plan Summary
+        async def broadcast(self, command_id: str, message: dict):
+            if command_id in self.active_connections:
+                for connection in self.active_connections[command_id]:
+                    await connection.send_json(message)
+    ```
 
-1. **FIRST PRIORITY**: Fix the 3 failing unit tests in `tests/unit/test_command_service.py`
-2. **SECOND PRIORITY**: Update the Makefile `test` target to include `--cov=app --cov-report=html --cov-report=term`
-3. **THIRD PRIORITY**: Add integration tests to cover low-coverage repository functions:
-   - Command repository filtering and pagination (`get_commands` function)
-   - Vehicle repository filtering, search, and status updates
-   - Response repository create and retrieval operations
-4. **FOURTH PRIORITY**: Verify all acceptance criteria are met and tests pass consistently
+*   **Tip: Structured Logging for WebSocket Events**
+    The project uses `structlog` for logging. You SHOULD log key WebSocket events with structured context:
+    ```python
+    logger.info(
+        "websocket_connection_established",
+        command_id=str(command_id),
+        user_id=str(user.user_id),
+        username=user.username
+    )
+    ```
 
-### Coverage Improvement Targets
+*   **Warning: Concurrent Task Handling**
+    You'll need to handle two concurrent async tasks:
+    1. Listening for Redis Pub/Sub messages
+    2. Handling WebSocket disconnection (waiting for `WebSocketDisconnect`)
 
-Focus your testing efforts on these specific uncovered code paths:
+    Use `asyncio.create_task()` and `asyncio.gather()` or `asyncio.wait()` with `FIRST_COMPLETED` to handle both:
+    ```python
+    async def redis_listener():
+        async for message in pubsub.listen():
+            # Forward to WebSocket
+            pass
 
-1. **command_repository.py** (26% → 80%+):
-   - Test `get_commands` with various filter combinations (vehicle_id, user_id, status)
-   - Test pagination (limit, offset)
-   - Test ordering (should be by submitted_at desc)
+    async def websocket_handler():
+        try:
+            while True:
+                # This will raise WebSocketDisconnect when client disconnects
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
 
-2. **vehicle_repository.py** (31% → 80%+):
-   - Test `get_all_vehicles` with status_filter
-   - Test VIN search with partial matches
-   - Test case-insensitive search
-   - Test `update_vehicle_status` function
+    # Run both tasks concurrently
+    await asyncio.gather(
+        redis_listener(),
+        websocket_handler()
+    )
+    ```
 
-3. **response_repository.py** (47% → 80%+):
-   - Test response creation with sequence numbers
-   - Test retrieval by command_id
-   - Test is_final flag handling
+*   **Warning: Memory Leak Prevention**
+    You MUST ensure proper cleanup of Redis connections when WebSocket disconnects. Use try/finally blocks:
+    ```python
+    try:
+        # WebSocket and Redis logic
+        pass
+    finally:
+        # Always cleanup
+        await pubsub.unsubscribe(f"response:{command_id}")
+        await pubsub.close()
+        await redis_client.close()
+        await manager.disconnect(command_id, websocket)
+    ```
 
-4. **command_service.py** (58% → 80%+):
-   - Test command validation error paths
-   - Test vehicle not found scenarios
-   - Test interaction with vehicle connector
-   - Test status transitions during command execution
+*   **Note: Status Event Publishing**
+    Currently, the vehicle connector does NOT publish a status event when command completes (only response events). You have TWO options:
+    1. **Recommended:** Modify `vehicle_connector.py` to publish a status event after updating command status (around line 263)
+    2. **Alternative:** Have the WebSocket server query the database periodically to check status
+
+    Option 1 is cleaner and more real-time. Add this after line 263:
+    ```python
+    # Publish status event to Redis
+    status_event = {
+        "event": "status",
+        "command_id": str(command_id),
+        "status": "completed",
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await redis_client.publish(channel, json.dumps(status_event))
+    ```
+
+*   **Note: Testing Pattern**
+    For WebSocket integration tests, use FastAPI's TestClient with WebSocket support:
+    ```python
+    from fastapi.testclient import TestClient
+
+    def test_websocket_connection():
+        with TestClient(app) as client:
+            with client.websocket_connect(f"/ws/responses/{command_id}?token={valid_jwt}") as websocket:
+                data = websocket.receive_json()
+                assert data["event"] == "response"
+    ```
+
+*   **Tip: Error Event Format**
+    When errors occur (timeout, vehicle unreachable, etc.), publish error events to Redis:
+    ```python
+    error_event = {
+        "event": "error",
+        "command_id": str(command_id),
+        "error_message": "Vehicle connection timeout"
+    }
+    ```
+
+### Project Conventions
+
+*   **Logging:** Use `structlog` with structured fields. Import: `import structlog; logger = structlog.get_logger(__name__)`
+*   **Type Hints:** Use Python 3.10+ type hints. Use `uuid.UUID` for UUIDs, `dict[str, Any]` for JSON objects
+*   **Async/Await:** All database and I/O operations MUST be async. Use `async def` and `await`
+*   **Error Handling:** Use try/except blocks with proper logging. Always include `exc_info=True` for exceptions
+*   **Code Quality:** Code must pass `ruff check` and `mypy` (strict mode). No linting errors allowed
+*   **Test Coverage:** Maintain ≥80% test coverage. Use pytest with pytest-asyncio
+
+### Files to Create/Modify
+
+1. **CREATE:** `backend/app/api/v1/websocket.py` - Main WebSocket endpoint implementation
+2. **CREATE:** `backend/app/services/websocket_manager.py` - Connection manager service
+3. **MODIFY:** `backend/app/connectors/vehicle_connector.py` - Add status event publishing (optional but recommended)
+4. **MODIFY:** `backend/app/main.py` - Register WebSocket router
+5. **CREATE:** `backend/tests/integration/test_websocket.py` - Comprehensive integration tests
