@@ -13,6 +13,11 @@ import type {
   UserProfile,
   LogoutResponse,
 } from '../types/auth';
+import type {
+  VehicleResponse,
+  VehicleStatusResponse,
+  VehicleListParams,
+} from '../types/vehicle';
 
 // Get API base URL from environment variable or default to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -178,6 +183,44 @@ export const authAPI = {
 
   getProfile: async (): Promise<UserProfile> => {
     const response = await apiClient.get<UserProfile>('/api/v1/auth/me');
+    return response.data;
+  },
+};
+
+// Vehicle API methods
+export const vehicleAPI = {
+  /**
+   * Get list of vehicles with optional filtering and pagination.
+   *
+   * @param params - Query parameters for filtering and pagination
+   * @returns Array of vehicle objects
+   */
+  getVehicles: async (params?: VehicleListParams): Promise<VehicleResponse[]> => {
+    const response = await apiClient.get<VehicleResponse[]>('/api/v1/vehicles', { params });
+    return response.data;
+  },
+
+  /**
+   * Get a single vehicle by ID.
+   *
+   * @param vehicleId - UUID of the vehicle to retrieve
+   * @returns Vehicle object with full details
+   */
+  getVehicle: async (vehicleId: string): Promise<VehicleResponse> => {
+    const response = await apiClient.get<VehicleResponse>(`/api/v1/vehicles/${vehicleId}`);
+    return response.data;
+  },
+
+  /**
+   * Get vehicle connection status (cached in Redis for 30 seconds).
+   *
+   * @param vehicleId - UUID of the vehicle
+   * @returns Vehicle status object with connection_status, last_seen_at, and health metrics
+   */
+  getVehicleStatus: async (vehicleId: string): Promise<VehicleStatusResponse> => {
+    const response = await apiClient.get<VehicleStatusResponse>(
+      `/api/v1/vehicles/${vehicleId}/status`
+    );
     return response.data;
   },
 };

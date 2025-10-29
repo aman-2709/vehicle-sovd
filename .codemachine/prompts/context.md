@@ -10,30 +10,28 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I3.T4",
+  "task_id": "I3.T5",
   "iteration_id": "I3",
   "iteration_goal": "Real-Time WebSocket Communication & Frontend Foundation",
-  "description": "Create React application foundation in `frontend/src/`. Implement: 1) Main entry point `main.tsx` with React Router setup, 2) Root component `App.tsx` with route definitions (Login, Dashboard, Vehicles, Commands, History), 3) Authentication context `src/context/AuthContext.tsx` for managing JWT tokens (access token in memory, refresh token in localStorage), 4) Login page `src/pages/LoginPage.tsx` with form (username, password fields, submit button), 5) API client `src/api/client.ts` using axios with base URL from environment variable, automatic JWT injection via interceptor, token refresh logic on 401 response. Implement login flow: submit credentials to `POST /api/v1/auth/login`, store tokens in context, redirect to dashboard. Implement protected route wrapper `src/components/auth/ProtectedRoute.tsx` that redirects to login if not authenticated. Create MUI theme in `src/styles/theme.ts` with automotive-inspired color scheme. Write component tests using Vitest and React Testing Library in `frontend/tests/components/`.",
+  "description": "Create Vehicles page `src/pages/VehiclesPage.tsx` displaying list of vehicles fetched from `GET /api/v1/vehicles` API. Implement: 1) Vehicle list component `src/components/vehicles/VehicleList.tsx` using MUI Table or Card layout, 2) Display vehicle fields: VIN, make, model, year, connection status (with color indicator: green=connected, gray=disconnected, red=error), last_seen_at (formatted as relative time, e.g., \"2 minutes ago\"), 3) React Query integration for data fetching, caching, and auto-refresh (refetch every 30 seconds), 4) Loading state (skeleton or spinner), 5) Error state (error message display), 6) Empty state (when no vehicles), 7) Search input to filter vehicles by VIN (client-side filtering initially), 8) Status filter dropdown (All, Connected, Disconnected). Create vehicle types `src/types/vehicle.ts` matching backend schemas. Write component tests in `frontend/tests/components/VehicleList.test.tsx`.",
   "agent_type_hint": "FrontendAgent",
-  "inputs": "Architecture Blueprint Section 3.3 (Container Diagram - Web App); Technology Stack (React 18, TypeScript, MUI).",
+  "inputs": "OpenAPI spec from I2.T9 (vehicle endpoints); Architecture Blueprint Section 3.7 (API Endpoints - Vehicles).",
   "target_files": [
-    "frontend/src/main.tsx",
-    "frontend/src/App.tsx",
-    "frontend/src/context/AuthContext.tsx",
-    "frontend/src/pages/LoginPage.tsx",
+    "frontend/src/pages/VehiclesPage.tsx",
+    "frontend/src/components/vehicles/VehicleList.tsx",
+    "frontend/src/types/vehicle.ts",
     "frontend/src/api/client.ts",
-    "frontend/src/components/auth/ProtectedRoute.tsx",
-    "frontend/src/styles/theme.ts",
-    "frontend/tests/components/LoginPage.test.tsx"
+    "frontend/tests/components/VehicleList.test.tsx"
   ],
   "input_files": [
-    "docs/api/openapi.yaml"
+    "docs/api/openapi.yaml",
+    "frontend/src/api/client.ts"
   ],
-  "deliverables": "Functional React application with login page; JWT authentication context; API client with token management; protected routes; MUI theme; component tests.",
-  "acceptance_criteria": "`npm run dev` starts frontend at `http://localhost:3000`; Login page renders with username and password fields; Submitting valid credentials (from seed data: admin/admin123) calls `/api/v1/auth/login` and stores tokens; After login, user redirected to Dashboard page (can be placeholder for now); Protected routes redirect to login if not authenticated; API client injects `Authorization: Bearer {token}` header on all requests; On 401 response, API client attempts token refresh automatically; MUI theme applied globally (verify by checking component styling); Component tests verify: login form submission, error handling, token storage; No console errors in browser; No linter errors (`npm run lint`)",
+  "deliverables": "Functional vehicle list page with API integration; React Query caching; filtering and search; loading/error states; component tests.",
+  "acceptance_criteria": "Vehicles page displays all vehicles from backend (verify with seed data: 2 vehicles); Vehicle connection status shown with color coding; Last seen timestamp formatted as relative time; Search input filters vehicles by VIN (partial match, case-insensitive); Status filter dropdown filters by connection status; React Query caches data (verify with network tab: first load fetches, second load uses cache); Auto-refresh every 30 seconds (verify with network tab); Loading spinner shown during initial fetch; Error message displayed if API fails (test by stopping backend); Empty state shown if no vehicles match filters; Component tests verify: rendering vehicle list, search functionality, status filtering; No console errors; No linter errors",
   "dependencies": [
-    "I2.T1",
-    "I2.T9"
+    "I2.T2",
+    "I3.T4"
   ],
   "parallelizable": true,
   "done": false
@@ -46,147 +44,78 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Technology Stack (from 02_Architecture_Overview.md)
+### Context: Vehicle API Endpoints (from OpenAPI Specification)
 
 ```markdown
-<!-- anchor: technology-stack -->
-### 3.2. Technology Stack Summary
+## GET /api/v1/vehicles
 
-<!-- anchor: stack-overview -->
-#### Technology Selection Matrix
+**Summary:** List Vehicles
 
-| **Layer/Concern** | **Technology** | **Justification** |
-|-------------------|----------------|-------------------|
-| **Frontend Framework** | React 18 + TypeScript | Industry-standard component model; TypeScript provides type safety; extensive ecosystem; strong community support; meets requirement. |
-| **Frontend State Management** | React Context + React Query | React Query for server state (caching, sync); Context for auth/global UI state; avoids Redux complexity for this scale. |
-| **Frontend Build** | Vite | Fast dev server and build times; superior to CRA; excellent TypeScript support; optimized production bundles. |
-| **Frontend UI Library** | Material-UI (MUI) | Comprehensive component library; automotive industry precedent; accessibility built-in; professional appearance. |
-| **Authentication** | JWT (JSON Web Tokens) | Stateless; scalable; industry standard; supported by FastAPI middleware. |
-| **Auth Library** | python-jose + passlib | JWT encoding/decoding; secure password hashing (bcrypt); widely adopted. |
-| **API Style** | REST (OpenAPI 3.1)| Requirements explicitly request OpenAPI/Swagger docs; RESTful design well-understood; mature tooling. |
+**Description:** Get list of vehicles with optional filtering and pagination.
+
+Query parameters:
+- `status`: Filter by connection status (connected, disconnected, error)
+- `search`: Search by VIN (partial match, case-insensitive)
+- `limit`: Maximum number of results (1-100, default: 50)
+- `offset`: Number of results to skip (default: 0)
+
+Requires authentication via JWT bearer token.
+
+**Returns:**
+List of vehicle objects with details (vehicle_id, vin, make, model, year, connection_status, last_seen_at, metadata)
+
+**Raises:**
+- 401 Unauthorized: If JWT token is missing or invalid
+- 422 Unprocessable Entity: If query parameters are invalid
+
+**Example Response Structure:**
+The endpoint returns a direct array of VehicleResponse objects:
+```
+[
+  {
+    "vehicle_id": "123e4567-e89b-12d3-a456-426614174000",
+    "vin": "1HGCM82633A123456",
+    "make": "Honda",
+    "model": "Accord",
+    "year": 2024,
+    "connection_status": "connected",
+    "last_seen_at": "2025-10-28T10:00:00Z",
+    "metadata": null
+  }
+]
 ```
 
-**Key Technology Decisions**
+## GET /api/v1/vehicles/{vehicle_id}
 
-**FastAPI over Node.js/Express:**
-- Superior async/await model for handling concurrent vehicle connections
-- Automatic OpenAPI generation saves development time
-- Native WebSocket support crucial for streaming responses
-- Type hints improve maintainability and align with TypeScript frontend philosophy
-- Performance benchmarks show FastAPI competitive with Node.js for I/O-bound operations
+**Summary:** Get Vehicle
+
+**Description:** Get a single vehicle by ID.
+
+Path parameters:
+- `vehicle_id`: UUID of the vehicle to retrieve
+
+**Returns:**
+Vehicle object with full details
+
+**Raises:**
+- 401 Unauthorized: If JWT token is missing or invalid
+- 404 Not Found: If vehicle with given ID does not exist
+
+## GET /api/v1/vehicles/{vehicle_id}/status
+
+**Summary:** Get Vehicle Status
+
+**Description:** Get vehicle connection status (cached in Redis for 30 seconds).
+
+This endpoint is optimized for frequent polling by frontend dashboards.
+Vehicle status is cached in Redis with a 30-second TTL to reduce database load.
+
+**Returns:**
+Vehicle status object with connection_status, last_seen_at, and health metrics
+
+**Note:**
+Second request within 30 seconds will return cached data (faster response).
 ```
-
-### Context: Container Diagram - Web Application (from 03_System_Structure_and_Data.md)
-
-```markdown
-<!-- anchor: container-diagram -->
-### 3.4. Container Diagram (C4 Level 2)
-
-<!-- anchor: container-diagram-description -->
-#### Description
-
-This diagram zooms into the SOVD Command WebApp system boundary and shows the major deployable containers (applications and data stores). Key containers include:
-
-- **Web Application (SPA)**: React-based frontend served as static files
-- **API Gateway**: Nginx reverse proxy for routing, TLS termination, and load balancing
-- **Application Server**: FastAPI-based backend with modular services
-- **WebSocket Server**: Handles real-time streaming responses (embedded in FastAPI)
-- **Vehicle Connector Service**: Abstraction layer for vehicle communication protocols
-- **PostgreSQL Database**: Primary data store for vehicles, commands, responses, and audit logs
-- **Redis Cache**: Session storage and response caching for performance
-
-**Container Diagram:**
-```
-Container(web_app, "Web Application", "React 18, TypeScript, MUI", "Provides UI for authentication, vehicle selection, command execution, and response viewing")
-```
-
-Relationships:
-- Engineer → web_app (Uses, HTTPS)
-- web_app → api_gateway (Makes API calls, HTTPS, JSON)
-- web_app → ws_server (Opens WebSocket for streaming, WSS)
-```
-
-### Context: Authentication API Specification (from docs/api/openapi.yaml)
-
-```yaml
-/api/v1/auth/login:
-  post:
-    tags:
-      - auth
-    summary: Login
-    description: "Authenticate user and return access and refresh tokens."
-    operationId: login_api_v1_auth_login_post
-    requestBody:
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/LoginRequest'
-          example:
-            username: engineer1
-            password: securePassword123
-      required: true
-    responses:
-      '200':
-        description: Successful Response
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TokenResponse'
-
-components:
-  schemas:
-    LoginRequest:
-      properties:
-        username:
-          type: string
-          minLength: 1
-          maxLength: 100
-        password:
-          type: string
-          minLength: 1
-      required:
-        - username
-        - password
-
-    TokenResponse:
-      properties:
-        access_token:
-          type: string
-          description: "JWT access token"
-        refresh_token:
-          type: string
-          description: "JWT refresh token"
-        token_type:
-          type: string
-          default: "bearer"
-        expires_in:
-          type: integer
-          description: "Access token expiration time in seconds"
-```
-
-### Context: Authentication Endpoints (from backend implementation)
-
-The backend authentication service has been implemented with the following endpoints:
-
-1. **POST /api/v1/auth/login**
-   - Accepts: `{ username: string, password: string }`
-   - Returns: `{ access_token, refresh_token, token_type, expires_in }`
-   - On success: Creates session in database and returns tokens
-   - On failure: Returns 401 Unauthorized
-
-2. **POST /api/v1/auth/refresh**
-   - Accepts: `{ refresh_token: string }`
-   - Returns: `{ access_token, token_type, expires_in }`
-   - Validates refresh token against database and issues new access token
-
-3. **POST /api/v1/auth/logout**
-   - Requires: Bearer token in Authorization header
-   - Returns: `{ message: "Logged out successfully" }`
-   - Deletes all sessions for the user
-
-4. **GET /api/v1/auth/me**
-   - Requires: Bearer token in Authorization header
-   - Returns: `{ user_id, username, role, email }`
 
 ---
 
@@ -196,164 +125,315 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `frontend/package.json`
-    *   **Summary:** This file contains all the necessary dependencies for the task. The project is already configured with React 18.2.0, TypeScript, MUI 5.14.0, React Router 6.20.0, axios 1.6.0, @tanstack/react-query 5.8.0, and Vite. All testing dependencies are in place: vitest, @testing-library/react, @testing-library/jest-dom.
-    *   **Recommendation:** You DO NOT need to install any additional dependencies. All required packages are already present. Simply use them directly in your implementation.
+*   **File:** `frontend/src/api/client.ts`
+    *   **Summary:** This file contains the API client configuration using Axios with automatic JWT token injection, token refresh logic on 401 responses, and authentication endpoints (authAPI object with login, refresh, logout, getProfile methods).
+    *   **Recommendation:** You MUST extend this file to add vehicle-related API methods. Follow the existing pattern used for `authAPI` to create a `vehicleAPI` object with methods for `getVehicles()`, `getVehicle(id)`, and `getVehicleStatus(id)`. Export these methods so they can be imported in your React components.
+    *   **Implementation Pattern:**
+        ```typescript
+        export const vehicleAPI = {
+          getVehicles: async (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
+            const response = await apiClient.get('/api/v1/vehicles', { params });
+            return response.data; // Returns VehicleResponse[]
+          },
+          getVehicle: async (vehicleId: string) => {
+            const response = await apiClient.get(`/api/v1/vehicles/${vehicleId}`);
+            return response.data; // Returns VehicleResponse
+          },
+          getVehicleStatus: async (vehicleId: string) => {
+            const response = await apiClient.get(`/api/v1/vehicles/${vehicleId}/status`);
+            return response.data; // Returns VehicleStatusResponse
+          },
+        };
+        ```
 
-*   **File:** `frontend/tsconfig.json`
-    *   **Summary:** TypeScript is configured with strict mode enabled (`"strict": true`), with additional strict linting rules (`noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`). The JSX mode is set to `react-jsx` (modern JSX transform).
-    *   **Recommendation:** Your TypeScript code MUST adhere to strict type checking. Ensure all variables are typed, avoid `any` types, and handle all potential null/undefined cases.
+*   **File:** `frontend/src/context/AuthContext.tsx`
+    *   **Summary:** This file provides authentication context with `useAuth` hook that exposes `isAuthenticated`, `user`, `login`, `logout`, and token management.
+    *   **Recommendation:** You can use the `useAuth()` hook in your VehiclesPage to access the current user if needed for display or logging purposes. The JWT token is already automatically injected into all API calls via the API client interceptor, so you don't need to manually handle authentication in your vehicle components.
 
-*   **File:** `frontend/vite.config.ts`
-    *   **Summary:** Vite is configured to run on host `0.0.0.0` port 3000 with HMR. The React plugin is already configured.
-    *   **Recommendation:** The dev server will be accessible at http://localhost:3000. No additional Vite configuration is needed for this task.
+*   **File:** `frontend/src/types/auth.ts`
+    *   **Summary:** This file contains TypeScript interfaces for authentication-related types matching backend Pydantic schemas (LoginRequest, TokenResponse, RefreshRequest, RefreshResponse, UserProfile, LogoutResponse).
+    *   **Recommendation:** You MUST create a similar file `frontend/src/types/vehicle.ts` with TypeScript interfaces matching the backend vehicle schemas. Based on the OpenAPI spec and backend schemas, you should define:
+        - `VehicleResponse` interface matching `backend/app/schemas/vehicle.py::VehicleResponse`
+        - `VehicleStatusResponse` interface matching the status endpoint response
+        - `VehicleListResponse` interface if needed for future pagination
+    *   **Key Fields:** The `VehicleResponse` should include: `vehicle_id` (string), `vin` (string), `make` (string), `model` (string), `year` (number), `connection_status` (string), `last_seen_at` (string | null), `metadata` (object | null)
 
-*   **File:** `frontend/.eslintrc.json` and `frontend/.prettierrc`
-    *   **Summary:** ESLint and Prettier are already configured in the project.
-    *   **Recommendation:** Run `npm run lint` to check for linting errors and `npm run format` to format your code before completing the task.
+*   **File:** `backend/app/schemas/vehicle.py`
+    *   **Summary:** This file defines the Pydantic schemas for vehicle responses with fields like `vehicle_id`, `vin`, `make`, `model`, `year`, `connection_status`, `last_seen_at`, and `metadata`.
+    *   **Recommendation:** Your TypeScript types in `frontend/src/types/vehicle.ts` MUST match these Pydantic schemas exactly. Note that `vehicle_id` is a UUID that gets serialized to string, `last_seen_at` is a datetime (ISO 8601 string in JSON), and `metadata` is optional JSONB (object or null).
+    *   **Critical Detail:** The backend uses `vehicle_metadata` as the field name in the model, but it's aliased to `metadata` in the response via `Field(alias="vehicle_metadata")`. Your TypeScript interface should use `metadata` as the field name to match the JSON response.
 
-*   **File:** `frontend/src/main.tsx`
-    *   **Summary:** This is a minimal placeholder that renders the App component into the root element using React 18's `createRoot` API. It includes `React.StrictMode`.
-    *   **Recommendation:** You MUST update this file to wrap the App component with React Router's `BrowserRouter`. You should also integrate the AuthContext provider here so it's available throughout the application.
+*   **File:** `backend/app/api/v1/vehicles.py`
+    *   **Summary:** This file implements the vehicle API endpoints with filtering, pagination, and Redis caching for status endpoint. The `list_vehicles` endpoint returns `list[VehicleResponse]` directly, NOT a wrapped object.
+    *   **Recommendation:** The backend endpoint returns a list of `VehicleResponse` objects directly (not wrapped in a pagination object with `vehicles`, `total`, etc.). You should handle the response accordingly in your frontend. Your API call should expect an array of vehicle objects.
+    *   **Critical Note:** Line 105 of vehicles.py shows: `return [VehicleResponse.model_validate(v) for v in vehicles]` - this confirms the response is a direct array, not a wrapped object.
+
+*   **File:** `frontend/src/pages/LoginPage.tsx`
+    *   **Summary:** This file demonstrates the pattern for form handling, error states, loading states, and MUI components (Container, Paper, Box, TextField, Button, Alert, CircularProgress).
+    *   **Recommendation:** You SHOULD follow the same patterns for loading states (`CircularProgress`), error display (`Alert`), and layouts using MUI components like `Paper`, `Container`, `Box`, `TextField`, and `Button`.
 
 *   **File:** `frontend/src/App.tsx`
-    *   **Summary:** This is a minimal placeholder component that displays a status message.
-    *   **Recommendation:** You MUST replace this entirely with route definitions using React Router. Define routes for `/login`, `/dashboard`, `/vehicles`, `/commands`, and `/history`. The root path `/` should redirect to either `/login` or `/dashboard` based on authentication status.
+    *   **Summary:** This file sets up React Router with protected routes using the `ProtectedRoute` component. The `/vehicles` route already exists and points to `VehiclesPage`.
+    *   **Recommendation:** The `/vehicles` route already exists and points to `VehiclesPage`. You are replacing the placeholder implementation with the full implementation. No changes needed to this file.
 
-*   **File:** `backend/app/api/v1/auth.py`
-    *   **Summary:** The authentication API is fully implemented with login, refresh, logout, and profile endpoints. The login endpoint returns `TokenResponse` with `access_token`, `refresh_token`, `token_type`, and `expires_in`.
-    *   **Recommendation:** Your API client MUST call `POST /api/v1/auth/login` with Content-Type `application/json` and a body containing `{ username, password }`. The backend expects these exact field names.
+*   **File:** `frontend/src/main.tsx`
+    *   **Summary:** This file is the entry point that wraps the app with `ThemeProvider`, `AuthProvider`, and `BrowserRouter`.
+    *   **Recommendation:** You MUST add the React Query `QueryClientProvider` to this file to enable React Query throughout the application. Import `QueryClient` and `QueryClientProvider` from `@tanstack/react-query`, create a `QueryClient` instance, and wrap the `<App />` component with the provider.
+    *   **Implementation:**
+        ```typescript
+        import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-*   **File:** `backend/app/schemas/auth.py`
-    *   **Summary:** The Pydantic schemas define the exact structure of authentication requests and responses. `LoginRequest` has `username` and `password` fields. `TokenResponse` has `access_token`, `refresh_token`, `token_type`, and `expires_in` fields.
-    *   **Recommendation:** Your TypeScript types MUST match these schemas exactly. Create interfaces that mirror the Pydantic models.
+        const queryClient = new QueryClient({
+          defaultOptions: {
+            queries: {
+              refetchOnWindowFocus: false,
+              retry: 1,
+              staleTime: 30000, // 30 seconds
+            },
+          },
+        });
 
-*   **File:** `frontend/index.html`
-    *   **Summary:** The HTML template includes a root div with id="root" and loads the main.tsx script.
-    *   **Recommendation:** No changes needed to this file. The root element is already in place for React mounting.
+        // In the render:
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </QueryClientProvider>
+        ```
+
+*   **File:** `frontend/src/pages/VehiclesPage.tsx`
+    *   **Summary:** This is currently a placeholder component that displays a simple message.
+    *   **Recommendation:** You MUST replace this entire file with the full implementation including the VehicleList component, search input, status filter, and integration with React Query.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** The backend runs on port 8000 (based on docker-compose.yml configuration). Your axios baseURL should be `http://localhost:8000` for development. Consider using Vite's `import.meta.env` to make this configurable (e.g., `import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'`).
+*   **Tip:** React Query is already installed (`@tanstack/react-query@^5.8.0` in package.json). You should use `useQuery` hook for fetching vehicles with automatic caching and refetching.
 
-*   **Note:** The task specifies storing the access token in memory and refresh token in localStorage. This is a security best practice. Implement the AuthContext with a state variable for the access token (in-memory) and use `localStorage.setItem('refresh_token', token)` for the refresh token.
-
-*   **Warning:** The axios interceptor for 401 responses MUST implement retry logic carefully to avoid infinite loops. When a 401 is received, attempt to refresh the token ONCE using the refresh token from localStorage. If the refresh succeeds, retry the original request with the new access token. If the refresh fails, clear all tokens and redirect to login.
-
-*   **Tip:** For the MUI theme, create an "automotive-inspired" color scheme. Consider using dark blues, grays, and metallic colors. MUI's `createTheme` function accepts a palette object where you can customize primary, secondary, and error colors. Example:
+*   **Tip:** For relative time formatting (e.g., "2 minutes ago"), you can use a simple utility function or consider using a library like `date-fns` (not installed yet). Since the task requires "2 minutes ago" format and it's a common need, I recommend creating a simple utility function in `frontend/src/utils/dateUtils.ts`:
     ```typescript
-    const theme = createTheme({
-      palette: {
-        primary: { main: '#1976d2' }, // Blue
-        secondary: { main: '#424242' }, // Dark gray
-      }
+    export const formatRelativeTime = (dateString: string | null): string => {
+      if (!dateString) return 'Never';
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+      if (diffInSeconds < 60) return 'Just now';
+      if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+      if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+      return `${Math.floor(diffInSeconds / 86400)} days ago`;
+    };
+    ```
+
+*   **Tip:** For connection status color coding:
+    - `connected` → green (use MUI theme color `success.main`)
+    - `disconnected` → gray (use `text.secondary`)
+    - `error` → red (use `error.main`)
+
+    You can use MUI's `Chip` component with `color` prop or a `Box` with styled background color.
+
+*   **Tip:** The backend currently returns a direct array of vehicles, not a wrapped object. Your API call should handle this:
+    ```typescript
+    const { data: vehicles, isLoading, error } = useQuery({
+      queryKey: ['vehicles'],
+      queryFn: () => vehicleAPI.getVehicles(),
+      refetchInterval: 30000, // Auto-refresh every 30 seconds
     });
     ```
 
-*   **Note:** The ProtectedRoute component should use React Router's Navigate component for redirection. Check the authentication state from AuthContext, and if not authenticated, render `<Navigate to="/login" replace />`.
+*   **Note:** For client-side filtering by VIN and status, you'll need to:
+    1. Fetch all vehicles initially
+    2. Use React state to manage search and status filter values
+    3. Use `useMemo` to compute the filtered list based on the state
+    4. Display the filtered list in the component
 
-*   **Tip:** For testing, the seed data includes two users: `admin/admin123` and `engineer/engineer123`. Your component tests should use these credentials when mocking successful login scenarios.
-
-*   **Warning:** The task requires component tests but does NOT require E2E tests at this stage. Focus on unit tests for the LoginPage component using React Testing Library. Mock the axios calls and AuthContext for isolated component testing.
-
-*   **Note:** The directory structure shows that `frontend/src/components/auth/`, `frontend/src/components/common/`, `frontend/src/pages/`, `frontend/src/api/`, and `frontend/src/styles/` directories already exist but are empty. You SHOULD create files in these existing directories rather than creating new directories.
-
-*   **Tip:** For the Dashboard placeholder, you can create a simple component that displays "Dashboard" and a logout button. The full dashboard implementation will come in later tasks. The key is to demonstrate that authenticated users can access it and unauthenticated users are redirected.
-
-*   **Important:** The axios interceptor MUST add the Authorization header for ALL requests (except login/refresh). Use `config.headers.Authorization = Bearer ${token}` in the request interceptor. Exclude the /auth/login and /auth/refresh endpoints from this header injection.
-
-*   **Note:** When implementing the token refresh logic, you need to handle the case where multiple concurrent requests receive 401 errors. Implement a promise-based queue so that only ONE refresh request is made, and all other pending requests wait for it to complete. This prevents multiple simultaneous refresh calls.
-
-*   **Tip:** For Vitest configuration, create a `vitest.config.ts` file or add vitest configuration to the existing `vite.config.ts`. You'll need to set up the test environment to 'jsdom' and configure global test utilities. Example:
+    Example:
     ```typescript
-    export default defineConfig({
-      test: {
-        environment: 'jsdom',
-        setupFiles: ['./tests/setup.ts'],
-        globals: true,
+    const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('All');
+
+    const filteredVehicles = useMemo(() => {
+      if (!vehicles) return [];
+      return vehicles.filter(v => {
+        const matchesSearch = searchTerm === '' ||
+          v.vin.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesStatus = statusFilter === 'All' ||
+          v.connection_status === statusFilter.toLowerCase();
+        return matchesSearch && matchesStatus;
+      });
+    }, [vehicles, searchTerm, statusFilter]);
+    ```
+
+*   **Warning:** The task specifies client-side filtering initially, but the backend actually supports server-side filtering via query parameters (`status` and `search`). For this task, implement client-side filtering as specified. However, document this decision and note that server-side filtering could be added as an optimization in a future iteration.
+
+*   **Testing Note:** For component tests with React Query, you'll need to wrap your component in a `QueryClientProvider` with a test query client. Example:
+    ```typescript
+    import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+    const createTestQueryClient = () => new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
       },
     });
+
+    const renderWithClient = (ui: React.ReactElement) => {
+      const testQueryClient = createTestQueryClient();
+      return render(
+        <QueryClientProvider client={testQueryClient}>
+          {ui}
+        </QueryClientProvider>
+      );
+    };
     ```
 
-*   **Warning:** The task acceptance criteria requires "No console errors in browser". Ensure your code doesn't have any console.error calls during normal operation. Console warnings are acceptable during development but should be minimized.
+*   **Important:** The task requires MUI Table or Card layout. I recommend using MUI `TableContainer`, `Table`, `TableHead`, `TableBody`, `TableRow`, `TableCell` components for a clean tabular view. This will be easier to implement filtering and sorting in the future.
 
----
+    Example structure:
+    ```typescript
+    <TableContainer component={Paper}>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>VIN</TableCell>
+            <TableCell>Make</TableCell>
+            <TableCell>Model</TableCell>
+            <TableCell>Year</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Last Seen</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {filteredVehicles.map(vehicle => (
+            <TableRow key={vehicle.vehicle_id}>
+              {/* ... table cells ... */}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+    ```
 
-## 4. Task Execution Checklist
+*   **Project Convention:** Based on existing code, use:
+    - Functional components with TypeScript (`React.FC`)
+    - Arrow functions for component definitions
+    - `async/await` for async operations wrapped in `void (async () => { ... })()`
+    - MUI `sx` prop for styling instead of styled-components
+    - JSDoc comments at the top of each file explaining its purpose
 
-Use this checklist to ensure you complete all requirements:
+*   **Note:** For the empty state (when no vehicles match filters), use MUI components to display a user-friendly message. Example:
+    ```typescript
+    {filteredVehicles.length === 0 && (
+      <Box sx={{ textAlign: 'center', py: 4 }}>
+        <Typography variant="h6" color="text.secondary">
+          No vehicles found
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {searchTerm || statusFilter !== 'All'
+            ? 'Try adjusting your filters'
+            : 'No vehicles available'}
+        </Typography>
+      </Box>
+    )}
+    ```
 
-### Phase 1: Project Setup
-- [ ] Create `.env.local` or use Vite's `import.meta.env` for API base URL configuration
-- [ ] Set up Vitest configuration for component testing
-- [ ] Create test setup file with React Testing Library configuration
+*   **Tip:** For the loading state, use MUI's `CircularProgress` centered in a Box:
+    ```typescript
+    {isLoading && (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+        <CircularProgress />
+      </Box>
+    )}
+    ```
 
-### Phase 2: Core Authentication Infrastructure
-- [ ] Implement `frontend/src/api/client.ts` with axios instance, base URL, request/response interceptors
-- [ ] Implement token refresh logic in interceptor with proper error handling
-- [ ] Create TypeScript interfaces matching backend schemas (LoginRequest, TokenResponse, etc.)
+*   **Tip:** For error state, use MUI's `Alert` component:
+    ```typescript
+    {error && (
+      <Alert severity="error" sx={{ mb: 2 }}>
+        Failed to load vehicles. Please try again.
+      </Alert>
+    )}
+    ```
 
-### Phase 3: Authentication Context
-- [ ] Implement `frontend/src/context/AuthContext.tsx` with state for access token (memory) and methods to manage tokens
-- [ ] Implement `login` function that calls `/api/v1/auth/login` and stores tokens
-- [ ] Implement `logout` function that clears tokens and calls `/api/v1/auth/logout`
-- [ ] Implement `refreshToken` function for token refresh flow
-- [ ] Create custom hook `useAuth` for consuming the context
+### Acceptance Criteria Verification Checklist
 
-### Phase 4: Routing and Protected Routes
-- [ ] Update `frontend/src/main.tsx` to include BrowserRouter and AuthContext provider
-- [ ] Update `frontend/src/App.tsx` with route definitions for all pages
-- [ ] Implement `frontend/src/components/auth/ProtectedRoute.tsx` wrapper component
-- [ ] Set up root path `/` to redirect based on auth status
+To meet all acceptance criteria, ensure:
 
-### Phase 5: Login Page
-- [ ] Implement `frontend/src/pages/LoginPage.tsx` with MUI form components
-- [ ] Add form validation (required fields)
-- [ ] Implement form submission handler that calls AuthContext.login
-- [ ] Add error display for authentication failures
-- [ ] Add loading state during login attempt
-- [ ] Implement redirect to dashboard on successful login
+1. **Data Display:** Vehicles page displays all vehicles from backend (2 seed vehicles visible)
+2. **Status Indicator:** Connection status shown with color coding (green/gray/red)
+3. **Time Formatting:** Last seen timestamp formatted as relative time ("X minutes ago")
+4. **Search:** Search input filters vehicles by VIN (partial match, case-insensitive)
+5. **Status Filter:** Dropdown filters by connection status (All, Connected, Disconnected)
+6. **Caching:** React Query caches data (verify network tab shows cache behavior)
+7. **Auto-refresh:** Data refetches every 30 seconds automatically
+8. **Loading State:** Loading spinner shown during initial fetch
+9. **Error State:** Error message displayed if API fails
+10. **Empty State:** Empty state shown when no vehicles match filters
+11. **Tests:** Component tests verify rendering, search, and filtering
+12. **Quality:** No console errors, no linter errors
 
-### Phase 6: Placeholder Pages
-- [ ] Create `frontend/src/pages/DashboardPage.tsx` (simple placeholder)
-- [ ] Create empty placeholders for VehiclesPage, CommandsPage, HistoryPage (or just Dashboard for now)
+### File Structure Summary
 
-### Phase 7: MUI Theme
-- [ ] Implement `frontend/src/styles/theme.ts` with automotive-inspired color scheme
-- [ ] Wrap App with ThemeProvider in main.tsx
+Expected file organization:
+```
+frontend/src/
+├── api/
+│   └── client.ts (MODIFY: add vehicleAPI methods)
+├── components/
+│   └── vehicles/
+│       └── VehicleList.tsx (CREATE: new component)
+├── pages/
+│   └── VehiclesPage.tsx (MODIFY: replace placeholder)
+├── types/
+│   └── vehicle.ts (CREATE: new types)
+├── utils/
+│   └── dateUtils.ts (CREATE: helper for relative time)
+└── main.tsx (MODIFY: add QueryClientProvider)
 
-### Phase 8: Testing
-- [ ] Write component test for LoginPage (form rendering, submission, error handling)
-- [ ] Test token storage in AuthContext
-- [ ] Test protected route redirection
-- [ ] Ensure all tests pass with `npm run test`
-- [ ] Verify linting passes with `npm run lint`
+frontend/tests/
+└── components/
+    └── VehicleList.test.tsx (CREATE: new test)
+```
 
-### Phase 9: Validation
-- [ ] Verify `npm run dev` starts successfully on port 3000
-- [ ] Manually test login flow with admin/admin123 credentials
-- [ ] Verify JWT token in Authorization header using browser DevTools Network tab
-- [ ] Test automatic token refresh on 401 response
-- [ ] Test logout functionality
-- [ ] Test protected route redirection when not logged in
-- [ ] Check browser console for errors (should be none)
+**CRITICAL:** Remember to update `frontend/src/main.tsx` to add the React Query `QueryClientProvider` wrapping before implementing the VehiclesPage, otherwise your `useQuery` hooks will fail with an error about missing QueryClient context.
 
----
+### Backend API Response Format (Critical!)
 
-## 5. Critical Success Factors
+Based on the actual backend implementation in `backend/app/api/v1/vehicles.py:105`:
 
-1. **Authentication Flow**: The login → token storage → protected route → auto-refresh flow MUST work seamlessly. This is the foundation for all future frontend features.
+```python
+return [VehicleResponse.model_validate(v) for v in vehicles]
+```
 
-2. **Type Safety**: All TypeScript types must match backend schemas exactly. Use strict typing throughout.
+The `/api/v1/vehicles` endpoint returns a **direct array** of vehicle objects:
 
-3. **Token Security**: Access token in memory (React state), refresh token in localStorage. Never store access tokens in localStorage (security vulnerability).
+```typescript
+// Correct response type:
+VehicleResponse[]
 
-4. **Error Handling**: Gracefully handle network errors, authentication failures, and token expiration. Display user-friendly error messages.
+// NOT:
+{ vehicles: VehicleResponse[], total: number, ... }
+```
 
-5. **Axios Interceptor**: The interceptor logic for token injection and refresh is complex. Test it thoroughly to avoid infinite loops or duplicate requests.
+Your TypeScript code MUST handle this correctly. The `vehicleAPI.getVehicles()` method should return `Promise<VehicleResponse[]>`, not a wrapped object.
 
-6. **Testing**: Component tests must be comprehensive. Test both success and failure scenarios for login.
+### Color Coding Reference
 
-7. **MUI Integration**: Ensure MUI theme is applied globally and components use MUI styling consistently.
+For vehicle connection status indicators, use these MUI theme colors:
 
-8. **No Console Errors**: The acceptance criteria explicitly requires no console errors. Debug and fix any errors before completing.
+| Status | Color | MUI Theme Reference | Hex |
+|--------|-------|---------------------|-----|
+| connected | Green | `success.main` | #2e7d32 |
+| disconnected | Gray | `text.secondary` | rgba(0,0,0,0.6) |
+| error | Red | `error.main` | #d32f2f |
+
+Implement this with MUI Chip:
+```typescript
+<Chip
+  label={vehicle.connection_status}
+  color={
+    vehicle.connection_status === 'connected' ? 'success' :
+    vehicle.connection_status === 'error' ? 'error' :
+    'default'
+  }
+  size="small"
+/>
+```
