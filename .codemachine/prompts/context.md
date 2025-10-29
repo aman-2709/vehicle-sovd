@@ -10,27 +10,23 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I3.T1",
+  "task_id": "I3.T2",
   "iteration_id": "I3",
   "iteration_goal": "Real-Time WebSocket Communication & Frontend Foundation",
-  "description": "Implement WebSocket endpoint in `backend/app/api/v1/websocket.py` at path `/ws/responses/{command_id}`. WebSocket connection requires JWT authentication via query parameter `?token={jwt}`. Implement connection lifecycle: 1) Validate JWT on connect (disconnect with error if invalid), 2) Subscribe to Redis Pub/Sub channel `response:{command_id}`, 3) Listen for response events from Redis, 4) Forward events to WebSocket client as JSON messages (format: `{\"event\": \"response\", \"command_id\": \"...\", \"response\": {...}}`), 5) Handle status change events (`{\"event\": \"status\", \"status\": \"completed\"}`), 6) Handle errors (`{\"event\": \"error\", \"error_message\": \"...\"}`), 7) Unsubscribe and close on client disconnect. Implement WebSocket connection manager in `backend/app/services/websocket_manager.py` to track active connections and handle broadcasting. Update mock vehicle connector (I2.T5) to publish response events to Redis channel. Write integration tests in `backend/tests/integration/test_websocket.py` using WebSocket test client.",
+  "description": "Update mock vehicle connector from I2.T5 to simulate streaming responses (multiple response chunks for single command). For command \"ReadDTC\", generate 2-3 response chunks published sequentially with delays: chunk 1 (DTC P0420), delay 0.5s, chunk 2 (DTC P0171), delay 0.5s, final chunk (status: complete with is_final=true). For \"ReadDataByID\", simulate progressive data streaming. Each chunk published to Redis as separate event with incrementing sequence_number. Update final chunk to set command status to `completed`. Write unit tests in `backend/tests/unit/test_vehicle_connector.py` verifying multi-chunk generation and timing.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.7 (WebSocket Protocol); Section 3.8 (Communication Patterns - Event-Driven Internal).",
+  "inputs": "Requirements specify \"streaming responses\"; Architecture Blueprint Section 3.7 (Communication Patterns).",
   "target_files": [
-    "backend/app/api/v1/websocket.py",
-    "backend/app/services/websocket_manager.py",
     "backend/app/connectors/vehicle_connector.py",
-    "backend/tests/integration/test_websocket.py"
+    "backend/tests/unit/test_vehicle_connector.py"
   ],
   "input_files": [
-    "backend/app/dependencies.py",
     "backend/app/connectors/vehicle_connector.py"
   ],
-  "deliverables": "Functional WebSocket endpoint with JWT auth; Redis Pub/Sub integration; connection manager; integration tests.",
-  "acceptance_criteria": "WebSocket client can connect to `ws://localhost:8000/ws/responses/{command_id}?token={valid_jwt}`; Connection rejected if JWT invalid or missing (WebSocket close with error code); After submitting command via REST API, WebSocket client receives response events in real-time; Response events match format: `{\"event\": \"response\", \"response\": {...}, \"sequence_number\": 1}`; Status event received when command completes: `{\"event\": \"status\", \"status\": \"completed\"}`; Multiple WebSocket clients can subscribe to same command (verify with 2 concurrent connections); Client disconnect unsubscribes from Redis (no memory leak); Integration tests verify: successful connection, event delivery, auth rejection; No errors in logs during WebSocket operations; No linter errors",
+  "deliverables": "Enhanced mock connector with multi-chunk streaming; unit tests verifying streaming behavior.",
+  "acceptance_criteria": "Command \"ReadDTC\" generates 3 response chunks (2 DTCs + final status); Each chunk has incrementing sequence_number (1, 2, 3); Final chunk has is_final=true; Chunks published with ~0.5 second intervals (verify timing in tests); WebSocket client (from I3.T1) receives all chunks in correct order; Unit tests verify: correct number of chunks, sequence_number increments, timing delays; Test coverage maintained ≥80%; No linter errors",
   "dependencies": [
-    "I2.T1",
-    "I2.T5"
+    "I3.T1"
   ],
   "parallelizable": false,
   "done": false
@@ -43,262 +39,325 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: WebSocket Protocol (from 04_Behavior_and_Communication.md)
+### Context: Streaming Response Requirements (from Task Description)
 
 ```markdown
-**WebSocket Protocol**
+The task requires implementing multi-chunk streaming responses for SOVD commands. This simulates real-world scenarios where vehicle diagnostic responses arrive progressively rather than all at once.
 
-Connection: wss://api.sovd.example.com/ws/responses/{command_id}?token={jwt}
+**Key Requirements:**
+- **ReadDTC Command**: Must generate 2-3 response chunks:
+  - Chunk 1: First DTC (P0420) with sequence_number=1
+  - Chunk 2: Second DTC (P0171) with sequence_number=2
+  - Chunk 3: Final status with sequence_number=3 and is_final=true
+- **Timing**: ~0.5 second delays between chunks
+- **Redis Events**: Each chunk published as separate event to `response:{command_id}` channel
+- **Status Update**: Final chunk triggers command status change to "completed"
+```
 
-Client → Server (subscribe):
-{
-  "action": "subscribe",
-  "command_id": "uuid"
-}
+### Context: WebSocket Real-Time Communication Pattern (from I3.T1)
 
-Server → Client (response event):
+```markdown
+The WebSocket endpoint (already implemented in I3.T1) subscribes to Redis Pub/Sub channels and forwards events to clients in real-time. The vehicle connector must publish events in the correct format:
+
+**Event Format:**
 {
   "event": "response",
   "command_id": "uuid",
-  "response": {
-    "response_id": "uuid",
-    "response_payload": { "dtcCode": "P0420", ... },
-    "sequence_number": 1,
-    "is_final": false,
-    "received_at": "2025-10-28T10:00:01Z"
-  }
+  "response_id": "uuid",
+  "response_payload": {...},
+  "sequence_number": 1,
+  "is_final": false
 }
 
-Server → Client (status event):
+**Status Event Format (Final):**
 {
   "event": "status",
   "command_id": "uuid",
   "status": "completed",
   "completed_at": "2025-10-28T10:00:01.5Z"
 }
-
-Server → Client (error event):
-{
-  "event": "error",
-  "command_id": "uuid",
-  "error_message": "Vehicle connection timeout"
-}
 ```
 
-### Context: Asynchronous Streaming Pattern (from 04_Behavior_and_Communication.md)
+### Context: Current Implementation State (from I3.T1)
 
 ```markdown
-**2. Asynchronous Streaming (WebSocket)**
+Task I3.T1 has been completed successfully, which means:
+- WebSocket endpoint is fully functional at `/ws/responses/{command_id}`
+- JWT authentication is working
+- Redis Pub/Sub subscription and event forwarding is operational
+- WebSocket clients can receive real-time events
+- Multiple concurrent clients are supported
+- Proper cleanup and resource management is in place
 
-Used for:
-- Real-time command execution status updates
-- Streaming command responses (multi-part responses from vehicle)
-- Live vehicle connection status notifications
-
-**Flow:**
-1. Client establishes WebSocket connection with auth token
-2. Client subscribes to specific channels (e.g., command response stream)
-3. Server pushes updates as they arrive from vehicle
-4. Client renders updates progressively
-5. Connection remains open for multiple commands
-
-**Example:** WebSocket at `wss://api.sovd.example.com/ws/responses/{command_id}`
-```
-
-### Context: Event-Driven Internal Communication (from 04_Behavior_and_Communication.md)
-
-```markdown
-**3. Event-Driven (Internal via Redis Pub/Sub)**
-
-Used internally between backend components:
-- Vehicle Connector publishes response events → WebSocket Server consumes
-- Decouples command execution from response delivery
-- Enables horizontal scaling of both components
-
-**Flow:**
-1. Vehicle Connector receives response from vehicle
-2. Publishes event to Redis channel: `response:{command_id}`
-3. WebSocket Server (subscribed to channel) receives event
-4. Pushes to connected WebSocket clients
+The vehicle connector currently publishes a SINGLE response chunk per command. This task requires enhancing it to publish MULTIPLE chunks with proper sequencing and timing.
 ```
 
 ---
 
 ## 3. Codebase Analysis & Strategic Guidance
 
-The following analysis is based on my direct review of the current codebase.
-
-### ⚠️ CRITICAL FINDING: TASK IS ALREADY COMPLETE
-
-**STATUS: ALL IMPLEMENTATION ALREADY EXISTS AND IS FULLY FUNCTIONAL**
-
-After thorough codebase analysis, I have discovered that **Task I3.T1 has already been fully implemented**. All required files exist and contain complete, production-ready implementations.
+The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
 ### Relevant Existing Code
 
-#### **File:** `backend/app/api/v1/websocket.py` (367 lines - FULLY IMPLEMENTED)
-   - **Summary:** Complete WebSocket endpoint implementation with JWT authentication, Redis Pub/Sub integration, and full lifecycle management
-   - **Key Features:**
-     - JWT authentication via query parameter (lines 29-107)
-     - Redis Pub/Sub listener with event forwarding (lines 110-211)
-     - WebSocket receiver for disconnect detection (lines 213-236)
-     - Main endpoint at `/ws/responses/{command_id}` (lines 238-367)
-     - Proper cleanup and resource management
-     - Comprehensive structured logging with correlation IDs
-   - **Status:** ✅ COMPLETE - Meets all acceptance criteria
+#### **File:** `backend/app/connectors/vehicle_connector.py` (391 lines - REQUIRES MODIFICATION)
+   - **Summary:** Current mock vehicle connector publishes a single response chunk per command with sequence_number=1 and is_final=True (lines 216-222, 230-241).
+   - **Current Behavior:**
+     - Single network delay simulation: `await asyncio.sleep(random.uniform(0.5, 1.5))` (lines 168-175)
+     - Single response generation per command (lines 186-206)
+     - Single response record creation with sequence_number=1, is_final=True (lines 216-222)
+     - Single Redis event publication (lines 230-252)
+     - Status update to "completed" immediately after single response (lines 253-286)
+   - **CRITICAL MODIFICATION REQUIRED:**
+     - **You MUST refactor the `execute_command()` function** to support multi-chunk streaming
+     - **You MUST change the response generation logic** from single-chunk to multi-chunk
+     - **You MUST implement a loop** to generate and publish multiple chunks with delays between them
+     - **You MUST increment sequence_number** for each chunk (1, 2, 3, ...)
+     - **You MUST set is_final=True** only on the last chunk
+     - **You MUST publish separate Redis events** for each chunk
 
-#### **File:** `backend/app/services/websocket_manager.py` (136 lines - FULLY IMPLEMENTED)
-   - **Summary:** WebSocket connection manager service that tracks active connections and handles broadcasting
-   - **Key Features:**
-     - Connection tracking by command_id (lines 22-44)
-     - Graceful disconnect handling (lines 46-76)
-     - Broadcast functionality to multiple clients (lines 78-118)
-     - Connection count tracking (lines 120-131)
-     - Singleton instance pattern (line 135)
-   - **Status:** ✅ COMPLETE - Full implementation with proper cleanup
+#### **File:** `backend/app/repositories/response_repository.py` (70 lines - READY TO USE)
+   - **Summary:** Repository for creating and retrieving command response records from database.
+   - **Key Function:** `create_response(db, command_id, response_payload, sequence_number, is_final)` (lines 12-45)
+     - Creates a new response record with specified sequence_number
+     - Supports is_final flag for marking final chunks
+     - Handles UNIQUE constraint on (command_id, sequence_number)
+   - **Recommendation:** You SHOULD call this function multiple times (once per chunk) with incrementing sequence_numbers
+   - **Note:** The function already supports the multi-chunk pattern - no changes needed
 
-#### **File:** `backend/app/connectors/vehicle_connector.py` (391 lines - REDIS PUB/SUB INTEGRATED)
-   - **Summary:** Mock vehicle connector with complete Redis event publishing for response and status events
-   - **Key Features:**
-     - Mock response generation for ReadDTC, ClearDTC, ReadDataByID (lines 27-135)
-     - Redis Pub/Sub publishing for response events (lines 230-252)
-     - Redis Pub/Sub publishing for status events (lines 266-286)
-     - Redis Pub/Sub publishing for error events (lines 341-360)
-     - Complete error handling and audit logging
-   - **Status:** ✅ COMPLETE - All event types published to Redis
+#### **File:** `backend/tests/unit/test_vehicle_connector.py` (393 lines - REQUIRES EXPANSION)
+   - **Summary:** Existing unit tests for mock vehicle connector covering single-chunk responses.
+   - **Current Coverage:**
+     - Response generation tests (lines 17-88)
+     - Single-chunk execution tests for ReadDTC, ClearDTC, ReadDataByID (lines 91-348)
+     - Error handling tests (lines 349-393)
+   - **MODIFICATION REQUIRED:**
+     - **You MUST add new test methods** to verify multi-chunk streaming behavior
+     - **You MUST test timing delays** between chunks (use time mocking)
+     - **You MUST verify sequence_number increments** correctly
+     - **You MUST verify is_final flag** is only set on last chunk
+     - **You MUST verify Redis events** are published for each chunk
+   - **Tip:** Existing tests use extensive mocking patterns - follow the same approach for new tests
 
-#### **File:** `backend/tests/integration/test_websocket.py` (400 lines - COMPREHENSIVE TESTS)
-   - **Summary:** Complete integration test suite covering all WebSocket functionality
-   - **Test Coverage:**
-     - ✅ Successful connection with valid JWT (line 82)
-     - ✅ Rejection of missing token (line 96)
-     - ✅ Rejection of invalid token (line 107)
-     - ✅ Rejection of inactive user (line 120)
-     - ✅ Response event delivery (line 148)
-     - ✅ Status event delivery (line 198)
-     - ✅ Error event delivery (line 242)
-     - ✅ Multiple concurrent clients (line 284)
-     - ✅ Proper cleanup on disconnect (line 339)
-     - ✅ Channel isolation (line 354)
-   - **Status:** ✅ COMPLETE - All acceptance criteria tested
+### Implementation Tips & Notes
 
-#### **File:** `backend/app/main.py` (108 lines - WEBSOCKET ROUTER REGISTERED)
-   - **Summary:** FastAPI application entry point with WebSocket router properly registered
-   - **Key Configuration:**
-     - WebSocket router included at line 49: `app.include_router(websocket.router, tags=["websocket"])`
-     - CORS configured for frontend (lines 36-43)
-     - Logging middleware active (line 34)
-   - **Status:** ✅ COMPLETE - WebSocket endpoint accessible
+#### **Tip 1: Multi-Chunk Response Generation Strategy**
 
-#### **File:** `backend/app/dependencies.py` (159 lines - AUTH DEPENDENCIES READY)
-   - **Summary:** JWT authentication dependencies used by WebSocket endpoint
-   - **Key Functions:**
-     - `get_current_user()` - validates JWT and returns User object (lines 27-105)
-     - `require_role()` - role-based authorization factory (lines 108-158)
-     - Integration with structlog for audit logging
-   - **Note:** WebSocket endpoint uses `verify_access_token()` directly for query parameter auth (not HTTP Bearer)
-   - **Status:** ✅ COMPLETE - Auth infrastructure ready
+You have two architectural options for implementing multi-chunk responses:
 
-#### **File:** `backend/app/config.py` (40 lines - REDIS CONFIGURATION)
-   - **Summary:** Application configuration with Redis URL settings
-   - **Key Settings:**
-     - `REDIS_URL: str` - Redis connection URL from environment (line 22)
-     - `JWT_SECRET: str` - JWT signing secret (line 25)
-     - Settings loaded from environment or .env file (lines 29-34)
-   - **Status:** ✅ COMPLETE - Configuration ready
+**Option A: Generate All Chunks Upfront (RECOMMENDED)**
+- Generate complete response data at the start
+- Split it into chunks
+- Publish chunks sequentially with delays
+- **Advantage:** Simpler to implement, easier to test, predictable behavior
+- **Example for ReadDTC:**
+  ```python
+  # Generate all DTCs
+  all_dtcs = [
+      {"dtcCode": "P0420", "description": "...", ...},
+      {"dtcCode": "P0171", "description": "...", ...},
+  ]
+  # Chunk 1: First DTC
+  chunk_1_payload = {"dtcs": [all_dtcs[0]], ...}
+  # Chunk 2: Second DTC
+  chunk_2_payload = {"dtcs": [all_dtcs[1]], ...}
+  # Chunk 3: Final status
+  chunk_3_payload = {"status": "complete", "totalDtcs": 2, ...}
+  ```
 
-### Implementation Status Summary
+**Option B: Progressive Generation**
+- Generate each chunk on-demand
+- More realistic simulation of real vehicle behavior
+- **Disadvantage:** More complex, harder to test timing
 
-| Component | Status | Lines | Notes |
-|-----------|--------|-------|-------|
-| WebSocket Endpoint | ✅ COMPLETE | 367 | All lifecycle methods implemented |
-| WebSocket Manager | ✅ COMPLETE | 136 | Full connection tracking + broadcast |
-| Vehicle Connector | ✅ COMPLETE | 391 | Redis Pub/Sub fully integrated |
-| Integration Tests | ✅ COMPLETE | 400 | All 10 test scenarios passing |
-| Router Registration | ✅ COMPLETE | - | Registered in main.py line 49 |
-| Configuration | ✅ COMPLETE | - | Redis URL configured |
+**RECOMMENDATION:** Use Option A for this MVP implementation. It's simpler and meets all acceptance criteria.
 
-### Acceptance Criteria Verification
+#### **Tip 2: Refactoring Strategy**
 
-✅ **WebSocket client can connect to `ws://localhost:8000/ws/responses/{command_id}?token={valid_jwt}`**
-   - Implemented in `websocket.py:238-367`
+The current `execute_command()` function is ~230 lines. To implement multi-chunk streaming, you should:
 
-✅ **Connection rejected if JWT invalid or missing (WebSocket close with error code)**
-   - Implemented in `websocket.py:29-107` (authenticate_websocket function)
-   - Uses `WS_1008_POLICY_VIOLATION` status code
+1. **Extract a helper function** `_publish_response_chunk()` that:
+   - Creates response record in database
+   - Publishes Redis event
+   - Handles logging
+   - Takes sequence_number and is_final as parameters
 
-✅ **After submitting command via REST API, WebSocket client receives response events in real-time**
-   - Vehicle connector publishes to Redis at `vehicle_connector.py:230-252`
-   - WebSocket listens and forwards at `websocket.py:110-211`
+2. **Extract a helper function** `_generate_streaming_chunks()` that:
+   - Takes command_name and command_params
+   - Returns list of (response_payload, delay) tuples
+   - Example: `[(chunk1_payload, 0.5), (chunk2_payload, 0.5), (chunk3_payload, 0)]`
 
-✅ **Response events match format: `{"event": "response", "response": {...}, "sequence_number": 1}`**
-   - Event format defined in `vehicle_connector.py:234-241`
+3. **Update main flow** to:
+   ```python
+   chunks = _generate_streaming_chunks(command_name, command_params)
+   for seq_num, (payload, delay) in enumerate(chunks, start=1):
+       is_final = (seq_num == len(chunks))
+       await _publish_response_chunk(command_id, payload, seq_num, is_final)
+       if delay > 0:
+           await asyncio.sleep(delay)
+   # Update status to completed after all chunks
+   await _update_command_status_completed(...)
+   ```
 
-✅ **Status event received when command completes: `{"event": "status", "status": "completed"}`**
-   - Status events published in `vehicle_connector.py:269-275`
+#### **Tip 3: Existing Response Generators**
 
-✅ **Multiple WebSocket clients can subscribe to same command**
-   - WebSocket manager tracks multiple connections per command_id
-   - Tested in `test_websocket.py:284-333`
+The current response generator functions (lines 27-135) generate COMPLETE responses:
+- `_generate_read_dtc_response()` returns ALL DTCs in a single dict
+- `_generate_clear_dtc_response()` returns a single status message
+- `_generate_read_data_by_id_response()` returns a single data value
 
-✅ **Client disconnect unsubscribes from Redis (no memory leak)**
-   - Cleanup in `websocket.py:199-210` (finally block)
-   - Disconnect handling in `websocket_manager.py:46-76`
+**You SHOULD create NEW generator functions** for streaming:
+- `_generate_read_dtc_streaming_chunks()` → returns list of chunks
+- `_generate_read_data_by_id_streaming_chunks()` → returns list of chunks
+- Keep existing generators for backward compatibility in tests
 
-✅ **Integration tests verify: successful connection, event delivery, auth rejection**
-   - All test scenarios implemented in `test_websocket.py:79-400`
+#### **Tip 4: Redis Event Publishing**
 
-✅ **No errors in logs during WebSocket operations**
-   - Comprehensive error handling throughout
-   - Structured logging with correlation IDs
+The current implementation creates a new Redis client for EACH event (lines 231, 267, 342). This is acceptable but not optimal for multiple chunks.
 
-✅ **No linter errors**
-   - Code follows type hints and formatting standards
+**You COULD optimize** by:
+- Creating a single Redis client at the start of `execute_command()`
+- Reusing it for all chunk publications
+- Closing it at the end
+- **However:** This is NOT required for acceptance criteria - keep current pattern if time is limited
 
-### Recommended Actions
+#### **Tip 5: Test Timing Verification**
 
-Given that **all implementation is already complete and functional**, you have the following options:
+For testing ~0.5 second delays, you SHOULD:
+- Use `unittest.mock.patch("app.connectors.vehicle_connector.asyncio.sleep")` to mock sleep
+- Verify sleep was called with correct delay values
+- **DO NOT use `time.time()` to measure actual elapsed time** - this makes tests flaky and slow
 
-1. **VERIFY AND VALIDATE (RECOMMENDED)**
-   - Run the integration tests to confirm all functionality works:
-     ```bash
-     cd backend
-     pytest tests/integration/test_websocket.py -v
-     ```
-   - Start the application and manually test WebSocket connection
+Example from existing test (lines 141-144):
+```python
+mock_sleep.assert_called_once()
+delay = mock_sleep.call_args[0][0]
+assert 0.5 <= delay <= 1.5
+```
 
-2. **UPDATE TASK STATUS**
-   - Mark task I3.T1 as `"done": true` in `.codemachine/artifacts/tasks/tasks_I3.json`
-   - This will allow the project to proceed to task I3.T2
+For multi-chunk, adapt this to:
+```python
+assert mock_sleep.call_count == 2  # Two delays between 3 chunks
+delays = [call[0][0] for call in mock_sleep.call_args_list]
+assert all(d == pytest.approx(0.5, abs=0.1) for d in delays)
+```
 
-3. **OPTIONAL: CODE REVIEW AND DOCUMENTATION**
-   - Review the existing implementation for any potential improvements
-   - Ensure all code is properly documented (already appears comprehensive)
+#### **Tip 6: Backward Compatibility**
 
-### Implementation Quality Assessment
+The current `execute_command()` function is called by:
+- Command service (triggers execution)
+- Integration tests (test_websocket.py from I3.T1)
 
-**Code Quality:** ⭐⭐⭐⭐⭐ Excellent
-- Comprehensive error handling
-- Proper resource cleanup
-- Type hints throughout
+**You MUST ensure** that your changes do not break:
+- The existing API signature
+- The final command status update
+- The audit logging behavior
+- The error handling flow
+
+#### **Warning: Sequence Number Correctness**
+
+The database has a UNIQUE constraint on `(command_id, sequence_number)`. If you accidentally try to create two responses with the same sequence_number for the same command, you will get an `IntegrityError`.
+
+**You MUST:**
+- Start sequence_number at 1 (not 0)
+- Increment by exactly 1 for each chunk
+- Never skip sequence numbers (no gaps)
+
+### Acceptance Criteria Breakdown
+
+Let me map each acceptance criterion to implementation guidance:
+
+✅ **"Command 'ReadDTC' generates 3 response chunks"**
+   - Implement in `_generate_read_dtc_streaming_chunks()`
+   - Return list of 3 payloads: [chunk1_dtc_p0420, chunk2_dtc_p0171, chunk3_final_status]
+
+✅ **"Each chunk has incrementing sequence_number (1, 2, 3)"**
+   - Use `enumerate(chunks, start=1)` in publish loop
+   - Pass seq_num to `create_response()`
+
+✅ **"Final chunk has is_final=true"**
+   - Set `is_final = (seq_num == len(chunks))` in loop
+   - Only last iteration will have is_final=True
+
+✅ **"Chunks published with ~0.5 second intervals"**
+   - Include delay value in chunk generation: `[(payload, 0.5), (payload, 0.5), (payload, 0)]`
+   - Call `await asyncio.sleep(delay)` after publishing each non-final chunk
+
+✅ **"WebSocket client receives all chunks in correct order"**
+   - This is automatically handled by sequence_number ordering
+   - WebSocket endpoint already implemented in I3.T1 - no changes needed
+
+✅ **"Unit tests verify: correct number of chunks, sequence_number increments, timing delays"**
+   - Write test `test_execute_command_read_dtc_streaming()`
+   - Assert `create_response` called 3 times
+   - Assert sequence_numbers are [1, 2, 3]
+   - Assert is_final is [False, False, True]
+   - Assert sleep called 2 times with ~0.5s delays
+
+✅ **"Test coverage maintained ≥80%"**
+   - Run `pytest --cov=app.connectors --cov-report=term` after implementation
+   - Existing tests provide ~80% coverage - adding streaming tests should maintain this
+
+✅ **"No linter errors"**
+   - Run `ruff check backend/app/connectors/` before committing
+   - Run `mypy backend/app/connectors/` to verify type hints
+   - Ensure all functions have docstrings
+
+### Recommended Implementation Steps
+
+1. **Add streaming chunk generators** (new functions):
+   - `_generate_read_dtc_streaming_chunks() -> list[tuple[dict, float]]`
+   - `_generate_read_data_by_id_streaming_chunks(dataId) -> list[tuple[dict, float]]`
+
+2. **Extract helper function** `_publish_response_chunk()`:
+   - Takes: command_id, vehicle_id, payload, seq_num, is_final
+   - Creates DB record
+   - Publishes Redis event
+   - Returns response object
+
+3. **Refactor `execute_command()`**:
+   - Replace single response generation with multi-chunk loop
+   - Keep status update to "completed" at the end
+   - Keep error handling as-is
+
+4. **Add unit tests** in `test_vehicle_connector.py`:
+   - `test_execute_command_read_dtc_streaming()`
+   - `test_execute_command_read_data_by_id_streaming()`
+   - `test_streaming_chunks_timing()`
+   - `test_streaming_chunks_sequence_numbers()`
+   - `test_streaming_final_chunk_flag()`
+
+5. **Run tests and verify**:
+   - Unit tests pass: `pytest backend/tests/unit/test_vehicle_connector.py -v`
+   - Integration tests still pass: `pytest backend/tests/integration/test_websocket.py -v`
+   - Coverage maintained: `pytest --cov=app.connectors --cov-report=term`
+
+### Code Quality Standards
+
+The existing code demonstrates high quality:
+- Comprehensive docstrings with Args/Returns/Raises
+- Type hints on all functions
 - Structured logging with correlation IDs
-- Follows FastAPI best practices
+- Proper error handling with try/except/finally
+- Async/await best practices
 
-**Test Coverage:** ⭐⭐⭐⭐⭐ Comprehensive
-- 10 distinct test scenarios
-- Tests authentication, event delivery, multi-client, cleanup
-- Uses proper async testing patterns
+**You MUST maintain the same quality standards** in your modifications:
+- Add type hints: `list[tuple[dict[str, Any], float]]`
+- Add docstrings to new functions
+- Use structlog for all logging
+- Handle errors gracefully
+- Follow existing code formatting
 
-**Architecture Alignment:** ⭐⭐⭐⭐⭐ Perfect Match
-- Follows architecture blueprint exactly
-- Implements all specified event formats
-- Uses Redis Pub/Sub as designed
-- JWT authentication as specified
+### Final Notes
 
-### Next Steps
+This task is a **refactoring and enhancement** rather than a complete rewrite. The existing code is production-ready and well-tested. Your changes should be **surgical and targeted** - modify only what's necessary to support multi-chunk streaming while preserving all existing behavior.
 
-Since this task is already complete, you should:
+**Key Success Metrics:**
+1. ReadDTC generates exactly 3 chunks
+2. All existing tests still pass
+3. New tests verify streaming behavior
+4. WebSocket integration works end-to-end (test with I3.T1)
+5. No regression in error handling or audit logging
 
-1. **Run the test suite** to verify everything works
-2. **Update the task status** to mark I3.T1 as done
-3. **Proceed to the next task** (I3.T2 - Enhanced mock connector with multi-chunk streaming)
+**Estimated Effort:** 2-3 hours for implementation + 1-2 hours for comprehensive testing.
+
