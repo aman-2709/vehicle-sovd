@@ -5,7 +5,7 @@ FastAPI router for command management endpoints.
 import uuid
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -17,7 +17,8 @@ from app.schemas.command import (
     CommandSubmitRequest,
 )
 from app.schemas.response import ResponseDetail
-from app.services import command_service
+from app.services import audit_service, command_service
+from app.utils.request_utils import get_client_ip, get_user_agent
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -25,7 +26,8 @@ logger = structlog.get_logger(__name__)
 
 @router.post("/commands", response_model=CommandResponse, status_code=201)
 async def submit_command(
-    request: CommandSubmitRequest,
+    command_request: CommandSubmitRequest,
+    http_request: Request,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(["engineer", "admin"])),
     db: AsyncSession = Depends(get_db),
@@ -37,7 +39,9 @@ async def submit_command(
     Validates vehicle existence and SOVD command format before creating command.
 
     Args:
-        request: Command submission request
+        command_request: Command submission request
+        http_request: FastAPI Request object for extracting IP/user-agent
+        background_tasks: Background tasks for async command execution
         current_user: Authenticated user (injected)
         db: Database session (injected)
 
@@ -49,17 +53,21 @@ async def submit_command(
         HTTPException 401: Not authenticated
         HTTPException 403: Insufficient permissions
     """
+    # Extract client information for audit logging
+    client_ip = get_client_ip(http_request)
+    user_agent = get_user_agent(http_request)
+
     logger.info(
         "api_submit_command",
         user_id=str(current_user.user_id),
-        vehicle_id=str(request.vehicle_id),
-        command_name=request.command_name,
+        vehicle_id=str(command_request.vehicle_id),
+        command_name=command_request.command_name,
     )
 
     command = await command_service.submit_command(
-        vehicle_id=request.vehicle_id,
-        command_name=request.command_name,
-        command_params=request.command_params,
+        vehicle_id=command_request.vehicle_id,
+        command_name=command_request.command_name,
+        command_params=command_request.command_params,
         user_id=current_user.user_id,
         db_session=db,
         background_tasks=background_tasks,
@@ -69,7 +77,7 @@ async def submit_command(
         logger.warning(
             "api_submit_command_failed",
             user_id=str(current_user.user_id),
-            vehicle_id=str(request.vehicle_id),
+            vehicle_id=str(command_request.vehicle_id),
         )
         raise HTTPException(
             status_code=400,
@@ -80,6 +88,23 @@ async def submit_command(
         "api_submit_command_success",
         command_id=str(command.command_id),
         user_id=str(current_user.user_id),
+    )
+
+    # Log audit event for command submission
+    await audit_service.log_audit_event(
+        user_id=current_user.user_id,
+        action="command_submitted",
+        entity_type="command",
+        entity_id=command.command_id,
+        details={
+            "command_name": command.command_name,
+            "command_params": command.command_params,
+        },
+        ip_address=client_ip,
+        user_agent=user_agent,
+        db_session=db,
+        vehicle_id=command_request.vehicle_id,
+        command_id=command.command_id,
     )
 
     return CommandResponse.model_validate(command)

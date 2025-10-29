@@ -19,6 +19,7 @@ import structlog
 from app.config import settings
 from app.database import async_session_maker
 from app.repositories import command_repository, response_repository
+from app.services import audit_service
 
 logger = structlog.get_logger(__name__)
 
@@ -251,12 +252,33 @@ async def execute_command(
 
         # Update command status to 'completed'
         async with async_session_maker() as db_session:
+            # Get command to extract user_id for audit logging
+            command = await command_repository.get_command_by_id(db_session, command_id)
+
             await command_repository.update_command_status(
                 db=db_session,
                 command_id=command_id,
                 status="completed",
                 completed_at=datetime.now(timezone.utc),
             )
+
+            # Log audit event for command completion
+            if command:
+                await audit_service.log_audit_event(
+                    user_id=command.user_id,
+                    action="command_completed",
+                    entity_type="command",
+                    entity_id=command_id,
+                    details={
+                        "command_name": command_name,
+                        "response_payload": response_payload,
+                    },
+                    ip_address=None,  # Not available in background task
+                    user_agent=None,  # Not available in background task
+                    db_session=db_session,
+                    vehicle_id=vehicle_id,
+                    command_id=command_id,
+                )
 
         logger.info(
             "mock_command_execution_completed",
@@ -276,6 +298,9 @@ async def execute_command(
         # Update command status to 'failed' on unexpected errors
         try:
             async with async_session_maker() as db_session:
+                # Get command to extract user_id for audit logging
+                command = await command_repository.get_command_by_id(db_session, command_id)
+
                 await command_repository.update_command_status(
                     db=db_session,
                     command_id=command_id,
@@ -283,6 +308,24 @@ async def execute_command(
                     error_message=str(e),
                     completed_at=datetime.now(timezone.utc),
                 )
+
+                # Log audit event for command failure
+                if command:
+                    await audit_service.log_audit_event(
+                        user_id=command.user_id,
+                        action="command_failed",
+                        entity_type="command",
+                        entity_id=command_id,
+                        details={
+                            "command_name": command_name,
+                            "error": str(e),
+                        },
+                        ip_address=None,  # Not available in background task
+                        user_agent=None,  # Not available in background task
+                        db_session=db_session,
+                        vehicle_id=vehicle_id,
+                        command_id=command_id,
+                    )
         except Exception as db_error:
             logger.error(
                 "mock_command_failed_to_update_error_status",

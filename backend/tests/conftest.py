@@ -13,6 +13,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
+from unittest.mock import AsyncMock, patch
+
 from app.database import get_db
 from app.main import app
 from app.models.user import User
@@ -96,13 +98,18 @@ async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, 
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Create async client
-    from httpx import ASGITransport
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test"
-    ) as client:
-        yield client
+    # Mock audit service since audit_logs table uses JSONB (PostgreSQL-specific)
+    # and integration tests use SQLite
+    with patch("app.services.audit_service.log_audit_event") as mock_audit:
+        mock_audit.return_value = True
+
+        # Create async client
+        from httpx import ASGITransport
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test"
+        ) as client:
+            yield client
 
     # Clear dependency overrides
     app.dependency_overrides.clear()

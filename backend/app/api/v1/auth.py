@@ -7,7 +7,7 @@ Provides REST API for user authentication, token management, and user profile.
 from datetime import datetime, timedelta
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,12 +24,14 @@ from app.schemas.auth import (
     TokenResponse,
     UserResponse,
 )
+from app.services import audit_service
 from app.services.auth_service import (
     authenticate_user,
     create_access_token,
     create_refresh_token,
     verify_refresh_token,
 )
+from app.utils.request_utils import get_client_ip, get_user_agent
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +41,7 @@ router = APIRouter()
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def login(
     credentials: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
     """
@@ -46,6 +49,7 @@ async def login(
 
     Args:
         credentials: Username and password
+        request: FastAPI Request object for extracting IP/user-agent
         db: Database session
 
     Returns:
@@ -54,6 +58,10 @@ async def login(
     Raises:
         HTTPException: 401 if credentials are invalid
     """
+    # Extract client information for audit logging
+    client_ip = get_client_ip(request)
+    user_agent = get_user_agent(request)
+
     # Authenticate user
     user = await authenticate_user(db, credentials.username, credentials.password)
 
@@ -84,6 +92,21 @@ async def login(
         username=user.username,
         role=user.role,
         session_id=str(session.session_id)
+    )
+
+    # Log audit event for user login
+    await audit_service.log_audit_event(
+        user_id=user.user_id,
+        action="user_login",
+        entity_type="user",
+        entity_id=user.user_id,
+        details={
+            "username": user.username,
+            "session_id": str(session.session_id),
+        },
+        ip_address=client_ip,
+        user_agent=user_agent,
+        db_session=db,
     )
 
     return TokenResponse(
@@ -198,6 +221,7 @@ async def refresh(
 
 @router.post("/logout", response_model=LogoutResponse, status_code=status.HTTP_200_OK)
 async def logout(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> LogoutResponse:
@@ -205,12 +229,17 @@ async def logout(
     Invalidate all refresh tokens for the current user (logout).
 
     Args:
+        request: FastAPI Request object for extracting IP/user-agent
         current_user: Authenticated user from JWT
         db: Database session
 
     Returns:
         LogoutResponse with confirmation message
     """
+    # Extract client information for audit logging
+    client_ip = get_client_ip(request)
+    user_agent = get_user_agent(request)
+
     # Delete all sessions for the current user
     await db.execute(
         delete(Session).where(Session.user_id == current_user.user_id)
@@ -221,6 +250,20 @@ async def logout(
         "user_logged_out",
         user_id=str(current_user.user_id),
         username=current_user.username
+    )
+
+    # Log audit event for user logout
+    await audit_service.log_audit_event(
+        user_id=current_user.user_id,
+        action="user_logout",
+        entity_type="user",
+        entity_id=current_user.user_id,
+        details={
+            "username": current_user.username,
+        },
+        ip_address=client_ip,
+        user_agent=user_agent,
+        db_session=db,
     )
 
     return LogoutResponse(

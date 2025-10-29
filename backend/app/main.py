@@ -8,12 +8,18 @@ Provides:
 - Basic FastAPI app instance
 - Health check endpoint
 - CORS middleware for frontend communication
+- Structured logging with correlation IDs
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth, commands, vehicles
+from app.middleware.logging_middleware import LoggingMiddleware
+from app.utils.logging import configure_logging
+
+# Configure structured logging before creating the app
+configure_logging()
 
 # Create FastAPI application instance
 app = FastAPI(
@@ -23,6 +29,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Register middleware (order matters - logging middleware should be first)
+app.add_middleware(LoggingMiddleware)
 
 # Configure CORS for frontend communication
 app.add_middleware(
