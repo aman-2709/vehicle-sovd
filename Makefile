@@ -3,16 +3,16 @@
 # Default target - show help
 help:
 	@echo "Available targets:"
-	@echo "  make up               - Start all services with docker-compose"
-	@echo "  make down             - Stop all services"
-	@echo "  make test             - Run all tests (backend, frontend, e2e)"
-	@echo "  make frontend-test    - Run frontend tests"
-	@echo "  make frontend-coverage- Run frontend tests with coverage report"
-	@echo "  make frontend-lint    - Run frontend linter (ESLint)"
-	@echo "  make frontend-format  - Format frontend code (Prettier)"
-	@echo "  make e2e              - Run end-to-end tests with docker-compose (starts services, runs tests, stops services)"
-	@echo "  make lint             - Run all linters (backend and frontend)"
-	@echo "  make logs             - View logs from all services"
+	@echo "  make up                 - Start all services with docker-compose"
+	@echo "  make down               - Stop all services"
+	@echo "  make test               - Run all tests (backend, frontend, e2e)"
+	@echo "  make frontend-test      - Run frontend tests"
+	@echo "  make frontend-coverage  - Run frontend tests with coverage report"
+	@echo "  make frontend-lint      - Run frontend linter (ESLint)"
+	@echo "  make frontend-format    - Format frontend code (Prettier)"
+	@echo "  make e2e                - Run end-to-end tests with docker-compose (starts services, runs tests, stops services)"
+	@echo "  make lint               - Run all linters (backend and frontend)"
+	@echo "  make logs               - View logs from all services"
 
 # Start all services with docker-compose
 up:

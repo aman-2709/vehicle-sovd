@@ -280,15 +280,21 @@ describe('VehicleSelector Component', () => {
 
       mockVehicleAPI.getVehicles.mockResolvedValue(mockVehicles);
 
-      render(
-        <VehicleSelector value="vehicle-1" onChange={mockOnChange} />,
+      // Start with empty value, then wait for data to load
+      const { rerender } = render(
+        <VehicleSelector value="" onChange={mockOnChange} />,
         { wrapper: createWrapper() }
       );
 
-      // Wait for vehicles to load, then check the value is displayed
+      // Wait for vehicles to load
       await waitFor(() => {
         expect(screen.getByLabelText('Vehicle')).not.toBeDisabled();
       });
+
+      // Now rerender with the selected value after data is loaded
+      rerender(
+        <VehicleSelector value="vehicle-1" onChange={mockOnChange} />
+      );
 
       // The selected value should be displayed in the select
       const selectElement = screen.getByLabelText('Vehicle');

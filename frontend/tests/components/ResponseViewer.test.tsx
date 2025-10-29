@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ResponseViewer } from '../../src/components/commands/ResponseViewer';
 import type { WebSocketEvent } from '../../src/types/response';
@@ -36,8 +36,8 @@ class MockWebSocket {
   }
 
   send(data: string): void {
-    // eslint-disable-next-line no-console
-    console.log('[MockWebSocket] Send:', data);
+    // Mock send - no-op
+    void data;
   }
 
   close(code?: number, reason?: string): void {
@@ -146,7 +146,9 @@ describe('ResponseViewer', () => {
       sequence_number: 1,
     };
 
-    mockWebSocketInstance?.simulateMessage(responseEvent);
+    act(() => {
+      mockWebSocketInstance?.simulateMessage(responseEvent);
+    });
 
     // Check that response is displayed
     await waitFor(() => {
@@ -163,25 +165,27 @@ describe('ResponseViewer', () => {
     });
 
     // Send multiple response events
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: { dtcCode: 'P0420', description: 'Error 1' },
-      sequence_number: 1,
-    });
+    act(() => {
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: { dtcCode: 'P0420', description: 'Error 1' },
+        sequence_number: 1,
+      });
 
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: { dtcCode: 'P0171', description: 'Error 2' },
-      sequence_number: 2,
-    });
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: { dtcCode: 'P0171', description: 'Error 2' },
+        sequence_number: 2,
+      });
 
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: { dtcCode: 'P0301', description: 'Error 3' },
-      sequence_number: 3,
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: { dtcCode: 'P0301', description: 'Error 3' },
+        sequence_number: 3,
+      });
     });
 
     // Check that all responses are displayed
@@ -208,7 +212,9 @@ describe('ResponseViewer', () => {
       completed_at: '2025-10-28T12:34:56Z',
     };
 
-    mockWebSocketInstance?.simulateMessage(statusEvent);
+    act(() => {
+      mockWebSocketInstance?.simulateMessage(statusEvent);
+    });
 
     // Check that command status is displayed
     await waitFor(() => {
@@ -230,7 +236,9 @@ describe('ResponseViewer', () => {
       error_message: 'Vehicle connection timeout',
     };
 
-    mockWebSocketInstance?.simulateMessage(errorEvent);
+    act(() => {
+      mockWebSocketInstance?.simulateMessage(errorEvent);
+    });
 
     // Check that error is displayed
     await waitFor(() => {
@@ -247,10 +255,12 @@ describe('ResponseViewer', () => {
     });
 
     // Send status event
-    mockWebSocketInstance?.simulateMessage({
-      event: 'status',
-      command_id: 'test-command-123',
-      status: 'completed',
+    act(() => {
+      mockWebSocketInstance?.simulateMessage({
+        event: 'status',
+        command_id: 'test-command-123',
+        status: 'completed',
+      });
     });
 
     await waitFor(() => {
@@ -267,10 +277,12 @@ describe('ResponseViewer', () => {
     });
 
     // Send error event
-    mockWebSocketInstance?.simulateMessage({
-      event: 'error',
-      command_id: 'test-command-123',
-      error_message: 'Test error',
+    act(() => {
+      mockWebSocketInstance?.simulateMessage({
+        event: 'error',
+        command_id: 'test-command-123',
+        error_message: 'Test error',
+      });
     });
 
     await waitFor(() => {
@@ -286,7 +298,9 @@ describe('ResponseViewer', () => {
     });
 
     // Simulate connection error
-    mockWebSocketInstance?.simulateError();
+    act(() => {
+      mockWebSocketInstance?.simulateError();
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Connection Error')).toBeInTheDocument();
@@ -330,15 +344,17 @@ describe('ResponseViewer', () => {
     });
 
     // Send response with complex JSON
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: {
-        dtcCode: 'P0420',
-        description: 'Catalyst System Efficiency Below Threshold',
-        metadata: { severity: 'high', timestamp: '2025-10-28T12:00:00Z' },
-      },
-      sequence_number: 1,
+    act(() => {
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: {
+          dtcCode: 'P0420',
+          description: 'Catalyst System Efficiency Below Threshold',
+          metadata: { severity: 'high', timestamp: '2025-10-28T12:00:00Z' },
+        },
+        sequence_number: 1,
+      });
     });
 
     // Check that JSON viewer is rendered
@@ -365,18 +381,20 @@ describe('ResponseViewer', () => {
     });
 
     // Send multiple responses
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: { data: 'response1' },
-      sequence_number: 1,
-    });
+    act(() => {
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: { data: 'response1' },
+        sequence_number: 1,
+      });
 
-    mockWebSocketInstance?.simulateMessage({
-      event: 'response',
-      command_id: 'test-command-123',
-      response: { data: 'response2' },
-      sequence_number: 2,
+      mockWebSocketInstance?.simulateMessage({
+        event: 'response',
+        command_id: 'test-command-123',
+        response: { data: 'response2' },
+        sequence_number: 2,
+      });
     });
 
     await waitFor(() => {
