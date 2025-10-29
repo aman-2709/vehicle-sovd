@@ -9,7 +9,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.command import Command
-from app.repositories import command_repository, vehicle_repository
+from app.models.response import Response
+from app.repositories import command_repository, response_repository, vehicle_repository
 
 logger = structlog.get_logger(__name__)
 
@@ -144,3 +145,32 @@ async def get_command_history(
     logger.info("command_history_retrieved", count=len(commands))
 
     return commands
+
+
+async def get_command_responses(
+    command_id: uuid.UUID, db_session: AsyncSession
+) -> list[Response]:
+    """
+    Retrieve all responses for a command, ordered by sequence number.
+
+    Args:
+        command_id: Command UUID
+        db_session: Database session
+
+    Returns:
+        List of Response objects ordered by sequence_number (ascending).
+        Returns empty list if no responses exist.
+    """
+    logger.info("command_responses_retrieval", command_id=str(command_id))
+
+    responses = await response_repository.get_responses_by_command_id(
+        db_session, command_id
+    )
+
+    logger.info(
+        "command_responses_retrieved",
+        command_id=str(command_id),
+        count=len(responses),
+    )
+
+    return responses

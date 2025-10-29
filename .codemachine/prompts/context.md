@@ -10,29 +10,29 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I2.T3",
+  "task_id": "I2.T4",
   "iteration_id": "I2",
   "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
-  "description": "Implement `backend/app/services/command_service.py` with functions: `submit_command(vehicle_id, command_name, command_params, user_id, db_session)` (validates command, inserts command record with status=pending, triggers async execution via Vehicle Connector - stub for now), `get_command_by_id(command_id, db_session)`, `get_command_history(filters, db_session)` (supports filtering by vehicle_id, user_id, status, pagination). Create `backend/app/schemas/command.py` Pydantic models: `CommandSubmitRequest`, `CommandResponse`, `CommandListResponse`. Implement `backend/app/api/v1/commands.py` FastAPI router with endpoints: `POST /api/v1/commands` (requires `engineer` or `admin` role), `GET /api/v1/commands/{command_id}`, `GET /api/v1/commands` (query params: vehicle_id, status, limit, offset). Implement `backend/app/repositories/command_repository.py` with async functions: `create_command()`, `get_command_by_id()`, `update_command_status()`, `get_commands()`. For now, `submit_command` should create command record and immediately mark it as `in_progress` (actual vehicle communication in I2.T5). Write unit tests in `backend/tests/unit/test_command_service.py` and integration tests in `backend/tests/integration/test_command_api.py`.",
+  "description": "Implement `backend/app/repositories/response_repository.py` with async functions: `create_response(command_id, response_payload, sequence_number, is_final, db_session)`, `get_responses_by_command_id(command_id, db_session)`. Add function to `command_service.py`: `get_command_responses(command_id, db_session)` (retrieves all responses for a command, ordered by sequence_number). Create `backend/app/schemas/response.py` Pydantic model: `ResponseDetail`. Add endpoint to `backend/app/api/v1/commands.py`: `GET /api/v1/commands/{command_id}/responses` (returns list of responses). Write integration tests in `backend/tests/integration/test_command_api.py` covering response retrieval.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.7 (API Endpoints - Command Endpoints); Data Model (commands table).",
+  "inputs": "Architecture Blueprint Section 3.7 (API Endpoints - Command Endpoints); Data Model (responses table).",
   "target_files": [
-    "backend/app/services/command_service.py",
-    "backend/app/schemas/command.py",
+    "backend/app/repositories/response_repository.py",
+    "backend/app/schemas/response.py",
     "backend/app/api/v1/commands.py",
-    "backend/app/repositories/command_repository.py",
-    "backend/tests/unit/test_command_service.py",
+    "backend/app/services/command_service.py",
     "backend/tests/integration/test_command_api.py"
   ],
   "input_files": [
-    "backend/app/models/command.py",
-    "backend/app/database.py",
-    "backend/app/dependencies.py"
+    "backend/app/models/response.py",
+    "backend/app/services/command_service.py"
   ],
-  "deliverables": "Functional command submission and retrieval API; basic command service logic (without vehicle communication yet); unit and integration tests.",
-  "acceptance_criteria": "`POST /api/v1/commands` with valid payload creates command record (status=pending or in_progress); `POST /api/v1/commands` requires authentication (401 if no JWT); `POST /api/v1/commands` requires `engineer` or `admin` role (403 for other roles); `POST /api/v1/commands` validates vehicle_id exists (400 if invalid); `POST /api/v1/commands` returns command_id and status; `GET /api/v1/commands/{command_id}` returns command details (name, params, status, timestamps); `GET /api/v1/commands` returns paginated list of commands; `GET /api/v1/commands?vehicle_id={id}` filters by vehicle; `GET /api/v1/commands?status=completed` filters by status; Unit tests cover: command validation, status transitions; Integration tests cover: all endpoints with success and error cases; Test coverage ≥ 80%; No linter errors",
-  "dependencies": ["I2.T1", "I2.T2"],
-  "parallelizable": false,
+  "deliverables": "Response repository with create/retrieve functions; API endpoint to fetch command responses; tests.",
+  "acceptance_criteria": "`GET /api/v1/commands/{command_id}/responses` returns empty list if no responses; Manually inserted response (via database or test fixture) is returned correctly; Responses ordered by sequence_number (ascending); Response payload (JSONB) correctly serialized to JSON in API response; Integration tests cover: fetching responses for command with 0, 1, and multiple responses; Test coverage ≥ 80%; No linter errors",
+  "dependencies": [
+    "I2.T3"
+  ],
+  "parallelizable": true,
   "done": false
 }
 ```
@@ -43,61 +43,52 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Command Endpoints (from Architecture Blueprint Section 3.7)
+### Context: Command Response Pattern (from Architecture Blueprint Section 3.7)
 
-Based on the task inputs referencing "Architecture Blueprint Section 3.7 (API Endpoints - Command Endpoints)", the command API should follow REST conventions and support the following operations:
+**Streaming Responses:**
+The SOVD command execution system supports streaming responses from vehicles. When a command is executed:
+- The vehicle may send multiple response chunks (e.g., diagnostic data streaming)
+- Each response chunk is stored as a separate record in the `responses` table
+- Each chunk has a `sequence_number` to maintain proper ordering
+- The final chunk is marked with `is_final=true` to indicate completion
+- The `response_payload` is stored as JSONB to allow flexible schema
 
-**Command Submission:**
-- `POST /api/v1/commands` - Submit a new command to a vehicle
-  - Request body: command_name, vehicle_id, command_params (JSONB)
-  - Response: command_id, status, submitted_at
+**API Endpoint:**
+- `GET /api/v1/commands/{command_id}/responses` - Retrieve all response chunks for a command
+  - Returns list of responses ordered by sequence_number (ascending)
   - Requires JWT authentication
-  - Requires RBAC: `engineer` or `admin` role
+  - Returns empty list if no responses exist (not 404)
+  - Each response includes: response_id, response_payload, sequence_number, is_final, received_at
 
-**Command Retrieval:**
-- `GET /api/v1/commands/{command_id}` - Get details of a specific command
-  - Returns: command_id, command_name, vehicle_id, user_id, status, command_params, error_message, submitted_at, completed_at
+### Context: Data Model - Responses Table
 
-**Command History:**
-- `GET /api/v1/commands` - List commands with filtering and pagination
-  - Query parameters: vehicle_id, status, limit, offset
-  - Supports filtering by vehicle and status
-  - Pagination with limit/offset pattern
-
-### Context: Data Model - Commands Table (from ERD and Database Schema)
-
-The `commands` table structure (as defined in `backend/app/models/command.py`):
+Based on the Response model in `backend/app/models/response.py`, the responses table structure is:
 
 **Fields:**
-- `command_id`: UUID (Primary Key)
-- `user_id`: UUID (Foreign Key to users, CASCADE on delete)
-- `vehicle_id`: UUID (Foreign Key to vehicles, CASCADE on delete)
-- `command_name`: String(100) - SOVD command identifier
-- `command_params`: JSONB - Command-specific parameters
-- `status`: String(20) - Lifecycle status ('pending', 'in_progress', 'completed', 'failed')
-- `error_message`: Text (nullable) - Error message if failed
-- `submitted_at`: DateTime (timezone-aware, auto-generated)
-- `completed_at`: DateTime (timezone-aware, nullable)
+- `response_id`: UUID (Primary Key)
+- `command_id`: UUID (Foreign Key to commands, CASCADE on delete)
+- `response_payload`: JSONB - Flexible JSON data from vehicle
+- `sequence_number`: Integer - Order of response chunks (starts at 1)
+- `is_final`: Boolean (default false) - Marks the last response chunk
+- `received_at`: DateTime (timezone-aware, auto-generated)
 
-**Relationships:**
-- `user`: Many-to-one relationship with User
-- `vehicle`: Many-to-one relationship with Vehicle
-- `responses`: One-to-many relationship with Response (cascade delete)
-- `audit_logs`: One-to-many relationship with AuditLog
+**Key Constraints:**
+- UNIQUE constraint on (command_id, sequence_number) - Prevents duplicate sequence numbers
+- NOT NULL on command_id, response_payload, sequence_number
+- CASCADE DELETE - Responses deleted when parent command is deleted
 
-**Status Lifecycle:**
-1. `pending` - Initial state when command is submitted
-2. `in_progress` - Command is being executed by vehicle connector
-3. `completed` - Command executed successfully
-4. `failed` - Command execution failed (error_message populated)
+**Indexes:**
+- Primary index on response_id
+- Index on command_id for efficient lookups
+- Index on received_at for time-based queries
 
-### Context: RBAC Requirements (from Architecture Blueprint Section 3.8)
+### Context: JSONB Serialization
 
-**Role-Based Access Control:**
-- Two primary roles: `engineer` and `admin`
-- Command submission requires either `engineer` or `admin` role
-- Use the existing `require_role()` dependency from `backend/app/dependencies.py`
-- Example usage: `Depends(require_role(["engineer", "admin"]))`
+PostgreSQL JSONB fields are automatically handled by SQLAlchemy and Pydantic:
+- SQLAlchemy's `JSON` type (mapped to JSONB in PostgreSQL) stores Python dicts/lists
+- When reading from database, JSONB is converted to Python dict automatically
+- Pydantic schemas serialize dicts to JSON in API responses
+- No special conversion logic needed - use `dict[str, Any]` type hint
 
 ---
 
@@ -107,362 +98,437 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-#### File: `backend/app/models/command.py`
-- **Summary:** This file contains the complete Command SQLAlchemy model with all fields, relationships, and constraints already defined.
-- **Recommendation:** You MUST import the `Command` class from this file in your repository and service modules. The model is production-ready and should NOT be modified.
-- **Key Attributes:**
-  - Primary key: `command_id` (UUID)
-  - Foreign keys: `user_id`, `vehicle_id` (both with CASCADE delete)
-  - JSONB field: `command_params` with server default `'{}'`
-  - Status field has server default `'pending'`
-  - Relationships are bidirectional with proper back_populates
+#### File: `backend/app/models/response.py` (READ IN FULL)
 
-#### File: `backend/app/dependencies.py`
-- **Summary:** This file provides authentication and authorization dependencies for FastAPI routes.
-- **Recommendation:** You MUST use the following dependencies in your API endpoints:
-  - `get_current_user` - Validates JWT and returns authenticated User object (use with Depends())
-  - `require_role(["engineer", "admin"])` - Factory function that creates role-checking dependency
-- **Example Usage Pattern:**
-  ```python
-  @router.post("/commands")
-  async def submit_command(
-      current_user: User = Depends(require_role(["engineer", "admin"])),
-      db: AsyncSession = Depends(get_db)
-  ):
-  ```
-
-#### File: `backend/app/database.py`
-- **Summary:** This file provides the database session management and async engine configuration.
-- **Recommendation:** You MUST import `get_db` from this module and use it as a dependency for database access.
-- **Key Features:**
-  - Returns AsyncSession via dependency injection
-  - Configured with connection pooling (pool_size=20, max_overflow=10)
-  - Automatic session cleanup in finally block
-  - Structured logging with structlog
-
-#### File: `backend/app/repositories/vehicle_repository.py`
-- **Summary:** This is the reference implementation showing the repository pattern used in this project.
-- **Recommendation:** You SHOULD follow the exact same pattern for `command_repository.py`:
-  - Use async functions with `AsyncSession` as first parameter
-  - Return `Model | None` for single record retrieval
-  - Return `list[Model]` for multiple records
-  - Use SQLAlchemy 2.0 select() syntax: `await db.execute(select(Model).where(...))`
-  - Extract results with `.scalar_one_or_none()` (single) or `.scalars().all()` (multiple)
-  - For updates: modify object, `await db.commit()`, `await db.refresh(obj)`
-- **Pattern Example:**
-  ```python
-  async def get_command_by_id(db: AsyncSession, command_id: uuid.UUID) -> Command | None:
-      result = await db.execute(select(Command).where(Command.command_id == command_id))
-      return result.scalar_one_or_none()
-  ```
-
-#### File: `backend/app/services/vehicle_service.py`
-- **Summary:** This is the reference implementation showing the service layer pattern.
-- **Recommendation:** You SHOULD follow this pattern for `command_service.py`:
-  - Import structlog and get logger: `logger = structlog.get_logger(__name__)`
-  - Service functions orchestrate business logic and call repository functions
-  - Use structured logging for all operations: `logger.info("event_name", field1=value1, ...)`
-  - Services receive `db: AsyncSession` as parameter and pass to repositories
-  - Return domain objects (models) or processed data (dicts)
-- **Logging Pattern:**
-  ```python
-  logger.info("command_submitted", command_id=str(command_id), user_id=str(user_id))
-  ```
-
-#### File: `backend/app/api/v1/vehicles.py`
-- **Summary:** This is the reference implementation for FastAPI router structure.
-- **Recommendation:** You MUST follow this exact pattern for `backend/app/api/v1/commands.py`:
-  - Create `router = APIRouter()` at module level
-  - Use type hints for all parameters and return types
-  - Use Query() for query parameters with validation (ge, le, description)
-  - Use UUID type from uuid module for path parameters
-  - Use Depends() for dependency injection (get_current_user, get_db)
-  - Call service layer functions (not repositories directly)
-  - Convert SQLAlchemy models to Pydantic with `.model_validate()`
-  - Raise HTTPException(status_code=404, detail="...") for not found
-  - Log all requests with user_id and relevant identifiers
-- **Endpoint Pattern:**
-  ```python
-  @router.post("/commands", response_model=CommandResponse)
-  async def submit_command(
-      request: CommandSubmitRequest,
-      current_user: User = Depends(require_role(["engineer", "admin"])),
-      db: AsyncSession = Depends(get_db)
-  ) -> CommandResponse:
-  ```
-
-#### File: `backend/app/schemas/vehicle.py`
-- **Summary:** This is the reference implementation for Pydantic schema patterns.
-- **Recommendation:** You MUST follow this pattern for `backend/app/schemas/command.py`:
-  - Use Pydantic v2 syntax with proper imports from pydantic
-  - Inherit from `BaseModel`
-  - Use `model_config = {"from_attributes": True}` for ORM compatibility
-  - Use `@field_serializer` for custom serialization (e.g., UUID to string)
-  - Use `Field()` for defaults and aliases
-  - Use proper type hints: `UUID`, `datetime | None`, `dict[str, Any]`
-- **Schema Pattern:**
-  ```python
-  class CommandResponse(BaseModel):
-      command_id: UUID
-      command_name: str
-      status: str
-
-      @field_serializer("command_id")
-      def serialize_command_id(self, value: UUID) -> str:
-          return str(value)
-
-      model_config = {"from_attributes": True}
-  ```
-
-### Implementation Tips & Notes
-
-**Tip #1 - FastAPI Router Registration:**
-After creating `backend/app/api/v1/commands.py`, you MUST register the router in `backend/app/main.py`. Check how the auth and vehicles routers are registered and follow the same pattern:
 ```python
-from app.api.v1 import commands
-app.include_router(commands.router, prefix="/api/v1", tags=["commands"])
+class Response(Base):
+    """Streaming command responses with sequence tracking."""
+
+    __tablename__ = "responses"
+
+    response_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("commands.command_id", ondelete="CASCADE"), nullable=False)
+    response_payload: Mapped[dict[str, Any]] = mapped_column(JSONB(astext_type=Text()), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_final: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+    # Relationships
+    command: Mapped["Command"] = relationship("Command", back_populates="responses")
 ```
 
-**Tip #2 - Vehicle Validation:**
-For `POST /api/v1/commands`, you MUST validate that the `vehicle_id` exists before creating the command. Import and use `vehicle_repository.get_vehicle_by_id()`:
+**Analysis:**
+- The model is complete and production-ready
+- Uses JSONB with Text() astext_type for PostgreSQL compatibility
+- Has server_default for is_final (false) and received_at (CURRENT_TIMESTAMP)
+- Bidirectional relationship with Command model via back_populates
+- You MUST import this model exactly as-is in response_repository.py
+
+#### File: `backend/app/services/command_service.py` (READ IN FULL)
+
+**Key Functions:**
+- `submit_command()` - Creates and submits commands
+- `get_command_by_id()` - Retrieves single command
+- `get_command_history()` - Lists commands with filtering
+
+**Pattern Observed:**
 ```python
-vehicle = await vehicle_repository.get_vehicle_by_id(db, request.vehicle_id)
-if not vehicle:
-    raise HTTPException(status_code=400, detail="Vehicle not found")
+async def get_command_by_id(command_id: uuid.UUID, db_session: AsyncSession) -> Command | None:
+    logger.info("command_retrieval", command_id=str(command_id))
+    command = await command_repository.get_command_by_id(db_session, command_id)
+
+    if command:
+        logger.info("command_found", command_id=str(command_id))
+    else:
+        logger.warning("command_not_found", command_id=str(command_id))
+
+    return command
 ```
 
-**Tip #3 - Stub Implementation for Vehicle Connector:**
-The task specifies: "For now, `submit_command` should create command record and immediately mark it as `in_progress`". This means:
-1. Create command with status='pending' (default from model)
-2. Immediately update status to 'in_progress'
-3. Do NOT actually communicate with vehicles yet (that's I2.T5)
-4. The command will remain in 'in_progress' state indefinitely (acceptable for this iteration)
+**Recommendation:**
+- You MUST add `get_command_responses()` function to this file
+- Follow the existing pattern: log at entry, call repository, log result, return
+- Function signature: `async def get_command_responses(command_id: uuid.UUID, db_session: AsyncSession) -> list[Response]`
+- Import Response model from app.models.response
+- Import response_repository (you'll create this)
+- Return empty list (not None) if no responses found
 
-**Tip #4 - Async Database Operations:**
-ALL database operations MUST be awaited:
-- `await db.execute(query)` - Execute query
-- `await db.commit()` - Commit transaction
-- `await db.refresh(obj)` - Refresh object from database
-- `db.add(obj)` - Add to session (NOT async, no await needed)
+#### File: `backend/app/api/v1/commands.py` (READ IN FULL - 191 lines)
 
-**Tip #5 - Testing Pattern:**
-Based on existing test files in `backend/tests/`:
-- Use `conftest.py` fixtures for database setup (already exists)
-- Import `AsyncSession` and use async test functions
-- Use `@pytest.mark.asyncio` decorator for async tests
-- Integration tests should use TestClient from httpx or FastAPI
-- Mock authentication by overriding `get_current_user` dependency
-- Verify HTTP status codes, response schemas, and database state
+**Existing Endpoints:**
+1. `POST /api/v1/commands` - Submit command (lines 25-80)
+2. `GET /api/v1/commands/{command_id}` - Get command details (lines 82-130)
+3. `GET /api/v1/commands` - List commands (lines 132-191)
 
-**Tip #6 - Query Parameter Filtering:**
-For `GET /api/v1/commands` with filters, build the query dynamically:
+**Pattern for GET endpoints:**
 ```python
-query = select(Command)
-if vehicle_id:
-    query = query.where(Command.vehicle_id == vehicle_id)
-if status:
-    query = query.where(Command.status == status)
-query = query.limit(limit).offset(offset)
-result = await db.execute(query)
-commands = result.scalars().all()
+@router.get("/commands/{command_id}", response_model=CommandResponse)
+async def get_command(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CommandResponse:
+    logger.info("api_get_command", command_id=str(command_id), user_id=str(current_user.user_id))
+
+    command = await command_service.get_command_by_id(command_id=command_id, db_session=db)
+
+    if command is None:
+        logger.warning("api_get_command_not_found", command_id=str(command_id))
+        raise HTTPException(status_code=404, detail="Command not found")
+
+    logger.info("api_get_command_success", command_id=str(command_id))
+    return CommandResponse.model_validate(command)
 ```
 
-**Tip #7 - Pagination Response:**
-The task specifies `CommandListResponse` schema. This should include pagination metadata like the `VehicleListResponse` pattern (total, limit, offset). However, calculating total count requires a separate COUNT query.
+**Recommendation:**
+- You MUST add the new endpoint to this file: `GET /api/v1/commands/{command_id}/responses`
+- Place it after the existing `get_command()` endpoint (around line 131)
+- Follow the exact pattern: logging, service call, error handling
+- IMPORTANT: Do NOT return 404 if command has no responses - return empty list with 200 OK
+- Response model: `list[ResponseDetail]` (you'll create ResponseDetail schema)
+- You will need to add import for ResponseDetail schema
 
-**Tip #8 - Import Organization:**
-Follow the import order pattern seen in existing files:
-1. Standard library (uuid, datetime)
-2. Third-party libraries (structlog, fastapi, sqlalchemy, pydantic)
-3. Local app imports (app.models, app.schemas, app.services, app.repositories)
+#### File: `backend/app/repositories/command_repository.py` (READ IN FULL - 137 lines)
 
-**Warning #1 - Type Hints:**
-The codebase uses strict type checking with mypy. You MUST provide type hints for:
-- All function parameters
-- All function return types
-- Pydantic model fields
-Use `| None` for optional types (Python 3.10+ syntax, not Optional[])
+**Pattern Analysis:**
 
-**Warning #2 - UUID Handling:**
-UUIDs are stored as UUID objects in the database but serialized to strings in JSON responses. You MUST:
-- Use `uuid.UUID` type for function parameters expecting UUIDs
-- Use `@field_serializer` in Pydantic schemas to convert UUID to string
-- Parse UUID from strings with `uuid.UUID(string_value)` with try/except for validation
-
-**Warning #3 - Linting Configuration:**
-The project uses strict linting (ruff, black, mypy). Before submitting:
-- Run `ruff check backend/` - Should pass with no errors
-- Run `mypy backend/` - Should pass with no errors
-- All code MUST conform to existing style (line length=100 from pyproject.toml)
-
-**Note #1 - Structlog Configuration:**
-Structlog is already configured in `backend/app/database.py`. All logging should use structured format:
 ```python
-logger.info("event_name", key1=value1, key2=value2)
-# NOT: logger.info(f"Event with {value1}")
+async def create_command(db: AsyncSession, user_id: uuid.UUID, vehicle_id: uuid.UUID,
+                         command_name: str, command_params: dict[str, Any]) -> Command:
+    command = Command(
+        command_id=uuid.uuid4(),
+        user_id=user_id,
+        vehicle_id=vehicle_id,
+        command_name=command_name,
+        command_params=command_params,
+    )
+    db.add(command)
+    await db.commit()
+    await db.refresh(command)
+    return command
+
+async def get_command_by_id(db: AsyncSession, command_id: uuid.UUID) -> Command | None:
+    result = await db.execute(select(Command).where(Command.command_id == command_id))
+    return result.scalar_one_or_none()
+
+async def get_commands(db: AsyncSession, vehicle_id: uuid.UUID | None = None,
+                       user_id: uuid.UUID | None = None, status: str | None = None,
+                       limit: int = 50, offset: int = 0) -> list[Command]:
+    query = select(Command)
+
+    if vehicle_id is not None:
+        query = query.where(Command.vehicle_id == vehicle_id)
+    if user_id is not None:
+        query = query.where(Command.user_id == user_id)
+    if status is not None:
+        query = query.where(Command.status == status)
+
+    query = query.order_by(Command.submitted_at.desc()).limit(limit).offset(offset)
+
+    result = await db.execute(query)
+    return list(result.scalars().all())
 ```
 
-**Note #2 - RBAC Implementation:**
-The `require_role()` function returns a dependency that automatically checks authorization. When a user without required role accesses the endpoint, it returns 403 Forbidden automatically. You do NOT need to manually check roles in endpoint logic.
+**Key Patterns:**
+- **Create pattern:** Create object → db.add() → await db.commit() → await db.refresh() → return
+- **Get single:** select() → where() → await db.execute() → result.scalar_one_or_none()
+- **Get multiple:** select() → where() → order_by() → limit/offset → await db.execute() → result.scalars().all() → convert to list
+- **Type hints:** Always use proper return types (Model, Model | None, list[Model])
+- **Parameter order:** db is always first parameter
 
-**Note #3 - Test Coverage:**
-The acceptance criteria requires ≥80% test coverage. Use pytest-cov:
-```bash
-pytest --cov=app --cov-report=html --cov-report=term
+**Recommendation for response_repository.py:**
+- You MUST follow these exact patterns
+- For `create_response()`: Use the create pattern (construct → add → commit → refresh → return)
+- For `get_responses_by_command_id()`: Use the get multiple pattern with order_by(Response.sequence_number)
+
+#### File: `backend/tests/integration/test_command_api.py` (READ IN FULL - 537 lines)
+
+**Test Structure:**
+- Organized into test classes (TestSubmitCommandEndpoint, TestGetCommandEndpoint, TestListCommandsEndpoint)
+- Uses pytest fixtures: async_client, engineer_auth_headers, test_engineer, db_session
+- Uses mocking with `@patch` and `AsyncMock` for service layer
+- Comprehensive test coverage: success cases, error cases, auth failures, validation errors
+
+**Example Test:**
+```python
+@pytest.mark.asyncio
+async def test_get_command_success(
+    self,
+    async_client: AsyncClient,
+    engineer_auth_headers: dict[str, str],
+    test_commands: list,
+):
+    """Test getting a command by ID."""
+    command = test_commands[0]
+
+    with patch("app.api.v1.commands.command_service") as mock_service:
+        mock_service.get_command_by_id = AsyncMock(return_value=command)
+
+        response = await async_client.get(
+            f"/api/v1/commands/{command.command_id}",
+            headers=engineer_auth_headers,
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["command_id"] == str(command.command_id)
 ```
-Focus on testing:
-- All API endpoints (success and error cases)
-- Command validation logic
-- Status transitions
-- RBAC enforcement
-- Vehicle existence validation
+
+**Recommendation:**
+- You MUST add new test class `TestGetCommandResponsesEndpoint` to this file
+- Use the same fixtures and patterns as existing tests
+- Create mock Response objects similar to mock Command objects
+- Test scenarios: 0 responses, 1 response, multiple responses (verify ordering), command not found
+- Verify JSON structure includes all Response fields
 
 ---
 
-## 4. Additional Strategic Guidance
+### Implementation Tips & Notes
 
-### File Creation Order (Recommended)
-
-To minimize errors and enable incremental testing, create files in this order:
-
-1. **`backend/app/schemas/command.py`** - No dependencies, pure Pydantic
-2. **`backend/app/repositories/command_repository.py`** - Depends on: models, database
-3. **`backend/app/services/command_service.py`** - Depends on: repositories, schemas
-4. **`backend/app/api/v1/commands.py`** - Depends on: all above + dependencies
-5. **Register router in `backend/app/main.py`**
-6. **`backend/tests/unit/test_command_service.py`** - Unit tests
-7. **`backend/tests/integration/test_command_api.py`** - Integration tests
-
-### Schema Definitions Required
-
-Based on task requirements, create these Pydantic schemas:
-
-**CommandSubmitRequest:**
-- command_name: str
-- vehicle_id: UUID
-- command_params: dict[str, Any] (default={})
-
-**CommandResponse:**
-- command_id: UUID (serialize to string)
-- user_id: UUID (serialize to string)
-- vehicle_id: UUID (serialize to string)
-- command_name: str
-- command_params: dict[str, Any]
-- status: str
-- error_message: str | None
-- submitted_at: datetime
-- completed_at: datetime | None
-
-**CommandListResponse:**
-- commands: list[CommandResponse]
-- total: int (optional for this iteration)
-- limit: int
-- offset: int
-
-### Repository Functions Required
-
-**create_command():**
+**Tip #1 - Response Repository Creation Pattern:**
 ```python
-async def create_command(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    vehicle_id: uuid.UUID,
-    command_name: str,
-    command_params: dict[str, Any]
-) -> Command
-```
-
-**get_command_by_id():**
-```python
-async def get_command_by_id(
-    db: AsyncSession,
-    command_id: uuid.UUID
-) -> Command | None
-```
-
-**update_command_status():**
-```python
-async def update_command_status(
+async def create_response(
     db: AsyncSession,
     command_id: uuid.UUID,
-    status: str,
-    error_message: str | None = None,
-    completed_at: datetime | None = None
-) -> Command | None
+    response_payload: dict[str, Any],
+    sequence_number: int,
+    is_final: bool,
+) -> Response:
+    response = Response(
+        response_id=uuid.uuid4(),
+        command_id=command_id,
+        response_payload=response_payload,
+        sequence_number=sequence_number,
+        is_final=is_final,
+    )
+    db.add(response)
+    await db.commit()
+    await db.refresh(response)
+    return response
 ```
 
-**get_commands():**
+**Tip #2 - Ordering by Sequence Number:**
+When retrieving responses, you MUST order by sequence_number in ascending order:
 ```python
-async def get_commands(
-    db: AsyncSession,
-    vehicle_id: uuid.UUID | None = None,
-    user_id: uuid.UUID | None = None,
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0
-) -> list[Command]
+query = select(Response).where(Response.command_id == command_id).order_by(Response.sequence_number.asc())
+```
+Or simply: `.order_by(Response.sequence_number)` (ascending is default)
+
+**Tip #3 - Empty List vs 404:**
+The acceptance criteria explicitly states: "returns empty list if no responses". This means:
+- Do NOT check if command exists first
+- Do NOT raise HTTPException(404) if no responses
+- Simply return `[]` from service and endpoint
+- This is different from get_command_by_id which returns 404 if command not found
+
+**Tip #4 - ResponseDetail Schema:**
+Create a Pydantic schema following the existing pattern in `backend/app/schemas/command.py`:
+```python
+from uuid import UUID
+from datetime import datetime
+from typing import Any
+from pydantic import BaseModel, field_serializer
+
+class ResponseDetail(BaseModel):
+    response_id: UUID
+    command_id: UUID
+    response_payload: dict[str, Any]
+    sequence_number: int
+    is_final: bool
+    received_at: datetime
+
+    @field_serializer("response_id", "command_id")
+    def serialize_uuid(self, value: UUID) -> str:
+        return str(value)
+
+    model_config = {"from_attributes": True}
 ```
 
-### Service Functions Required
+**Tip #5 - Adding to command_service.py:**
+```python
+from app.models.response import Response
+from app.repositories import response_repository
 
-**submit_command():**
-- Validate vehicle exists (call vehicle_repository)
-- Create command with status='pending'
-- Update status to 'in_progress' (stub for vehicle communication)
-- Return command object
+async def get_command_responses(
+    command_id: uuid.UUID, db_session: AsyncSession
+) -> list[Response]:
+    """
+    Retrieve all responses for a command, ordered by sequence number.
 
-**get_command_by_id():**
-- Call repository
-- Return command or None
+    Args:
+        command_id: Command UUID
+        db_session: Database session
 
-**get_command_history():**
-- Call repository with filters
-- Return list of commands
+    Returns:
+        List of Response objects (empty if no responses)
+    """
+    logger.info("command_responses_retrieval", command_id=str(command_id))
 
-### Endpoint Specifications
+    responses = await response_repository.get_responses_by_command_id(db_session, command_id)
 
-**POST /api/v1/commands:**
-- Request: CommandSubmitRequest body
-- Response: CommandResponse (201 Created)
-- Auth: require_role(["engineer", "admin"])
-- Validate: vehicle_id exists
-- Logic: Call submit_command service
+    logger.info("command_responses_retrieved", command_id=str(command_id), count=len(responses))
 
-**GET /api/v1/commands/{command_id}:**
-- Path: command_id UUID
-- Response: CommandResponse (200 OK) or 404
-- Auth: get_current_user
-- Logic: Call get_command_by_id service
+    return responses
+```
 
-**GET /api/v1/commands:**
-- Query: vehicle_id, status, limit (default 50), offset (default 0)
-- Response: list[CommandResponse] or CommandListResponse (200 OK)
-- Auth: get_current_user
-- Logic: Call get_command_history service
+**Tip #6 - Adding Endpoint to commands.py:**
+```python
+from app.schemas.response import ResponseDetail
 
-### Testing Strategy
+@router.get("/commands/{command_id}/responses", response_model=list[ResponseDetail])
+async def get_command_responses(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResponseDetail]:
+    """
+    Retrieve all responses for a specific command.
 
-**Unit Tests (test_command_service.py):**
-- Test submit_command with valid/invalid vehicle_id
-- Test get_command_by_id with existing/non-existing id
-- Test get_command_history with various filters
-- Mock repository layer
+    Returns responses ordered by sequence_number (ascending).
+    Returns empty list if no responses exist.
 
-**Integration Tests (test_command_api.py):**
-- Test POST /api/v1/commands success (201)
-- Test POST /api/v1/commands without auth (401)
-- Test POST /api/v1/commands without required role (403)
-- Test POST /api/v1/commands with invalid vehicle_id (400)
-- Test GET /api/v1/commands/{command_id} success (200)
-- Test GET /api/v1/commands/{command_id} not found (404)
-- Test GET /api/v1/commands with filters
-- Test GET /api/v1/commands pagination
-- Verify database state after each operation
+    Args:
+        command_id: Command UUID
+        current_user: Authenticated user (injected)
+        db: Database session (injected)
+
+    Returns:
+        List of ResponseDetail objects
+
+    Raises:
+        HTTPException 401: Not authenticated
+    """
+    logger.info(
+        "api_get_command_responses",
+        command_id=str(command_id),
+        user_id=str(current_user.user_id),
+    )
+
+    responses = await command_service.get_command_responses(
+        command_id=command_id, db_session=db
+    )
+
+    logger.info(
+        "api_get_command_responses_success",
+        command_id=str(command_id),
+        count=len(responses),
+    )
+
+    return [ResponseDetail.model_validate(r) for r in responses]
+```
+
+**Tip #7 - Integration Test Structure:**
+```python
+class TestGetCommandResponsesEndpoint:
+    """Test GET /api/v1/commands/{command_id}/responses endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_get_responses_empty(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test getting responses for command with no responses."""
+        command_id = uuid.uuid4()
+
+        with patch("app.api.v1.commands.command_service") as mock_service:
+            mock_service.get_command_responses = AsyncMock(return_value=[])
+
+            response = await async_client.get(
+                f"/api/v1/commands/{command_id}/responses",
+                headers=engineer_auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data == []
+
+    # Add more tests for 1 response, multiple responses, unauthorized, etc.
+```
+
+**Warning #1 - JSONB Type Mapping:**
+The Response model uses `JSONB(astext_type=Text())` which is PostgreSQL-specific. This may cause issues in SQLite tests (from conftest.py). However, since integration tests mock the service layer, this shouldn't be a problem. The model works correctly with PostgreSQL.
+
+**Warning #2 - Cascade Delete:**
+The Response model has `ondelete="CASCADE"` on the command_id foreign key. This means:
+- If a command is deleted, all its responses are automatically deleted
+- You don't need to manually delete responses when deleting commands
+- Be aware of this behavior when writing tests
+
+**Warning #3 - Sequence Number Uniqueness:**
+The database has a UNIQUE constraint on (command_id, sequence_number). If you try to create two responses with the same sequence_number for the same command, you'll get an IntegrityError. Handle this appropriately (though it shouldn't happen in normal operation).
+
+**Note #1 - No Command Existence Check:**
+Unlike submit_command which validates vehicle existence, this endpoint does NOT need to check if the command exists. Simply query responses by command_id and return whatever is found (even if empty).
+
+**Note #2 - Import Organization:**
+Remember to follow the import order pattern:
+1. Standard library: `import uuid`, `from datetime import datetime`, `from typing import Any`
+2. Third-party: `from sqlalchemy import select`, `from pydantic import BaseModel`
+3. Local: `from app.models.response import Response`
+
+**Note #3 - Test Coverage:**
+The acceptance criteria requires ≥80% coverage. Your integration tests MUST cover:
+1. Empty responses list (command exists but no responses)
+2. Single response returned correctly
+3. Multiple responses returned in correct order (ascending sequence_number)
+4. Unauthorized access (no JWT) returns 403
+5. Response payload JSONB correctly serialized to JSON
+
+---
+
+## 4. Files to Create/Modify
+
+### Create Files:
+1. **`backend/app/repositories/response_repository.py`** - New file
+2. **`backend/app/schemas/response.py`** - New file
+
+### Modify Files:
+1. **`backend/app/services/command_service.py`** - Add `get_command_responses()` function
+2. **`backend/app/api/v1/commands.py`** - Add `GET /commands/{command_id}/responses` endpoint
+3. **`backend/tests/integration/test_command_api.py`** - Add `TestGetCommandResponsesEndpoint` class
+
+---
+
+## 5. Recommended Implementation Order
+
+To minimize errors and enable incremental testing:
+
+1. **Create `backend/app/schemas/response.py`**
+   - Pure Pydantic, no dependencies
+   - Define ResponseDetail schema
+   - Add @field_serializer for UUIDs
+
+2. **Create `backend/app/repositories/response_repository.py`**
+   - Import Response model
+   - Implement create_response()
+   - Implement get_responses_by_command_id() with ordering
+
+3. **Modify `backend/app/services/command_service.py`**
+   - Import Response model and response_repository
+   - Add get_command_responses() function
+   - Follow existing logging pattern
+
+4. **Modify `backend/app/api/v1/commands.py`**
+   - Import ResponseDetail schema
+   - Add get_command_responses() endpoint
+   - Use existing get_current_user dependency
+
+5. **Modify `backend/tests/integration/test_command_api.py`**
+   - Add TestGetCommandResponsesEndpoint class
+   - Create mock Response objects
+   - Test all scenarios from acceptance criteria
+
+6. **Run tests and verify coverage:**
+   ```bash
+   pytest backend/tests/integration/test_command_api.py::TestGetCommandResponsesEndpoint -v
+   pytest --cov=app --cov-report=term
+   ```
 
 ---
 
 ## End of Task Briefing Package
 
-You now have all the information needed to implement I2.T3. Follow the patterns established in the codebase, use the existing utilities and dependencies, and ensure all acceptance criteria are met.
+You now have all the information needed to implement I2.T4. This task builds on the existing command infrastructure and adds the ability to retrieve streaming response data. Follow the established patterns, and ensure proper ordering and JSONB serialization.
 
 Good luck, Coder Agent! 🚀

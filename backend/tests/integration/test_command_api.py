@@ -15,6 +15,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.command import Command
+from app.models.response import Response
 from app.models.user import User
 from app.services.auth_service import create_access_token, hash_password
 
@@ -534,3 +535,213 @@ class TestListCommandsEndpoint:
             data = response.json()
 
             assert len(data["commands"]) == 0
+
+
+class TestGetCommandResponsesEndpoint:
+    """Test GET /api/v1/commands/{command_id}/responses endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_get_responses_empty(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test getting responses for command with no responses."""
+        command_id = uuid.uuid4()
+
+        with patch("app.api.v1.commands.command_service") as mock_service:
+            mock_service.get_command_responses = AsyncMock(return_value=[])
+
+            response = await async_client.get(
+                f"/api/v1/commands/{command_id}/responses",
+                headers=engineer_auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert data == []
+            assert isinstance(data, list)
+
+    @pytest.mark.asyncio
+    async def test_get_responses_single_response(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test getting a single response for a command."""
+        command_id = uuid.uuid4()
+        response_id = uuid.uuid4()
+
+        mock_response = Response(
+            response_id=response_id,
+            command_id=command_id,
+            response_payload={"status": "success", "data": "test data"},
+            sequence_number=1,
+            is_final=True,
+            received_at=datetime.now(timezone.utc),
+        )
+
+        with patch("app.api.v1.commands.command_service") as mock_service:
+            mock_service.get_command_responses = AsyncMock(
+                return_value=[mock_response]
+            )
+
+            response = await async_client.get(
+                f"/api/v1/commands/{command_id}/responses",
+                headers=engineer_auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert len(data) == 1
+            assert data[0]["response_id"] == str(response_id)
+            assert data[0]["command_id"] == str(command_id)
+            assert data[0]["response_payload"] == {
+                "status": "success",
+                "data": "test data",
+            }
+            assert data[0]["sequence_number"] == 1
+            assert data[0]["is_final"] is True
+            assert "received_at" in data[0]
+
+    @pytest.mark.asyncio
+    async def test_get_responses_multiple_ordered(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test getting multiple responses ordered by sequence_number."""
+        command_id = uuid.uuid4()
+
+        mock_responses = [
+            Response(
+                response_id=uuid.uuid4(),
+                command_id=command_id,
+                response_payload={"chunk": 1},
+                sequence_number=1,
+                is_final=False,
+                received_at=datetime.now(timezone.utc),
+            ),
+            Response(
+                response_id=uuid.uuid4(),
+                command_id=command_id,
+                response_payload={"chunk": 2},
+                sequence_number=2,
+                is_final=False,
+                received_at=datetime.now(timezone.utc),
+            ),
+            Response(
+                response_id=uuid.uuid4(),
+                command_id=command_id,
+                response_payload={"chunk": 3, "final": True},
+                sequence_number=3,
+                is_final=True,
+                received_at=datetime.now(timezone.utc),
+            ),
+        ]
+
+        with patch("app.api.v1.commands.command_service") as mock_service:
+            mock_service.get_command_responses = AsyncMock(
+                return_value=mock_responses
+            )
+
+            response = await async_client.get(
+                f"/api/v1/commands/{command_id}/responses",
+                headers=engineer_auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert len(data) == 3
+
+            # Verify ordering by sequence_number
+            assert data[0]["sequence_number"] == 1
+            assert data[1]["sequence_number"] == 2
+            assert data[2]["sequence_number"] == 3
+
+            # Verify response_payload JSONB serialization
+            assert data[0]["response_payload"] == {"chunk": 1}
+            assert data[1]["response_payload"] == {"chunk": 2}
+            assert data[2]["response_payload"] == {"chunk": 3, "final": True}
+
+            # Verify is_final flags
+            assert data[0]["is_final"] is False
+            assert data[1]["is_final"] is False
+            assert data[2]["is_final"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_responses_unauthorized(
+        self,
+        async_client: AsyncClient,
+    ):
+        """Test that unauthorized requests are rejected."""
+        command_id = uuid.uuid4()
+
+        response = await async_client.get(
+            f"/api/v1/commands/{command_id}/responses"
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_get_responses_complex_jsonb_payload(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test JSONB payload with complex nested structure serializes correctly."""
+        command_id = uuid.uuid4()
+
+        complex_payload = {
+            "diagnostics": {
+                "engine": {"temperature": 85.5, "rpm": 2500, "status": "ok"},
+                "battery": {"voltage": 12.6, "charge_percent": 95},
+            },
+            "sensors": [
+                {"id": "sensor1", "value": 42.0},
+                {"id": "sensor2", "value": 17.3},
+            ],
+            "metadata": {"timestamp": "2024-01-15T10:30:00Z", "version": "1.0"},
+        }
+
+        mock_response = Response(
+            response_id=uuid.uuid4(),
+            command_id=command_id,
+            response_payload=complex_payload,
+            sequence_number=1,
+            is_final=True,
+            received_at=datetime.now(timezone.utc),
+        )
+
+        with patch("app.api.v1.commands.command_service") as mock_service:
+            mock_service.get_command_responses = AsyncMock(
+                return_value=[mock_response]
+            )
+
+            response = await async_client.get(
+                f"/api/v1/commands/{command_id}/responses",
+                headers=engineer_auth_headers,
+            )
+
+            assert response.status_code == status.HTTP_200_OK
+            data = response.json()
+            assert len(data) == 1
+
+            # Verify complex JSONB structure is correctly serialized
+            assert data[0]["response_payload"] == complex_payload
+            assert data[0]["response_payload"]["diagnostics"]["engine"]["rpm"] == 2500
+            assert len(data[0]["response_payload"]["sensors"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_responses_invalid_uuid(
+        self,
+        async_client: AsyncClient,
+        engineer_auth_headers: dict[str, str],
+    ):
+        """Test that invalid UUID format returns validation error."""
+        response = await async_client.get(
+            "/api/v1/commands/not-a-uuid/responses",
+            headers=engineer_auth_headers,
+        )
+
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY

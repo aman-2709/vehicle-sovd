@@ -16,6 +16,7 @@ from app.schemas.command import (
     CommandResponse,
     CommandSubmitRequest,
 )
+from app.schemas.response import ResponseDetail
 from app.services import command_service
 
 router = APIRouter()
@@ -127,6 +128,48 @@ async def get_command(
     )
 
     return CommandResponse.model_validate(command)
+
+
+@router.get("/commands/{command_id}/responses", response_model=list[ResponseDetail])
+async def get_command_responses(
+    command_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ResponseDetail]:
+    """
+    Retrieve all responses for a specific command.
+
+    Returns responses ordered by sequence_number (ascending) to maintain
+    proper streaming order. Returns empty list if no responses exist.
+
+    Args:
+        command_id: Command UUID
+        current_user: Authenticated user (injected)
+        db: Database session (injected)
+
+    Returns:
+        List of ResponseDetail objects (empty if no responses)
+
+    Raises:
+        HTTPException 401: Not authenticated
+    """
+    logger.info(
+        "api_get_command_responses",
+        command_id=str(command_id),
+        user_id=str(current_user.user_id),
+    )
+
+    responses = await command_service.get_command_responses(
+        command_id=command_id, db_session=db
+    )
+
+    logger.info(
+        "api_get_command_responses_success",
+        command_id=str(command_id),
+        count=len(responses),
+    )
+
+    return [ResponseDetail.model_validate(r) for r in responses]
 
 
 @router.get("/commands", response_model=CommandListResponse)
