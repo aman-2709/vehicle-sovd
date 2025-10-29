@@ -222,6 +222,9 @@ POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh
 # Run tests
 make test
 
+# Run end-to-end tests (starts services, runs tests, stops services)
+make e2e
+
 # Run linters
 make lint
 
@@ -239,6 +242,182 @@ docker-compose exec backend bash
 docker-compose exec frontend sh
 ```
 
+## End-to-End Testing
+
+The project includes comprehensive end-to-end tests using Playwright that validate complete user workflows across the entire application stack.
+
+### Prerequisites
+
+- Node.js 18+ installed (for running Playwright tests)
+- Docker and Docker Compose installed
+- Playwright browsers installed (chromium, firefox)
+
+### Running E2E Tests
+
+**Automated Full Stack Testing:**
+
+The simplest way to run E2E tests is using the `make e2e` command, which handles all service orchestration automatically:
+
+```bash
+make e2e
+```
+
+This command will:
+1. Start all docker-compose services (frontend, backend, database, redis)
+2. Wait for services to be healthy and ready
+3. Run the complete Playwright test suite
+4. Stop all services and clean up
+5. Exit with proper status code (0 = success, non-zero = failure)
+
+**Manual E2E Test Execution:**
+
+If you want more control over the test execution:
+
+```bash
+# Start services manually
+make up
+
+# Wait for services to be ready (check health)
+docker-compose ps
+
+# Navigate to E2E test directory
+cd tests/e2e
+
+# Run all tests in headless mode (default)
+npx playwright test
+
+# Run tests in headed mode (see browser)
+npx playwright test --headed
+
+# Run tests with UI mode (interactive debugging)
+npx playwright test --ui
+
+# Run specific test file
+npx playwright test specs/auth.spec.ts
+
+# Run tests for specific browser only
+npx playwright test --project=chromium
+npx playwright test --project=firefox
+
+# Run tests in debug mode (step-by-step)
+npx playwright test --debug
+
+# Stop services when done
+make down
+```
+
+### Test Suites
+
+The E2E test suite covers three critical user flows:
+
+**1. Authentication Flow (`tests/e2e/specs/auth.spec.ts`)**
+- Complete login flow with valid credentials
+- Redirect to dashboard after successful login
+- Username display in header after authentication
+- Logout functionality and redirect to login
+- Session persistence across page refreshes
+- Protected route access control
+- Invalid credentials handling
+
+**2. Vehicle Management (`tests/e2e/specs/vehicle_management.spec.ts`)**
+- Vehicle list rendering and display
+- Search filtering by VIN
+- Status filter dropdown (All, Connected, Disconnected)
+- Vehicle details visibility
+- Auto-refresh behavior
+- Empty search results handling
+
+**3. Command Execution (`tests/e2e/specs/command_execution.spec.ts`)**
+- Complete command execution flow (vehicle selection → command selection → parameter input → submission)
+- Real-time response viewing via WebSocket
+- Command ID display after submission
+- Parameter validation
+- Multiple sequential command execution
+- Error handling for disconnected vehicles
+- Response viewer real-time updates
+
+### Test Results and Artifacts
+
+Playwright automatically captures artifacts for debugging:
+
+- **Screenshots:** `tests/e2e/test-results/screenshots/` (captured on failure only)
+- **Videos:** `tests/e2e/test-results/artifacts/` (retained on failure only)
+- **Test Report:** `tests/e2e/test-results/html-report/` (HTML report with detailed results)
+- **JSON Results:** `tests/e2e/test-results/results.json` (machine-readable results)
+
+To view the HTML test report:
+
+```bash
+cd tests/e2e
+npx playwright show-report
+```
+
+### Browser Coverage
+
+E2E tests run across multiple browsers to ensure cross-browser compatibility:
+- **Chromium** (Chrome, Edge)
+- **Firefox**
+
+### Configuration
+
+Playwright configuration is located at `tests/e2e/playwright.config.ts`:
+- Base URL: `http://localhost:3000`
+- Headless mode: Enabled by default (can be overridden with `--headed`)
+- Timeouts: 60s per test, 10s per assertion, 15s per action
+- Retries: 2 retries on CI, 0 retries locally
+- Parallel execution: Fully parallel (limited to 1 worker on CI)
+- Screenshot on failure: Enabled
+- Video on failure: Enabled
+
+### Troubleshooting E2E Tests
+
+**Tests fail immediately:**
+- Verify services are running: `docker-compose ps`
+- Check frontend is accessible: `curl http://localhost:3000`
+- Check backend is accessible: `curl http://localhost:8000/docs`
+- Verify database was initialized: `docker-compose exec db psql -U sovd_user -d sovd -c "SELECT * FROM users;"`
+
+**Timeout errors:**
+- Increase timeout in `playwright.config.ts` if services are slow to start
+- Check service logs: `docker-compose logs backend` or `docker-compose logs frontend`
+- Ensure adequate system resources (CPU, memory)
+
+**Flaky tests (intermittent failures):**
+- Check for race conditions in test code (use proper `waitFor` methods)
+- Verify WebSocket connections are stable: `docker-compose logs backend | grep websocket`
+- Increase wait timeouts for slower systems
+
+**WebSocket response tests fail:**
+- Verify Redis is running and healthy: `docker-compose ps redis`
+- Check backend WebSocket endpoint: `docker-compose logs backend | grep ws`
+- Ensure response broadcasting is working: check backend logs for pub/sub activity
+
+**"Browser not found" error:**
+- Install Playwright browsers: `npx playwright install chromium firefox`
+- Or install all browsers: `npx playwright install`
+
+**Port conflicts:**
+- Ensure ports 3000, 8000, 5432, and 6379 are available
+- Stop conflicting services: `sudo lsof -ti:3000 | xargs kill -9`
+
+**Clean slate for E2E tests:**
+```bash
+# Stop all services and remove volumes
+docker-compose down -v
+
+# Start fresh and run E2E tests
+make e2e
+```
+
+### CI/CD Integration
+
+E2E tests are integrated into the GitHub Actions CI/CD pipeline:
+- Tests run automatically on every pull request and merge to main
+- Tests run in headless mode across multiple browsers
+- Screenshots and videos are uploaded as artifacts on failure
+- Pipeline fails if any E2E test fails
+- Expected duration: <5 minutes for complete E2E suite
+
 ## Project Structure
 
 ```
@@ -248,7 +427,12 @@ sovd-command-webapp/
 ├── infrastructure/    # IaC and deployment configs
 ├── docs/             # Documentation and diagrams
 ├── scripts/          # Development and utility scripts
-└── tests/            # End-to-end tests
+└── tests/
+    └── e2e/          # End-to-end tests (Playwright)
+        ├── specs/    # Test specifications
+        ├── test-results/ # Test artifacts (screenshots, videos, reports)
+        ├── package.json
+        └── playwright.config.ts
 ```
 
 ## Documentation

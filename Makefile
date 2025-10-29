@@ -1,4 +1,4 @@
-.PHONY: up down test lint logs help
+.PHONY: up down test lint logs e2e help
 
 # Default target - show help
 help:
@@ -6,6 +6,7 @@ help:
 	@echo "  make up    - Start all services with docker-compose"
 	@echo "  make down  - Stop all services"
 	@echo "  make test  - Run all tests (backend, frontend, e2e)"
+	@echo "  make e2e   - Run end-to-end tests with docker-compose (starts services, runs tests, stops services)"
 	@echo "  make lint  - Run all linters (backend and frontend)"
 	@echo "  make logs  - View logs from all services"
 
@@ -25,6 +26,24 @@ test:
 	@cd frontend && npm test || true
 	@echo "Running e2e tests..."
 	@cd tests/e2e && npx playwright test || true
+
+# Run end-to-end tests with full service orchestration
+e2e:
+	@echo "Starting docker-compose services..."
+	@docker-compose up -d
+	@echo "Waiting for services to be ready..."
+	@sleep 10
+	@echo "Checking service health..."
+	@docker-compose ps
+	@echo "Waiting for frontend to be ready..."
+	@timeout 60 sh -c 'until curl -s http://localhost:3000 > /dev/null; do sleep 2; done' || (echo "Frontend failed to start" && docker-compose down && exit 1)
+	@echo "Waiting for backend to be ready..."
+	@timeout 60 sh -c 'until curl -s http://localhost:8000/docs > /dev/null; do sleep 2; done' || (echo "Backend failed to start" && docker-compose down && exit 1)
+	@echo "Services are ready, running E2E tests..."
+	@cd tests/e2e && npx playwright test || (EXIT_CODE=$$?; cd ../.. && docker-compose down && exit $$EXIT_CODE)
+	@echo "E2E tests completed, stopping services..."
+	@docker-compose down
+	@echo "E2E test suite finished successfully!"
 
 # Run all linters (backend: ruff, black, mypy; frontend: eslint, prettier)
 lint:
