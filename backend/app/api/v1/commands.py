@@ -5,7 +5,7 @@ FastAPI router for command management endpoints.
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -26,6 +26,7 @@ logger = structlog.get_logger(__name__)
 @router.post("/commands", response_model=CommandResponse, status_code=201)
 async def submit_command(
     request: CommandSubmitRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(["engineer", "admin"])),
     db: AsyncSession = Depends(get_db),
 ) -> CommandResponse:
@@ -61,6 +62,7 @@ async def submit_command(
         command_params=request.command_params,
         user_id=current_user.user_id,
         db_session=db,
+        background_tasks=background_tasks,
     )
 
     if command is None:

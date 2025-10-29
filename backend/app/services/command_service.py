@@ -6,8 +6,10 @@ import uuid
 from typing import Any
 
 import structlog
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.connectors import vehicle_connector
 from app.models.command import Command
 from app.models.response import Response
 from app.repositories import command_repository, response_repository, vehicle_repository
@@ -21,12 +23,13 @@ async def submit_command(
     command_params: dict[str, Any],
     user_id: uuid.UUID,
     db_session: AsyncSession,
+    background_tasks: BackgroundTasks,
 ) -> Command | None:
     """
     Submit a command to a vehicle.
 
-    Validates vehicle existence, creates command record, and marks as in_progress.
-    Actual vehicle communication is stubbed for now (will be implemented in I2.T5).
+    Validates vehicle existence, creates command record, and triggers
+    asynchronous mock command execution via the vehicle connector.
 
     Args:
         vehicle_id: Target vehicle UUID
@@ -34,6 +37,7 @@ async def submit_command(
         command_params: Command-specific parameters
         user_id: ID of user submitting the command
         db_session: Database session
+        background_tasks: FastAPI background tasks for async execution
 
     Returns:
         Created Command object if vehicle exists, None otherwise
@@ -70,23 +74,24 @@ async def submit_command(
         status=command.status,
     )
 
-    # Update status to 'in_progress' (stub for vehicle connector)
-    updated_command = await command_repository.update_command_status(
-        db=db_session, command_id=command.command_id, status="in_progress"
+    # Trigger async command execution via vehicle connector
+    background_tasks.add_task(
+        vehicle_connector.execute_command,
+        command.command_id,
+        vehicle_id,
+        command_name,
+        command_params,
     )
-
-    # This should never be None since we just created the command
-    assert updated_command is not None, "Failed to update command status"
 
     logger.info(
         "command_submitted",
-        command_id=str(updated_command.command_id),
-        status=updated_command.status,
+        command_id=str(command.command_id),
+        status=command.status,
         vehicle_id=str(vehicle_id),
         user_id=str(user_id),
     )
 
-    return updated_command
+    return command
 
 
 async def get_command_by_id(
