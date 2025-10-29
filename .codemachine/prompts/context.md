@@ -10,19 +10,22 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I2.T8",
+  "task_id": "I2.T10",
   "iteration_id": "I2",
   "iteration_goal": "Core Backend APIs - Authentication, Vehicles, Commands",
-  "description": "Create PlantUML sequence diagram `docs/diagrams/sequence_command_flow.puml` illustrating end-to-end command execution flow from user login to command completion and response delivery. Diagram must include actors/systems: Engineer (user), Web App, API Gateway, Application Server (with sub-components: Auth Service, Command Service, Vehicle Connector), Redis Pub/Sub, WebSocket Server (note: WebSocket not implemented yet, show placeholder), Database, Vehicle. Flow: 1) User login (auth flow), 2) User selects vehicle (GET /vehicles), 3) User submits command (POST /commands), 4) Backend validates command (SOVD handler), 5) Command record created (database), 6) Async execution triggered (Vehicle Connector), 7) Mock vehicle response generated, 8) Response published to Redis, 9) Response saved to database, 10) Command status updated to completed. Reference Architecture Blueprint Section 3.7 (Key Interaction Flow). Create companion diagram `docs/diagrams/sequence_error_flow.puml` showing error scenario (vehicle timeout or validation failure).",
-  "agent_type_hint": "DiagrammingAgent",
-  "inputs": "Architecture Blueprint Section 3.7 (Sequence Diagrams); implemented APIs from I2.T1-I2.T7.",
+  "description": "Expand integration tests in `backend/tests/integration/` to achieve 80%+ coverage for all implemented modules. Write comprehensive test scenarios: authentication flows (login success/failure, token refresh, logout, protected endpoints), vehicle API (listing with filters, pagination, caching), command API (submission, validation errors, retrieval, response listing), audit logging (verify audit records created). Use pytest fixtures for database setup/teardown, test users, test vehicles. Configure pytest-cov to generate coverage report. Add `make test` target to Makefile to run `pytest --cov=app --cov-report=html --cov-report=term`. Ensure all tests pass and coverage meets 80% threshold. Fix any failing tests or bugs discovered.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "All implemented backend modules from I2.T1-I2.T7.",
   "target_files": [
-    "docs/diagrams/sequence_command_flow.puml",
-    "docs/diagrams/sequence_error_flow.puml"
+    "backend/tests/integration/test_auth_api.py",
+    "backend/tests/integration/test_vehicle_api.py",
+    "backend/tests/integration/test_command_api.py",
+    "backend/tests/conftest.py",
+    "Makefile"
   ],
   "input_files": [],
-  "deliverables": "Two PlantUML sequence diagrams documenting command execution (success and error flows).",
-  "acceptance_criteria": "PlantUML files compile without errors; `sequence_command_flow.puml` matches Architecture Blueprint Section 3.7 (Command Execution Flow); All actors/systems from description included; Flow shows all 10 steps listed in description; `sequence_error_flow.puml` shows validation error scenario (400 Bad Request returned); Diagrams include notes explaining key decision points; Files committed to `docs/diagrams/`",
+  "deliverables": "Comprehensive integration test suite; coverage report showing 80%+ coverage; all tests passing.",
+  "acceptance_criteria": "`make test` (or `pytest`) runs all tests successfully (0 failures); Coverage report shows ≥80% line coverage for `backend/app/` directory; Integration tests cover all API endpoints with success and error cases; Tests verify audit log creation for key events; Tests verify Redis caching behavior for vehicle status; Fixtures provide clean database state for each test; Coverage HTML report generated in `backend/htmlcov/` directory; Coverage summary displayed in terminal output; No flaky tests (tests pass consistently on multiple runs)",
   "dependencies": [
     "I2.T1",
     "I2.T2",
@@ -32,7 +35,7 @@ This is the full specification of the task you must complete.
     "I2.T6",
     "I2.T7"
   ],
-  "parallelizable": true,
+  "parallelizable": false,
   "done": false
 }
 ```
@@ -43,347 +46,87 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: key-interaction-flow (from 04_Behavior_and_Communication.md)
+### Context: unit-testing (from 03_Verification_and_Glossary.md)
 
 ```markdown
-#### Key Interaction Flow (Sequence Diagram)
+#### Unit Testing
 
-##### Description: Command Execution Flow
-
-This sequence diagram illustrates the critical workflow of a user executing an SOVD command and receiving a streaming response. It demonstrates:
-
-1. **Authentication**: User logs in and receives JWT
-2. **Vehicle Selection**: User queries available vehicles
-3. **Command Submission**: User submits SOVD command via REST API
-4. **WebSocket Establishment**: UI establishes WebSocket for real-time updates
-5. **Command Execution**: Backend forwards command to vehicle via gRPC
-6. **Streaming Response**: Vehicle sends multiple response chunks
-7. **Event Publishing**: Vehicle Connector publishes to Redis
-8. **Real-Time Delivery**: WebSocket Server pushes to UI
-9. **Completion**: Final response marks command complete
-
-This flow showcases the hybrid REST + WebSocket architecture for optimal user experience.
+**Backend (Python/pytest)**
+*   **Scope**: Individual functions and classes in services, repositories, utilities, and protocol handlers
+*   **Framework**: pytest with pytest-asyncio for async code
+*   **Coverage Target**: ≥80% line coverage for all modules
+*   **Key Areas**:
+    *   Auth service: JWT generation/validation, password hashing, RBAC logic
+    *   Vehicle service: Filtering, caching logic
+    *   Command service: Status transitions, validation
+    *   SOVD protocol handler: Command validation, encoding/decoding
+    *   Audit service: Log record creation
+    *   Mock vehicle connector: Response generation
+*   **Mocking**: Use pytest fixtures and `unittest.mock` for database, Redis, external dependencies
+*   **Execution**: `pytest backend/tests/unit/` or `make test`
 ```
 
-### Context: sequence-diagram-plantuml (from 04_Behavior_and_Communication.md)
-
-```plantuml
-@startuml
-
-title Command Execution Flow - SOVD WebApp
-
-actor Engineer as "Automotive\nEngineer"
-participant "Web App\n(React)" as WebApp
-participant "API Gateway\n(Nginx)" as Gateway
-participant "Application Server\n(FastAPI)" as AppServer
-participant "Vehicle Connector\n(gRPC Client)" as Connector
-participant "Redis\nPub/Sub" as Redis
-participant "WebSocket Server\n(FastAPI)" as WSServer
-participant "PostgreSQL" as DB
-participant "Vehicle\n(SOVD Endpoint)" as Vehicle
-
-== Authentication ==
-Engineer -> WebApp : Enters credentials, clicks Login
-WebApp -> Gateway : POST /api/v1/auth/login
-Gateway -> AppServer : POST /auth/login
-AppServer -> DB : Validate credentials, load user
-DB --> AppServer : User record
-AppServer --> Gateway : 200 OK + JWT tokens
-Gateway --> WebApp : Access token + Refresh token
-WebApp -> Engineer : Display dashboard
-
-== Vehicle Selection ==
-Engineer -> WebApp : Navigates to Vehicles page
-WebApp -> Gateway : GET /api/v1/vehicles
-Gateway -> AppServer : GET /vehicles (with JWT)
-AppServer -> DB : Query vehicles
-DB --> AppServer : Vehicle list
-AppServer --> Gateway : 200 OK + [vehicles]
-Gateway --> WebApp : Vehicle data
-WebApp -> Engineer : Display vehicle list
-
-== Command Submission ==
-Engineer -> WebApp : Selects vehicle, enters command\n"ReadDTC", params: {"ecuAddress": "0x10"}
-WebApp -> Gateway : POST /api/v1/commands
-Gateway -> AppServer : POST /commands (with JWT, payload)
-AppServer -> DB : Insert command record (status=pending)
-DB --> AppServer : command_id
-AppServer -> Connector : Execute command (async)
-activate Connector
-AppServer --> Gateway : 202 Accepted + command_id + stream_url
-Gateway --> WebApp : Command submitted
-WebApp -> Engineer : "Command executing... (see real-time results below)"
-
-== WebSocket Establishment ==
-WebApp -> Gateway : WS connect: wss://.../ws/responses/{command_id}?token={jwt}
-Gateway -> WSServer : Upgrade to WebSocket
-WSServer -> WSServer : Validate JWT, authorize
-WSServer --> Gateway : WebSocket established
-Gateway --> WebApp : WebSocket open
-WebApp -> WSServer : {"action": "subscribe", "command_id": "{command_id}"}
-WSServer -> Redis : SUBSCRIBE response:{command_id}
-
-== Command Execution at Vehicle ==
-Connector -> Vehicle : gRPC call: ExecuteCommand(ReadDTC, params)
-activate Vehicle
-note right of Connector : Async execution,\nnon-blocking
-
-AppServer -> DB : Update command status=in_progress
-DB --> AppServer : OK
-
-Vehicle -> Vehicle : Execute diagnostic command
-Vehicle --> Connector : gRPC stream response (chunk 1)
-Connector -> DB : Insert response (seq=1, is_final=false)
-Connector -> Redis : PUBLISH response:{command_id}\n{"response_payload": {"dtcCode": "P0420", ...}, ...}
-
-Redis --> WSServer : Event received
-WSServer -> WebApp : WS message: {"event": "response", "response": {...}, "sequence_number": 1}
-WebApp -> Engineer : Display DTC: P0420 (progressive render)
-
-Vehicle --> Connector : gRPC stream response (chunk 2)
-Connector -> DB : Insert response (seq=2, is_final=false)
-Connector -> Redis : PUBLISH response:{command_id}\n{"response_payload": {"dtcCode": "P0171", ...}, ...}
-
-Redis --> WSServer : Event received
-WSServer -> WebApp : WS message: {"event": "response", "response": {...}, "sequence_number": 2}
-WebApp -> Engineer : Display DTC: P0171
-
-Vehicle --> Connector : gRPC stream response (final)
-deactivate Vehicle
-Connector -> DB : Insert response (seq=3, is_final=true)
-Connector -> DB : Update command status=completed
-Connector -> Redis : PUBLISH response:{command_id}\n{"response_payload": {"status": "complete"}, "is_final": true}
-deactivate Connector
-
-Redis --> WSServer : Event received
-WSServer -> WebApp : WS message: {"event": "status", "status": "completed"}
-WebApp -> Engineer : "Command completed successfully"
-
-@enduml
-```
-
-### Context: error-handling-flow (from 04_Behavior_and_Communication.md)
+### Context: integration-testing (from 03_Verification_and_Glossary.md)
 
 ```markdown
-#### Error Handling Flow (Sequence Diagram)
+#### Integration Testing
 
-##### Description: Vehicle Timeout Scenario
-
-This diagram illustrates graceful error handling when a vehicle fails to respond within the timeout period (e.g., 30 seconds):
-
-1. Command is submitted and forwarded to vehicle
-2. Vehicle does not respond (connection lost, vehicle offline, etc.)
-3. Vehicle Connector detects timeout
-4. Error is logged to database and audit log
-5. Error event is published to WebSocket
-6. User receives clear error message with suggested actions
+**Backend API Integration Tests**
+*   **Scope**: API endpoints with database and Redis integration (using test containers or docker-compose services)
+*   **Framework**: pytest with httpx async test client
+*   **Key Scenarios**:
+    *   Authentication flow: login, token refresh, logout, protected endpoint access
+    *   Vehicle API: listing, filtering, pagination, caching behavior
+    *   Command API: submission, retrieval, response listing, validation errors
+    *   WebSocket: connection establishment, event delivery, authentication
+    *   Error scenarios: validation errors, timeouts, database failures
+    *   Audit logging: verify audit records created for all actions
+*   **Test Data**: Use test fixtures for users, vehicles, commands (seed before tests, clean after)
+*   **Execution**: `pytest backend/tests/integration/` (requires running docker-compose for db and redis)
 ```
 
-### Context: error-diagram-plantuml (from 04_Behavior_and_Communication.md)
-
-```plantuml
-@startuml
-
-title Error Handling Flow - Vehicle Timeout
-
-actor Engineer
-participant WebApp
-participant AppServer
-participant Connector
-participant Redis
-participant WSServer
-participant DB
-participant Vehicle
-
-Engineer -> WebApp : Submit command
-WebApp -> AppServer : POST /api/v1/commands
-AppServer -> DB : Insert command (status=pending)
-AppServer -> Connector : Execute command
-activate Connector
-AppServer --> WebApp : 202 Accepted + command_id
-
-Connector -> Vehicle : gRPC ExecuteCommand
-activate Vehicle
-
-... 30 seconds pass with no response ...
-
-Vehicle --x Connector : (timeout - no response)
-deactivate Vehicle
-
-Connector -> Connector : Detect timeout, handle gracefully
-Connector -> DB : Update command\nstatus=failed\nerror_message="Vehicle timeout"
-Connector -> DB : Insert audit log (action=command_timeout)
-Connector -> Redis : PUBLISH response:{command_id}\n{"event": "error", "error_message": "Vehicle connection timeout"}
-deactivate Connector
-
-Redis --> WSServer : Error event
-WSServer -> WebApp : WS: {"event": "error", "error_message": "Vehicle connection timeout. Vehicle may be offline."}
-WebApp -> Engineer : Display error notification\n"Command failed: Vehicle timeout. Please check vehicle connectivity."
-
-@enduml
-```
-
-### Context: auth-endpoints (from 04_Behavior_and_Communication.md)
+### Context: code-quality-gates (from 03_Verification_and_Glossary.md)
 
 ```markdown
-**Authentication Endpoints**
+### 5.3. Code Quality Gates
 
-```
-POST   /api/v1/auth/login
-Request:  { "username": "string", "password": "string" }
-Response: { "access_token": "string", "refresh_token": "string", "expires_in": 900 }
+#### Quality Metrics & Enforcement
 
-POST   /api/v1/auth/refresh
-Request:  { "refresh_token": "string" }
-Response: { "access_token": "string", "expires_in": 900 }
-
-POST   /api/v1/auth/logout
-Headers:  Authorization: Bearer {token}
-Response: { "message": "Logged out successfully" }
-
-GET    /api/v1/auth/me
-Headers:  Authorization: Bearer {token}
-Response: { "user_id": "uuid", "username": "string", "role": "string" }
-```
+**Code Coverage**
+*   **Requirement**: ≥80% line coverage for both backend and frontend
+*   **Enforcement**: CI pipeline fails if coverage drops below threshold
+*   **Reporting**: HTML coverage reports generated and uploaded as artifacts
+*   **Tool**: pytest-cov (backend), Vitest coverage (frontend)
 ```
 
-### Context: vehicle-endpoints (from 04_Behavior_and_Communication.md)
+### Context: task-i2-t10 (from 02_Iteration_I2.md)
 
 ```markdown
-**Vehicle Endpoints**
-
-```
-GET    /api/v1/vehicles
-Headers:  Authorization: Bearer {token}
-Query:    ?status=connected&search=VIN123
-Response: [
-  {
-    "vehicle_id": "uuid",
-    "vin": "string",
-    "make": "string",
-    "model": "string",
-    "year": 2024,
-    "connection_status": "connected",
-    "last_seen_at": "2025-10-28T10:00:00Z"
-  }
-]
-
-GET    /api/v1/vehicles/{vehicle_id}
-Headers:  Authorization: Bearer {token}
-Response: { "vehicle_id": "uuid", "vin": "string", ... }
-
-GET    /api/v1/vehicles/{vehicle_id}/status
-Headers:  Authorization: Bearer {token}
-Response: {
-  "connection_status": "connected",
-  "last_seen_at": "2025-10-28T10:00:00Z",
-  "health": { "signal_strength": 4, "battery": 12.6 }
-}
-```
-```
-
-### Context: command-endpoints (from 04_Behavior_and_Communication.md)
-
-```markdown
-**Command Endpoints**
-
-```
-POST   /api/v1/commands
-Headers:  Authorization: Bearer {token}
-Request:  {
-  "vehicle_id": "uuid",
-  "command_name": "ReadDTC",
-  "command_params": { "ecuAddress": "0x10", "format": "UDS" }
-}
-Response: {
-  "command_id": "uuid",
-  "status": "pending",
-  "submitted_at": "2025-10-28T10:00:00Z",
-  "stream_url": "wss://api.sovd.example.com/ws/responses/{command_id}"
-}
-
-GET    /api/v1/commands/{command_id}
-Headers:  Authorization: Bearer {token}
-Response: {
-  "command_id": "uuid",
-  "vehicle_id": "uuid",
-  "command_name": "ReadDTC",
-  "command_params": { ... },
-  "status": "completed",
-  "submitted_at": "2025-10-28T10:00:00Z",
-  "completed_at": "2025-10-28T10:00:01.5Z"
-}
-
-GET    /api/v1/commands/{command_id}/responses
-Headers:  Authorization: Bearer {token}
-Response: [
-  {
-    "response_id": "uuid",
-    "response_payload": { "dtcCode": "P0420", "description": "Catalyst System Efficiency Below Threshold" },
-    "sequence_number": 1,
-    "is_final": false,
-    "received_at": "2025-10-28T10:00:01Z"
-  },
-  {
-    "response_id": "uuid",
-    "response_payload": { "status": "complete" },
-    "sequence_number": 2,
-    "is_final": true,
-    "received_at": "2025-10-28T10:00:01.5Z"
-  }
-]
-
-GET    /api/v1/commands
-Headers:  Authorization: Bearer {token}
-Query:    ?vehicle_id=uuid&status=completed&limit=20&offset=0
-Response: [
-  { "command_id": "uuid", "command_name": "ReadDTC", "status": "completed", ... }
-]
-```
-```
-
-### Context: websocket-protocol (from 04_Behavior_and_Communication.md)
-
-```markdown
-**WebSocket Protocol**
-
-```
-Connection: wss://api.sovd.example.com/ws/responses/{command_id}?token={jwt}
-
-Client → Server (subscribe):
-{
-  "action": "subscribe",
-  "command_id": "uuid"
-}
-
-Server → Client (response event):
-{
-  "event": "response",
-  "command_id": "uuid",
-  "response": {
-    "response_id": "uuid",
-    "response_payload": { "dtcCode": "P0420", ... },
-    "sequence_number": 1,
-    "is_final": false,
-    "received_at": "2025-10-28T10:00:01Z"
-  }
-}
-
-Server → Client (status event):
-{
-  "event": "status",
-  "command_id": "uuid",
-  "status": "completed",
-  "completed_at": "2025-10-28T10:00:01.5Z"
-}
-
-Server → Client (error event):
-{
-  "event": "error",
-  "command_id": "uuid",
-  "error_message": "Vehicle connection timeout"
-}
-```
+**Task 2.10: Integration Testing and Coverage Report**
+*   **Task ID:** `I2.T10`
+*   **Description:** Expand integration tests in `backend/tests/integration/` to achieve 80%+ coverage for all implemented modules. Write comprehensive test scenarios: authentication flows (login success/failure, token refresh, logout, protected endpoints), vehicle API (listing with filters, pagination, caching), command API (submission, validation errors, retrieval, response listing), audit logging (verify audit records created). Use pytest fixtures for database setup/teardown, test users, test vehicles. Configure pytest-cov to generate coverage report. Add `make test` target to Makefile to run `pytest --cov=app --cov-report=html --cov-report=term`. Ensure all tests pass and coverage meets 80% threshold. Fix any failing tests or bugs discovered.
+*   **Agent Type Hint:** `BackendAgent`
+*   **Inputs:** All implemented backend modules from I2.T1-I2.T7.
+*   **Input Files:** [All backend source files in `backend/app/`]
+*   **Target Files:**
+    *   `backend/tests/integration/test_auth_api.py` (expand)
+    *   `backend/tests/integration/test_vehicle_api.py` (expand)
+    *   `backend/tests/integration/test_command_api.py` (expand)
+    *   `backend/tests/conftest.py` (shared fixtures)
+    *   Updates to `Makefile` (add test target)
+*   **Deliverables:** Comprehensive integration test suite; coverage report showing 80%+ coverage; all tests passing.
+*   **Acceptance Criteria:**
+    *   `make test` (or `pytest`) runs all tests successfully (0 failures)
+    *   Coverage report shows ≥80% line coverage for `backend/app/` directory
+    *   Integration tests cover all API endpoints with success and error cases
+    *   Tests verify audit log creation for key events
+    *   Tests verify Redis caching behavior for vehicle status
+    *   Fixtures provide clean database state for each test
+    *   Coverage HTML report generated in `backend/htmlcov/` directory
+    *   Coverage summary displayed in terminal output
+    *   No flaky tests (tests pass consistently on multiple runs)
+*   **Dependencies:** All I2 tasks (requires complete backend implementation)
+*   **Parallelizable:** No (final validation task for iteration)
 ```
 
 ---
@@ -392,59 +135,138 @@ Server → Client (error event):
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
+### Current Test Coverage Status
+
+**Overall Coverage: 88% (ALREADY EXCEEDS 80% THRESHOLD)**
+
+**Current Status:**
+- Total statements: 939
+- Missed statements: 108
+- Coverage: 88%
+- **CRITICAL**: 3 tests are currently FAILING in `tests/unit/test_command_service.py`
+
+**Files with Low Coverage (Below 80%):**
+1. `app/repositories/command_repository.py`: 26% coverage (38 statements, 28 missed)
+2. `app/repositories/response_repository.py`: 47% coverage (15 statements, 8 missed)
+3. `app/repositories/vehicle_repository.py`: 31% coverage (29 statements, 20 missed)
+4. `app/services/command_service.py`: 58% coverage (43 statements, 18 missed)
+5. `app/database.py`: 69% coverage (16 statements, 5 missed)
+6. `app/main.py`: 77% coverage (26 statements, 6 missed)
+
 ### Relevant Existing Code
 
-*   **File:** `docs/diagrams/component_diagram.puml`
-    *   **Summary:** This file demonstrates the existing PlantUML style used in the project. It uses the C4 PlantUML library with `!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml` for consistent component modeling.
-    *   **Recommendation:** Your sequence diagrams SHOULD follow a similar professional style. Use standard PlantUML syntax (NOT C4 for sequence diagrams - C4 is for architecture diagrams). Ensure proper formatting with `@startuml` and `@enduml` tags, clear titles, and consistent participant naming.
+*   **File:** `backend/tests/conftest.py`
+    *   **Summary:** This file contains pytest fixtures for database sessions and async HTTP clients. It uses SQLite for testing (file-based at `./test.db`) and creates only the `users` and `sessions` tables since other tables require PostgreSQL-specific JSONB types.
+    *   **Recommendation:** You MUST continue using this fixture pattern. The audit service is already mocked here (`patch("app.services.audit_service.log_audit_event")`), which is why audit tests pass even though the audit_logs table isn't created.
+    *   **WARNING:** The conftest currently uses a **function-scoped** db_session fixture, which means each test gets a fresh database. This is good for isolation but tests are currently using SQLite instead of the real PostgreSQL database.
+
+*   **File:** `backend/tests/integration/test_auth_api.py`
+    *   **Summary:** This is an EXCELLENT reference implementation with 857 lines of comprehensive auth endpoint tests. It includes multiple test classes covering all endpoints, edge cases, and error paths.
+    *   **Recommendation:** Use this file as your GOLD STANDARD template for test structure. Notice how it:
+        - Organizes tests by endpoint into classes
+        - Tests both success and failure paths
+        - Includes edge cases (expired tokens, malformed headers, missing fields)
+        - Has an end-to-end flow test
+        - Verifies database state after operations
+
+*   **File:** `backend/tests/integration/test_vehicle_api.py`
+    *   **Summary:** Contains 450 lines of vehicle API tests covering listing, filtering, pagination, and caching scenarios.
+    *   **Recommendation:** This file already has good coverage. Review it to ensure caching tests are comprehensive.
+
+*   **File:** `backend/tests/integration/test_command_api.py`
+    *   **Summary:** Contains 747 lines of command API tests.
+    *   **Recommendation:** Review this file carefully - the low coverage of `command_repository.py` (26%) and `command_service.py` (58%) suggests missing test coverage for command filtering, pagination, and status update scenarios.
+
+*   **File:** `backend/app/repositories/command_repository.py`
+    *   **Summary:** Contains 4 key functions: `create_command`, `get_command_by_id`, `update_command_status`, and `get_commands` (with filtering by vehicle_id, user_id, status, and pagination).
+    *   **CRITICAL:** The `get_commands` function (lines 102-136) has VERY LOW coverage. This function handles filtering and pagination logic that MUST be tested.
+    *   **Recommendation:** You MUST write integration tests that exercise all filter combinations and pagination scenarios for this function.
+
+*   **File:** `backend/app/repositories/vehicle_repository.py`
+    *   **Summary:** Contains 4 functions: `get_all_vehicles` (with status_filter, search_term, pagination), `get_vehicle_by_id`, `get_vehicle_by_vin`, and `update_vehicle_status`.
+    *   **CRITICAL:** Only 31% coverage - the filtering and search logic is likely not being tested.
+    *   **Recommendation:** Write tests that exercise the VIN search (partial match, case-insensitive) and status filtering with various combinations.
+
+*   **File:** `backend/app/repositories/response_repository.py`
+    *   **Summary:** Low coverage at 47%. This repository handles command response storage.
+    *   **Recommendation:** Add tests for response creation and retrieval scenarios, especially for multi-response commands.
 
 *   **File:** `backend/app/services/command_service.py`
-    *   **Summary:** This file contains the core command submission logic. Key function: `submit_command()` which validates the vehicle, validates SOVD command via `sovd_protocol_handler`, creates command record, and triggers async execution via `vehicle_connector.execute_command()` using FastAPI BackgroundTasks.
-    *   **Recommendation:** Your sequence diagram MUST accurately reflect this implementation. The diagram should show: (1) Command validation check, (2) Database insertion with status='pending', (3) Async trigger to vehicle connector (not blocking), (4) Return 202 Accepted immediately to client.
-
-*   **File:** `backend/app/connectors/vehicle_connector.py`
-    *   **Summary:** This is the mock vehicle connector that simulates command execution. Key workflow: (1) Simulates network delay with `asyncio.sleep()`, (2) Updates command status to 'in_progress', (3) Generates mock response using MOCK_RESPONSE_GENERATORS, (4) Saves response to database via `response_repository.create_response()`, (5) Publishes event to Redis Pub/Sub channel `response:{command_id}`, (6) Updates command status to 'completed', (7) Logs audit event via `audit_service.log_audit_event()`.
-    *   **Recommendation:** Your sequence diagram MUST show this exact flow. Note that this is currently a MOCK implementation - the diagram should show "Mock Vehicle Response Generation" as a placeholder, with a note indicating this will be replaced with real gRPC calls in future iterations. The Redis publishing is critical - ensure this is clearly shown as the mechanism for real-time updates.
-
-*   **File:** `backend/app/api/v1/auth.py`
-    *   **Summary:** This file implements the authentication endpoints. Key flow in `login()`: (1) Extracts client IP/user-agent, (2) Calls `authenticate_user()` to validate credentials, (3) Generates access and refresh tokens, (4) Stores refresh token in database (Session table), (5) Logs audit event, (6) Returns TokenResponse.
-    *   **Recommendation:** Your sequence diagram should accurately represent the authentication flow showing all these steps, including the database interaction to store the session and the audit logging.
+    *   **Summary:** Only 58% coverage. This service orchestrates command submission, validation, and async execution via the vehicle connector.
+    *   **CRITICAL:** Missing coverage likely includes error paths, status transitions, and interaction with the vehicle connector.
+    *   **Recommendation:** Add tests for command validation failures, vehicle connector errors, and status update scenarios.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** I noticed the architecture blueprint (Section 3.7) shows WebSocket Server as a separate component, but in the current implementation (as per task description), WebSocket is NOT yet implemented. Your diagram MUST include a note or placeholder indicating "WebSocket Server (not yet implemented - shown for completeness)". This maintains alignment with the architecture while being honest about current state.
+*   **Tip #1 - Failing Tests**: You have 3 FAILING tests in `tests/unit/test_command_service.py`. These MUST be fixed first before claiming task completion:
+    - `test_submit_command_success`
+    - `test_submit_command_vehicle_not_found`
+    - `test_submit_command_empty_params`
 
-*   **Note:** The existing `component_diagram.puml` uses the C4 PlantUML library, which is excellent for component/container diagrams but NOT appropriate for sequence diagrams. For your task, use standard PlantUML sequence diagram syntax without the C4 include. Reference: https://plantuml.com/sequence-diagram
+*   **Tip #2 - Coverage Already Met**: The OVERALL coverage is 88%, which already exceeds the 80% threshold. However, several individual modules are below 80%. You should focus on:
+    1. Fixing the 3 failing unit tests
+    2. Adding integration tests to cover the low-coverage repository functions
+    3. Ensuring the Makefile `test` target runs with coverage reporting
 
-*   **Note:** The mock vehicle connector currently generates a single response with `sequence_number=1` and `is_final=True`. However, the architecture blueprint shows multi-chunk streaming responses. Your sequence diagram should follow the blueprint (showing multiple chunks) as this represents the intended final state, even though the current mock only sends one chunk. Add a note explaining this discrepancy.
+*   **Tip #3 - Makefile Update**: The current Makefile `test` target at line 21-27 does NOT include the `--cov` flags required by the acceptance criteria. You MUST update it to:
+    ```makefile
+    test:
+        @echo "Running backend tests with coverage..."
+        @cd backend && pytest --cov=app --cov-report=html --cov-report=term
+    ```
 
-*   **Critical:** For the error flow diagram (`sequence_error_flow.puml`), the task description mentions "validation failure" but the architecture blueprint focuses on "vehicle timeout". You MUST create TWO scenarios in the error diagram or create separate diagrams: (1) Validation error (400 Bad Request returned immediately before vehicle connector is called), (2) Vehicle timeout (after 30 seconds, as shown in blueprint). The validation error scenario is simpler and happens synchronously in `command_service.submit_command()` when `sovd_protocol_handler.validate_command()` returns an error.
+*   **Tip #4 - SQLite vs PostgreSQL**: The current test setup uses SQLite, which means:
+    - JSONB fields cannot be tested (audit_logs, command_params, response_payload)
+    - The audit service is mocked in conftest.py
+    - This is ACCEPTABLE for the current iteration since the task focuses on integration testing of APIs, not database implementation details
 
-*   **Warning:** Ensure all participant names in your diagrams match the architecture terminology exactly. Use "Application Server (FastAPI)" not just "Backend", "Vehicle Connector (gRPC Client)" not just "Connector", etc. This ensures consistency with the existing component diagram and architecture blueprint.
+*   **Tip #5 - Redis Caching**: The vehicle service uses Redis caching (see requirement "Tests verify Redis caching behavior for vehicle status"). Make sure `test_vehicle_api.py` has tests that verify:
+    - First request to `/vehicles/{id}/status` fetches from database
+    - Second request within TTL (30 seconds) hits cache
+    - Cache invalidation after TTL expiry
 
-*   **Best Practice:** The architecture blueprint sequence diagram is extremely detailed (60+ lines). While you should include all the key steps from the 10-point list in the task description, you may need to consolidate some steps to keep the diagram readable. For example, you can combine "Response saved to database" and "Response published to Redis" into a single section with two sequential operations, rather than showing every database transaction separately.
+*   **Tip #6 - Audit Logging**: Since the audit service is mocked in conftest, tests should verify that `log_audit_event` was CALLED with correct parameters, not that actual database records were created. Check `test_auth_api.py` for examples if needed.
 
-*   **PlantUML Syntax Reminder:**
-    - Use `actor` for human users (Engineer)
-    - Use `participant` for system components
-    - Use `->` for synchronous calls (request-response)
-    - Use `-->` for return messages
-    - Use `activate`/`deactivate` to show component lifecycle
-    - Use `note right of` or `note left of` to add explanatory comments
-    - Use `==Section Name==` to group related interactions
-    - Use `...` to indicate time passing (useful for timeout scenario)
+*   **Warning #1 - Test Isolation**: Each test should be independent and not rely on data from previous tests. The current `db_session` fixture (function-scoped) provides good isolation.
 
-*   **Validation Checklist Before Committing:**
-    1. Run PlantUML compiler (if available) or use an online validator (plantuml.com/plantuml)
-    2. Verify all 10 steps from task description are present in sequence_command_flow.puml
-    3. Verify error scenarios (validation + timeout) are shown in sequence_error_flow.puml
-    4. Check that all actors/systems from task description are included
-    5. Ensure notes explain key decision points (async execution, mock vs. real vehicle, Redis as pub/sub mechanism)
-    6. Confirm diagram titles are clear and descriptive
-    7. Verify consistency with existing diagrams in docs/diagrams/ directory
+*   **Warning #2 - Async Patterns**: ALL repository and service functions are async. Make sure all test functions are marked with `@pytest.mark.asyncio` and use `await` correctly.
 
----
+*   **Note #1 - Test Organization**: Follow the pattern in `test_auth_api.py` of organizing tests into classes by endpoint or feature area. This makes tests easier to navigate and maintain.
 
-**End of Task Briefing Package**
+*   **Note #2 - Coverage HTML Report**: The coverage HTML report is generated in `backend/htmlcov/` and includes detailed line-by-line coverage highlighting. Use this to identify exactly which lines need test coverage.
 
-This briefing is your complete guide to implementing Task I2.T8. Follow the architecture blueprint examples closely, accurately represent the implemented backend code, and create professional, readable sequence diagrams that will serve as valuable documentation for the development team.
+### Action Plan Summary
+
+1. **FIRST PRIORITY**: Fix the 3 failing unit tests in `tests/unit/test_command_service.py`
+2. **SECOND PRIORITY**: Update the Makefile `test` target to include `--cov=app --cov-report=html --cov-report=term`
+3. **THIRD PRIORITY**: Add integration tests to cover low-coverage repository functions:
+   - Command repository filtering and pagination (`get_commands` function)
+   - Vehicle repository filtering, search, and status updates
+   - Response repository create and retrieval operations
+4. **FOURTH PRIORITY**: Verify all acceptance criteria are met and tests pass consistently
+
+### Coverage Improvement Targets
+
+Focus your testing efforts on these specific uncovered code paths:
+
+1. **command_repository.py** (26% → 80%+):
+   - Test `get_commands` with various filter combinations (vehicle_id, user_id, status)
+   - Test pagination (limit, offset)
+   - Test ordering (should be by submitted_at desc)
+
+2. **vehicle_repository.py** (31% → 80%+):
+   - Test `get_all_vehicles` with status_filter
+   - Test VIN search with partial matches
+   - Test case-insensitive search
+   - Test `update_vehicle_status` function
+
+3. **response_repository.py** (47% → 80%+):
+   - Test response creation with sequence numbers
+   - Test retrieval by command_id
+   - Test is_final flag handling
+
+4. **command_service.py** (58% → 80%+):
+   - Test command validation error paths
+   - Test vehicle not found scenarios
+   - Test interaction with vehicle connector
+   - Test status transitions during command execution

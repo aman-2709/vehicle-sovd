@@ -19,8 +19,8 @@ down:
 
 # Run all tests (backend unit, integration, frontend, e2e)
 test:
-	@echo "Running backend tests..."
-	@cd backend && pytest tests/ || true
+	@echo "Running backend tests with coverage..."
+	@cd backend && pytest --cov=app --cov-report=html --cov-report=term
 	@echo "Running frontend tests..."
 	@cd frontend && npm test || true
 	@echo "Running e2e tests..."
