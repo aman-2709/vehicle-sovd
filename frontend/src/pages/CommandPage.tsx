@@ -11,6 +11,7 @@ import { useMutation } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { VehicleSelector } from '../components/vehicles/VehicleSelector';
 import { CommandForm } from '../components/commands/CommandForm';
+import { ResponseViewer } from '../components/commands/ResponseViewer';
 import { commandAPI } from '../api/client';
 import type {
   CommandFormData,
@@ -23,6 +24,7 @@ const CommandPage: React.FC = () => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [activeCommandId, setActiveCommandId] = useState<string | null>(null);
 
   // Mutation for submitting commands
   const submitCommandMutation = useMutation<CommandResponse, AxiosError, CommandSubmitRequest>({
@@ -32,6 +34,8 @@ const CommandPage: React.FC = () => {
       setSubmitSuccess(
         `Command submitted successfully! Command ID: ${data.command_id}. Status: ${data.status}`
       );
+      // Set active command ID to show ResponseViewer
+      setActiveCommandId(data.command_id);
     },
     onError: (error: AxiosError) => {
       setSubmitSuccess(null);
@@ -56,6 +60,7 @@ const CommandPage: React.FC = () => {
     setSelectedVehicleId(vehicleId);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setActiveCommandId(null); // Clear active command when changing vehicle
   };
 
   const handleCommandSubmit = async (data: CommandFormData): Promise<void> => {
@@ -130,6 +135,24 @@ const CommandPage: React.FC = () => {
                 />
               )}
             </Grid>
+
+            {/* Response Viewer Section - Show after successful command submission */}
+            {activeCommandId && (
+              <Grid item xs={12}>
+                <ResponseViewer
+                  commandId={activeCommandId}
+                  onStatusChange={(status) => {
+                    // Log status change for debugging
+                    // eslint-disable-next-line no-console
+                    console.log('[CommandPage] Command status changed:', status);
+                  }}
+                  onError={(error) => {
+                    // eslint-disable-next-line no-console
+                    console.error('[CommandPage] ResponseViewer error:', error);
+                  }}
+                />
+              </Grid>
+            )}
           </Grid>
         </Paper>
       </Container>
