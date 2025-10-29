@@ -47,54 +47,44 @@ class TestSubmitCommand:
             submitted_at=datetime.now(timezone.utc),
         )
 
-        mock_command_in_progress = Command(
-            command_id=command_id,
-            user_id=user_id,
-            vehicle_id=vehicle_id,
-            command_name=command_name,
-            command_params=command_params,
-            status="in_progress",
-            submitted_at=datetime.now(timezone.utc),
-        )
-
         mock_db = MagicMock()
+        mock_background_tasks = MagicMock()
 
         with patch("app.services.command_service.vehicle_repository") as mock_vehicle_repo:
             with patch("app.services.command_service.command_repository") as mock_cmd_repo:
-                mock_vehicle_repo.get_vehicle_by_id = AsyncMock(return_value=mock_vehicle)
-                mock_cmd_repo.create_command = AsyncMock(return_value=mock_command_pending)
-                mock_cmd_repo.update_command_status = AsyncMock(
-                    return_value=mock_command_in_progress
-                )
+                with patch("app.services.command_service.sovd_protocol_handler") as mock_sovd:
+                    mock_vehicle_repo.get_vehicle_by_id = AsyncMock(return_value=mock_vehicle)
+                    mock_cmd_repo.create_command = AsyncMock(return_value=mock_command_pending)
+                    mock_sovd.validate_command = MagicMock(return_value=None)  # No validation error
 
-                result = await command_service.submit_command(
-                    vehicle_id=vehicle_id,
-                    command_name=command_name,
-                    command_params=command_params,
-                    user_id=user_id,
-                    db_session=mock_db,
-                )
+                    result = await command_service.submit_command(
+                        vehicle_id=vehicle_id,
+                        command_name=command_name,
+                        command_params=command_params,
+                        user_id=user_id,
+                        db_session=mock_db,
+                        background_tasks=mock_background_tasks,
+                    )
 
-                # Assertions
-                assert result is not None
-                assert result.command_id == command_id
-                assert result.status == "in_progress"
-                assert result.command_name == command_name
-                assert result.vehicle_id == vehicle_id
-                assert result.user_id == user_id
+                    # Assertions
+                    assert result is not None
+                    assert result.command_id == command_id
+                    assert result.status == "pending"  # Changed from in_progress
+                    assert result.command_name == command_name
+                    assert result.vehicle_id == vehicle_id
+                    assert result.user_id == user_id
 
-                # Verify repository calls
-                mock_vehicle_repo.get_vehicle_by_id.assert_called_once_with(mock_db, vehicle_id)
-                mock_cmd_repo.create_command.assert_called_once_with(
-                    db=mock_db,
-                    user_id=user_id,
-                    vehicle_id=vehicle_id,
-                    command_name=command_name,
-                    command_params=command_params,
-                )
-                mock_cmd_repo.update_command_status.assert_called_once_with(
-                    db=mock_db, command_id=command_id, status="in_progress"
-                )
+                    # Verify repository calls
+                    mock_vehicle_repo.get_vehicle_by_id.assert_called_once_with(mock_db, vehicle_id)
+                    mock_cmd_repo.create_command.assert_called_once_with(
+                        db=mock_db,
+                        user_id=user_id,
+                        vehicle_id=vehicle_id,
+                        command_name=command_name,
+                        command_params=command_params,
+                    )
+                    # Verify background task was added
+                    mock_background_tasks.add_task.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_submit_command_vehicle_not_found(self):
@@ -105,6 +95,7 @@ class TestSubmitCommand:
         command_params = {}
 
         mock_db = MagicMock()
+        mock_background_tasks = MagicMock()
 
         with patch("app.services.command_service.vehicle_repository") as mock_vehicle_repo:
             with patch("app.services.command_service.command_repository") as mock_cmd_repo:
@@ -116,6 +107,7 @@ class TestSubmitCommand:
                     command_params=command_params,
                     user_id=user_id,
                     db_session=mock_db,
+                    background_tasks=mock_background_tasks,
                 )
 
                 # Assertions
@@ -152,37 +144,28 @@ class TestSubmitCommand:
             submitted_at=datetime.now(timezone.utc),
         )
 
-        mock_command_in_progress = Command(
-            command_id=command_id,
-            user_id=user_id,
-            vehicle_id=vehicle_id,
-            command_name=command_name,
-            command_params=command_params,
-            status="in_progress",
-            submitted_at=datetime.now(timezone.utc),
-        )
-
         mock_db = MagicMock()
+        mock_background_tasks = MagicMock()
 
         with patch("app.services.command_service.vehicle_repository") as mock_vehicle_repo:
             with patch("app.services.command_service.command_repository") as mock_cmd_repo:
-                mock_vehicle_repo.get_vehicle_by_id = AsyncMock(return_value=mock_vehicle)
-                mock_cmd_repo.create_command = AsyncMock(return_value=mock_command_pending)
-                mock_cmd_repo.update_command_status = AsyncMock(
-                    return_value=mock_command_in_progress
-                )
+                with patch("app.services.command_service.sovd_protocol_handler") as mock_sovd:
+                    mock_vehicle_repo.get_vehicle_by_id = AsyncMock(return_value=mock_vehicle)
+                    mock_cmd_repo.create_command = AsyncMock(return_value=mock_command_pending)
+                    mock_sovd.validate_command = MagicMock(return_value=None)  # No validation error
 
-                result = await command_service.submit_command(
-                    vehicle_id=vehicle_id,
-                    command_name=command_name,
-                    command_params=command_params,
-                    user_id=user_id,
-                    db_session=mock_db,
-                )
+                    result = await command_service.submit_command(
+                        vehicle_id=vehicle_id,
+                        command_name=command_name,
+                        command_params=command_params,
+                        user_id=user_id,
+                        db_session=mock_db,
+                        background_tasks=mock_background_tasks,
+                    )
 
-                # Assertions
-                assert result is not None
-                assert result.command_params == {}
+                    # Assertions
+                    assert result is not None
+                    assert result.command_params == {}
 
 
 class TestGetCommandById:
