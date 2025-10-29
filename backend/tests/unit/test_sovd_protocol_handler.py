@@ -2,8 +2,6 @@
 Unit tests for SOVD protocol handler module.
 """
 
-import pytest
-
 from app.services import sovd_protocol_handler
 
 
