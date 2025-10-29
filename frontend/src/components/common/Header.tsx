@@ -54,11 +54,7 @@ const Header: React.FC = () => {
     <AppBar position="sticky" elevation={1}>
       <Toolbar>
         {/* App Title */}
-        <Typography
-          variant="h6"
-          component="div"
-          sx={{ fontWeight: 600, letterSpacing: 0.5 }}
-        >
+        <Typography variant="h6" component="div" sx={{ fontWeight: 600, letterSpacing: 0.5 }}>
           SOVD Command
         </Typography>
 

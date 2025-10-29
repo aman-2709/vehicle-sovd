@@ -24,7 +24,9 @@ const DashboardPage: React.FC = () => {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>
       <Container maxWidth="lg">
         <Paper elevation={2} sx={{ p: 4 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Box
+            sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}
+          >
             <Typography variant="h4" component="h1">
               Dashboard
             </Typography>
@@ -60,7 +62,8 @@ const DashboardPage: React.FC = () => {
 
           <Box sx={{ mt: 4, p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
             <Typography variant="body2" color="white">
-              This is a placeholder dashboard. Full functionality will be implemented in future iterations.
+              This is a placeholder dashboard. Full functionality will be implemented in future
+              iterations.
             </Typography>
           </Box>
         </Paper>

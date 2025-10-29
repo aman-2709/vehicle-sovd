@@ -10,27 +10,29 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I3.T9",
+  "task_id": "I3.T10",
   "iteration_id": "I3",
   "iteration_goal": "Real-Time WebSocket Communication & Frontend Foundation",
-  "description": "Set up Playwright for E2E testing in `tests/e2e/`. Configure `tests/e2e/playwright.config.ts` with base URL `http://localhost:3000`, browsers (chromium, firefox), headless mode, screenshot on failure. Write initial E2E test scenarios: 1) `tests/e2e/specs/auth.spec.ts`: complete auth flow (login with valid credentials, verify redirect to dashboard, verify header shows username, logout, verify redirect to login), 2) `tests/e2e/specs/vehicle_management.spec.ts`: navigate to vehicles page, verify vehicle list displays, search for vehicle by VIN, filter by status, 3) `tests/e2e/specs/command_execution.spec.ts`: navigate to command page, select vehicle, select command \"ReadDTC\", fill parameters, submit, verify command_id displayed, verify response viewer shows responses (wait for WebSocket events). Add `make e2e` target to root Makefile to run E2E tests (starts docker-compose, waits for services, runs tests, stops services). Document E2E test execution in README.",
+  "description": "Expand frontend component tests to achieve 80%+ coverage. Write additional tests for untested components and edge cases. Configure Vitest coverage reporting with `vitest --coverage`. Add `frontend:test` and `frontend:coverage` targets to root Makefile. Ensure all frontend tests pass. Run ESLint and Prettier on all frontend code, fix any violations. Configure Prettier to run on pre-commit hook (using husky or similar). Generate coverage HTML report. Update GitHub Actions CI workflow skeleton (from I1.T1) to run frontend tests and linting in CI pipeline.",
   "agent_type_hint": "FrontendAgent",
-  "inputs": "Implemented frontend pages from I3.T4-I3.T8; backend APIs from I2.",
+  "inputs": "All frontend components from I3.T4-I3.T8.",
   "target_files": [
-    "tests/e2e/playwright.config.ts",
-    "tests/e2e/specs/auth.spec.ts",
-    "tests/e2e/specs/vehicle_management.spec.ts",
-    "tests/e2e/specs/command_execution.spec.ts",
+    "frontend/tests/components/VehicleList.test.tsx",
+    "frontend/tests/components/CommandForm.test.tsx",
+    "frontend/tests/components/ResponseViewer.test.tsx",
+    "frontend/vitest.config.ts",
     "Makefile",
-    "README.md"
+    ".github/workflows/ci-cd.yml",
+    "frontend/.prettierrc"
   ],
-  "input_files": [],
-  "deliverables": "Configured Playwright E2E testing framework; three E2E test suites covering critical user flows; Makefile automation; documentation.",
-  "acceptance_criteria": "`make e2e` starts services, runs all E2E tests, stops services; Auth E2E test passes: login → dashboard → logout flow works end-to-end; Vehicle management E2E test passes: vehicle list displays, search and filter work; Command execution E2E test passes: full flow from selecting vehicle to viewing responses works (including WebSocket updates); Tests run in headless mode without errors; Screenshots captured on failure (saved to `tests/e2e/screenshots/`); Tests run across multiple browsers (chromium, firefox) successfully; E2E tests complete in <5 minutes; README includes clear instructions for running E2E tests; No flaky tests (tests pass consistently)",
+  "input_files": [
+    "frontend/src/pages/VehiclesPage.tsx",
+    "frontend/src/pages/CommandPage.tsx",
+    "frontend/src/components/commands/ResponseViewer.tsx"
+  ],
+  "deliverables": "Comprehensive frontend test suite with 80%+ coverage; all tests passing; linting and formatting configured; CI integration.",
+  "acceptance_criteria": "`make frontend:test` runs all frontend tests successfully (0 failures); Coverage report shows ≥80% line coverage for `frontend/src/` directory; `npm run lint` (or `make frontend:lint`) passes with no errors; `npm run format` (or `make frontend:format`) formats all files consistently; Coverage HTML report generated in `frontend/coverage/` directory; GitHub Actions workflow runs frontend tests and linting on push (verify workflow syntax is valid); Component tests cover: all pages, key components (VehicleList, CommandForm, ResponseViewer), common components (Header, ErrorBoundary); Tests verify: rendering, user interactions, API integration (with mocked API), error handling; No console errors or warnings in tests; All frontend code follows ESLint and Prettier rules",
   "dependencies": [
-    "I3.T1",
-    "I3.T2",
-    "I3.T3",
     "I3.T4",
     "I3.T5",
     "I3.T6",
@@ -48,92 +50,175 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: e2e-testing (from 03_Verification_and_Glossary.md)
+### Context: testing-levels (from 03_Verification_and_Glossary.md)
 
 ```markdown
-#### End-to-End (E2E) Testing
+<!-- anchor: testing-levels -->
+### 5.1. Testing Levels
 
-**Full-Stack E2E Tests**
-*   **Scope**: Complete user workflows across frontend and backend with real services running
-*   **Framework**: Playwright (supports multiple browsers: Chromium, Firefox, WebKit)
-*   **Environment**: docker-compose with all services (frontend, backend, database, redis)
+The project employs a comprehensive testing strategy across multiple levels to ensure quality, reliability, and adherence to requirements.
+
+<!-- anchor: unit-testing -->
+#### Unit Testing
+
+**Backend (Python/pytest)**
+*   **Scope**: Individual functions and classes in services, repositories, utilities, and protocol handlers
+*   **Framework**: pytest with pytest-asyncio for async code
+*   **Coverage Target**: ≥80% line coverage for all modules
+*   **Key Areas**:
+    *   Auth service: JWT generation/validation, password hashing, RBAC logic
+    *   Vehicle service: Filtering, caching logic
+    *   Command service: Status transitions, validation
+    *   SOVD protocol handler: Command validation, encoding/decoding
+    *   Audit service: Log record creation
+    *   Mock vehicle connector: Response generation
+*   **Mocking**: Use pytest fixtures and `unittest.mock` for database, Redis, external dependencies
+*   **Execution**: `pytest backend/tests/unit/` or `make test`
+
+**Frontend (TypeScript/Vitest)**
+*   **Scope**: Individual React components, hooks, utility functions
+*   **Framework**: Vitest with React Testing Library
+*   **Coverage Target**: ≥80% line coverage for all components
+*   **Key Areas**:
+    *   Authentication components: LoginForm, ProtectedRoute
+    *   Vehicle components: VehicleList, VehicleSelector
+    *   Command components: CommandForm, ResponseViewer
+    *   Common components: Header, ErrorBoundary, LoadingSpinner
+    *   API client: Token management, retry logic
+*   **Mocking**: Mock API calls using Vitest's `vi.mock()`, mock WebSocket connections
+*   **Execution**: `npm run test` or `make frontend:test`
+
+<!-- anchor: integration-testing -->
+#### Integration Testing
+
+**Backend API Integration Tests**
+*   **Scope**: API endpoints with database and Redis integration (using test containers or docker-compose services)
+*   **Framework**: pytest with httpx async test client
 *   **Key Scenarios**:
-    *   **Authentication**: Complete login flow, verify session persistence, logout
-    *   **Vehicle Management**: Navigate to vehicles page, search/filter vehicles, view vehicle details
-    *   **Command Execution**: End-to-end flow (login → select vehicle → submit command → view real-time responses in ResponseViewer)
-    *   **Command History**: View history, filter by status/vehicle, view command details
-    *   **Error Handling**: Invalid login, vehicle timeout simulation, network failures
-*   **Assertions**: Page navigation, element visibility, API responses, WebSocket events, database state
-*   **Screenshot on Failure**: Automatic screenshot capture for debugging
-*   **Execution**: `make e2e` (starts docker-compose, runs Playwright tests, stops services)
-*   **Duration Target**: <5 minutes for full E2E suite
+    *   Authentication flow: login, token refresh, logout, protected endpoint access
+    *   Vehicle API: listing, filtering, pagination, caching behavior
+    *   Command API: submission, retrieval, response listing, validation errors
+    *   WebSocket: connection establishment, event delivery, authentication
+    *   Error scenarios: validation errors, timeouts, database failures
+    *   Audit logging: verify audit records created for all actions
+*   **Test Data**: Use test fixtures for users, vehicles, commands (seed before tests, clean after)
+*   **Execution**: `pytest backend/tests/integration/` (requires running docker-compose for db and redis)
+```
+
+### Context: code-quality-gates (from 03_Verification_and_Glossary.md)
+
+```markdown
+<!-- anchor: code-quality-gates -->
+### 5.3. Code Quality Gates
+
+<!-- anchor: quality-metrics -->
+#### Quality Metrics & Enforcement
+
+**Code Coverage**
+*   **Requirement**: ≥80% line coverage for both backend and frontend
+*   **Enforcement**: CI pipeline fails if coverage drops below threshold
+*   **Reporting**: HTML coverage reports generated and uploaded as artifacts
+*   **Tool**: pytest-cov (backend), Vitest coverage (frontend)
+
+**Linting & Formatting**
+*   **Backend Standards**:
+    *   Ruff: Select rules E (errors), F (pyflakes), I (import order)
+    *   Black: Line length 100, enforced formatting
+    *   mypy: Strict mode (type checking)
+*   **Frontend Standards**:
+    *   ESLint: React rules, security rules, TypeScript rules
+    *   Prettier: Consistent formatting (trailing commas, semicolons)
+*   **Enforcement**: CI pipeline fails on any linting errors
+*   **Pre-commit Hooks**: Optional (can use husky to run linters before commit)
+
+**Type Safety**
+*   **Backend**: mypy strict mode ensures all functions have type hints
+*   **Frontend**: TypeScript strict mode (`"strict": true` in tsconfig.json)
+*   **Enforcement**: CI pipeline runs type checkers
+
+**Dependency Security**
+*   **Tools**: pip-audit (backend), npm audit (frontend), Trivy (Docker)
+*   **Enforcement**: CI pipeline fails on critical vulnerabilities
+```
+
+### Context: nfr-usability (from 01_Context_and_Drivers.md)
+
+```markdown
+<!-- anchor: nfr-usability -->
+#### Usability
+- **Intuitive UI**: Clean, modern interface following UX best practices
+- **Error Handling**: Clear error messages with actionable guidance
+- **Responsive Design**: Support for desktop and tablet form factors
+
+**Architectural Impact**: Component-based UI framework (React), design system, comprehensive error handling middleware.
 ```
 
 ### Context: ci-cd-pipeline (from 03_Verification_and_Glossary.md)
 
 ```markdown
-#### Pipeline Overview (GitHub Actions)
+<!-- anchor: ci-cd-pipeline -->
+### 5.4. Continuous Integration & Deployment Pipeline
 
-The CI/CD pipeline (`github/workflows/ci-cd.yml`) orchestrates all verification activities automatically:
+<!-- anchor: pipeline-overview -->
+#### Pipeline Overview
 
-**Stage 1: Lint & Format Check (Parallel)**
-*   Backend: ruff, black --check, mypy
-*   Frontend: eslint, prettier --check
-*   **Failure Condition**: Any linting errors
-*   **Duration**: ~2 minutes
+**GitHub Actions Workflow Stages**
 
-**Stage 2: Unit Tests (Parallel)**
-*   Backend: pytest unit tests with coverage report
-*   Frontend: npm test (Vitest) with coverage report
-*   **Failure Condition**: Test failure or coverage <80%
-*   **Duration**: ~3 minutes
+1. **Lint (Parallel)**
+   - Backend linting: `ruff check`, `black --check`, `mypy`
+   - Frontend linting: `eslint`, `prettier --check`
+   - **Duration**: ~2 minutes
+   - **Failure Action**: Fail build, block merge
 
-**Stage 3: Integration Tests**
-*   Start docker-compose (db, redis, backend)
-*   Run backend integration tests
-*   Stop docker-compose
-*   **Failure Condition**: Test failure
-*   **Duration**: ~5 minutes
+2. **Unit Tests (Parallel)**
+   - Backend unit tests: `pytest backend/tests/unit/ --cov`
+   - Frontend unit tests: `vitest run --coverage`
+   - **Coverage Threshold**: ≥80%
+   - **Duration**: ~3 minutes
+   - **Failure Action**: Fail build if tests fail or coverage < 80%
 
-**Stage 4: E2E Tests**
-*   Start full docker-compose stack (frontend, backend, db, redis)
-*   Run Playwright E2E tests (headless mode)
-*   Capture screenshots on failure
-*   Stop docker-compose
-*   **Failure Condition**: Test failure
-*   **Duration**: ~5 minutes
-```
+3. **Integration Tests (Sequential)**
+   - Start docker-compose (PostgreSQL, Redis, backend services)
+   - Backend integration tests: `pytest backend/tests/integration/`
+   - **Duration**: ~5 minutes
+   - **Failure Action**: Fail build, stop services
 
-### Context: task-i3-t9 (from 02_Iteration_I3.md)
+4. **E2E Tests (Sequential)**
+   - Start full application stack (docker-compose)
+   - Frontend E2E tests: `playwright test`
+   - **Duration**: ~8 minutes
+   - **Failure Action**: Fail build, capture screenshots/videos
 
-```markdown
-*   **Task 3.9: End-to-End Testing Setup and Initial E2E Tests**
-    *   **Task ID:** `I3.T9`
-    *   **Description:** Set up Playwright for E2E testing in `tests/e2e/`. Configure `tests/e2e/playwright.config.ts` with base URL `http://localhost:3000`, browsers (chromium, firefox), headless mode, screenshot on failure. Write initial E2E test scenarios: 1) `tests/e2e/specs/auth.spec.ts`: complete auth flow (login with valid credentials, verify redirect to dashboard, verify header shows username, logout, verify redirect to login), 2) `tests/e2e/specs/vehicle_management.spec.ts`: navigate to vehicles page, verify vehicle list displays, search for vehicle by VIN, filter by status, 3) `tests/e2e/specs/command_execution.spec.ts`: navigate to command page, select vehicle, select command "ReadDTC", fill parameters, submit, verify command_id displayed, verify response viewer shows responses (wait for WebSocket events). Add `make e2e` target to root Makefile to run E2E tests (starts docker-compose, waits for services, runs tests, stops services). Document E2E test execution in README.
-    *   **Agent Type Hint:** `FrontendAgent` or `TestingAgent`
-    *   **Inputs:** Implemented frontend pages from I3.T4-I3.T8; backend APIs from I2.
-    *   **Input Files:** [All frontend and backend source files]
-    *   **Target Files:**
-        *   `tests/e2e/playwright.config.ts`
-        *   `tests/e2e/specs/auth.spec.ts`
-        *   `tests/e2e/specs/vehicle_management.spec.ts`
-        *   `tests/e2e/specs/command_execution.spec.ts`
-        *   Updates to `Makefile` (add e2e target)
-        *   Updates to `README.md` (document E2E test execution)
-    *   **Deliverables:** Configured Playwright E2E testing framework; three E2E test suites covering critical user flows; Makefile automation; documentation.
-    *   **Acceptance Criteria:**
-        *   `make e2e` starts services, runs all E2E tests, stops services
-        *   Auth E2E test passes: login → dashboard → logout flow works end-to-end
-        *   Vehicle management E2E test passes: vehicle list displays, search and filter work
-        *   Command execution E2E test passes: full flow from selecting vehicle to viewing responses works (including WebSocket updates)
-        *   Tests run in headless mode without errors
-        *   Screenshots captured on failure (saved to `tests/e2e/screenshots/`)
-        *   Tests run across multiple browsers (chromium, firefox) successfully
-        *   E2E tests complete in <5 minutes
-        *   README includes clear instructions for running E2E tests
-        *   No flaky tests (tests pass consistently)
-    *   **Dependencies:** All I3 tasks (requires complete frontend and WebSocket implementation)
-    *   **Parallelizable:** No (final validation task for iteration)
+5. **Security Scans (Parallel)**
+   - Backend: `pip-audit`, `bandit`
+   - Frontend: `npm audit`
+   - Docker: `trivy` image scans
+   - **Duration**: ~3 minutes
+   - **Failure Action**: Fail on critical vulnerabilities
+
+6. **Build Images (Parallel)**
+   - Build production Docker images
+   - Tag: `<branch>-<git-sha>`, `latest` (for main)
+   - **Duration**: ~5 minutes
+   - **Artifacts**: Docker images
+
+7. **Push to Registry (Sequential)**
+   - Push images to container registry (Docker Hub, ECR, etc.)
+   - **Condition**: Only on main/develop branches
+   - **Duration**: ~3 minutes
+
+8. **Deploy to Staging (Sequential)**
+   - Deploy to staging environment using Helm
+   - **Trigger**: Automatic on `develop` branch
+   - Run smoke tests
+   - **Duration**: ~5 minutes
+
+9. **Deploy to Production (Manual Approval)**
+   - Deploy to production environment
+   - **Trigger**: Manual approval required on `main` branch
+   - Run smoke tests
+   - **Rollback**: Automatic rollback on smoke test failure
+   - **Duration**: ~5 minutes
 ```
 
 ---
@@ -144,128 +229,149 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `tests/e2e/` directory
-    *   **Summary:** The E2E test directory already exists with a `specs/` subdirectory and `test-results/` subdirectory. This indicates partial setup, but no actual test files or Playwright configuration exists yet.
-    *   **Recommendation:** You MUST create the `playwright.config.ts` file in the `tests/e2e/` directory and populate the `specs/` directory with the three required test files.
+*   **File:** `frontend/vite.config.ts`
+    *   **Summary:** Vite configuration already includes basic test setup with `test.environment: 'jsdom'` and `test.setupFiles: ['./tests/setup.ts']`. Coverage configuration is NOT yet present.
+    *   **Recommendation:** You MUST add coverage configuration to the `test` section to enable coverage reporting. Add the `coverage` property with provider (use `@vitest/coverage-v8`), reporter options (text, html, json), and threshold settings (minimum 80% for lines, branches, functions, statements).
 
 *   **File:** `frontend/package.json`
-    *   **Summary:** The frontend package.json contains Vitest for unit testing but does NOT include Playwright dependencies. The test script runs Vitest, not Playwright.
-    *   **Recommendation:** You MUST create a separate `package.json` file in the `tests/e2e/` directory (separate from the frontend package.json) and install Playwright there using `npm init -y && npm install -D @playwright/test`. This is standard practice to keep E2E dependencies isolated.
+    *   **Summary:** Currently has basic test script `"test": "vitest"`. No coverage-specific script or coverage dependencies present. The package uses Vitest 1.0.0.
+    *   **Recommendation:** You MUST add `@vitest/coverage-v8` as a devDependency. You SHOULD add a separate `"test:coverage"` script that runs `vitest run --coverage` for one-time coverage generation, while keeping `"test"` for watch mode during development.
+
+*   **File:** `frontend/tests/setup.ts`
+    *   **Summary:** Basic Vitest setup with `@testing-library/jest-dom` imports and cleanup after each test. This is correctly configured.
+    *   **Recommendation:** This file is properly configured. You can OPTIONALLY add global mocks here (e.g., for window.matchMedia which MUI components might use).
+
+*   **File:** `frontend/.eslintrc.json`
+    *   **Summary:** Comprehensive ESLint configuration with TypeScript, React, and React Hooks plugins. Already configured with recommended rules and type checking enabled. Has specific overrides for test files.
+    *   **Recommendation:** The configuration is already strong. You MUST ensure all frontend code passes these linting rules. Run `npm run lint` and fix any violations.
+
+*   **File:** `frontend/.prettierrc`
+    *   **Summary:** Prettier configuration with line length 100, single quotes, trailing commas, and other standard settings.
+    *   **Recommendation:** You MUST run `npm run format` (or add this script if missing) to format all files. The configuration is already correct.
+
+*   **File:** `frontend/src/api/client.ts`
+    *   **Summary:** Complex API client with axios interceptors for JWT injection and automatic token refresh. Includes retry logic and queuing for concurrent requests during token refresh.
+    *   **Recommendation:** This file has complex logic that SHOULD be unit tested separately. Create `frontend/tests/unit/api/client.test.ts` to test: token injection, token refresh flow, request queuing, error handling. Mock axios and localStorage.
+
+*   **File:** `frontend/src/context/AuthContext.tsx`
+    *   **Summary:** Authentication context provider with login, logout, and refresh token methods. Manages authentication state and user profile.
+    *   **Recommendation:** Create `frontend/tests/unit/context/AuthContext.test.tsx` to test the context provider. Test: initial state, login flow, logout flow, token refresh, error handling. You SHOULD use React Testing Library's `renderHook` utility for testing hooks.
 
 *   **File:** `Makefile`
-    *   **Summary:** The Makefile already has a `test` target that attempts to run E2E tests with `cd tests/e2e && npx playwright test || true`, but Playwright is not installed yet. The Makefile also shows a structure for starting services with docker-compose.
-    *   **Recommendation:** You MUST update the `e2e` target in the Makefile (or create it if it doesn't exist as a separate target) to: (1) Start docker-compose with `docker-compose up -d`, (2) Wait for services to be healthy (use `docker-compose ps` or health checks), (3) Run Playwright tests from `tests/e2e/`, (4) Stop services with `docker-compose down`. Follow the pattern shown in the CI/CD pipeline documentation.
+    *   **Summary:** Currently has targets for `up`, `down`, `test`, `e2e`, `lint`, and `logs`. The `test` target runs backend tests but frontend test command uses `|| true` which ignores failures.
+    *   **Recommendation:** You MUST add `frontend:test` and `frontend:coverage` targets. Remove the `|| true` from the main test target for frontend to ensure failures are caught. The `frontend:test` target should run `cd frontend && npm test run` (for CI) and `frontend:coverage` should run `cd frontend && npm run test:coverage`.
 
-*   **File:** `docker-compose.yml`
-    *   **Summary:** Docker Compose configuration includes all four services (db, redis, backend, frontend) with health checks defined for db and redis. Services are exposed on standard ports (frontend: 3000, backend: 8000, db: 5432, redis: 6379).
-    *   **Recommendation:** Your Playwright config SHOULD use `http://localhost:3000` as the base URL since that's where the frontend service runs. When running in the `make e2e` context, the services will already be started by docker-compose.
-
-*   **File:** `frontend/src/pages/LoginPage.tsx`
-    *   **Summary:** Login page accepts username and password, calls the `login` function from AuthContext, and redirects to `/dashboard` on success. It displays error messages for invalid credentials (401 status).
-    *   **Recommendation:** Your auth E2E test SHOULD use the seed data credentials documented in the README: `admin` / `admin123` or `engineer` / `engineer123`. The test MUST verify redirect to `/dashboard` after successful login and MUST check that the header displays the username.
-
-*   **File:** `frontend/src/pages/VehiclesPage.tsx`
-    *   **Summary:** Vehicles page uses React Query to fetch vehicle data with 30-second auto-refresh. It includes client-side search filtering by VIN and status filter dropdown with options "All", "Connected", "Disconnected".
-    *   **Recommendation:** Your vehicle management E2E test SHOULD navigate to `/vehicles`, verify that the vehicle list is visible (check for VIN elements), interact with the search input to filter by VIN, and interact with the status dropdown to filter vehicles. Use Playwright's auto-waiting features to handle the React Query loading states.
-
-*   **File:** `frontend/src/pages/CommandPage.tsx`
-    *   **Summary:** Command page includes a vehicle selector dropdown and a command form that dynamically changes based on selected command. On successful command submission, it displays the command_id and sets `activeCommandId` to show the ResponseViewer component.
-    *   **Recommendation:** Your command execution E2E test MUST: (1) Navigate to `/commands` or the command page route, (2) Select a vehicle from the dropdown (use the seed vehicle VINs), (3) Select "ReadDTC" command, (4) Fill in the ecuAddress parameter field, (5) Submit the form, (6) Wait for the success message and command_id to appear, (7) Verify that the ResponseViewer component is visible and displays responses. Since responses are streamed via WebSocket, you SHOULD add `page.waitForSelector()` calls to wait for response elements to appear.
-
-*   **File:** `backend/app/api/v1/websocket.py`
-    *   **Summary:** WebSocket endpoint at `/ws/responses/{command_id}` requires JWT authentication via query parameter `?token={jwt}`. The endpoint authenticates the user, subscribes to Redis Pub/Sub channel, and streams response events to the client.
-    *   **Recommendation:** For the command execution E2E test, you DO NOT need to manually connect to the WebSocket endpoint—the ResponseViewer component handles this automatically. However, you SHOULD wait for response elements to appear in the ResponseViewer, which will indicate that WebSocket events are being received correctly.
-
-*   **File:** `README.md`
-    *   **Summary:** README includes comprehensive documentation for quick start, docker-compose services, and troubleshooting. It does NOT currently include E2E testing instructions.
-    *   **Recommendation:** You MUST add a new section to the README documenting E2E test execution. Include: (1) Prerequisites (Node.js, Playwright browsers installed), (2) Running tests with `make e2e`, (3) Running tests in headed mode for debugging, (4) Location of screenshots on failure, (5) Troubleshooting common E2E test issues.
+*   **File:** `.github/workflows/ci-cd.yml`
+    *   **Summary:** Currently a placeholder with only a basic checkout step. Needs complete implementation.
+    *   **Recommendation:** You MUST implement proper CI jobs following the pipeline overview from the plan. Create separate jobs for: `frontend-lint`, `frontend-test`, `backend-lint`, `backend-test`, `integration-test`, `e2e-test`. Each job should fail the build on errors. Frontend test job MUST check coverage threshold.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** Playwright's `page.waitForURL()` is excellent for verifying navigation after login and logout. Use it to assert that the URL changes to `/dashboard` after login and `/login` after logout.
+*   **Tip:** The existing test files (VehicleList.test.tsx, CommandForm.test.tsx, etc.) follow a good pattern with describe blocks for different scenarios (Loading State, Error State, Empty State, etc.). You SHOULD follow this same pattern for consistency.
 
-*   **Tip:** For the vehicle management test, use Playwright's `page.locator()` with text selectors to find vehicle VINs. The seed data includes two test vehicles with VINs `TESTVIN0000000001` and `TESTVIN0000000002` (from the init_db.sh script context).
+*   **Tip:** I found that `@testing-library/jest-dom` is already installed and imported in tests/setup.ts. This provides helpful matchers like `toBeInTheDocument()`, `toBeVisible()`, etc. Use these extensively.
 
-*   **Tip:** When testing the command execution flow, you SHOULD use `page.waitForTimeout()` sparingly and prefer `page.waitForSelector()` or `page.waitForResponse()` for more reliable waiting. WebSocket responses are streamed, so you may need to wait for multiple response elements to appear.
+*   **Note:** The project uses TypeScript strict mode. All test files MUST be written in TypeScript with proper type annotations. Pay special attention to mocking - you'll need to properly type your mocks.
 
-*   **Note:** The Makefile currently runs E2E tests with `|| true` which suppresses failures. For the `make e2e` target you implement, you SHOULD remove the `|| true` so that failures cause the Make target to fail (this is critical for CI/CD integration).
+*   **Note:** For testing components that use React Router (like ProtectedRoute), you MUST wrap them in a `<MemoryRouter>` or `<BrowserRouter>` in your tests. Example pattern from existing tests shows proper component wrapping.
 
-*   **Note:** Playwright configuration SHOULD include `screenshot: 'only-on-failure'` and `video: 'retain-on-failure'` for debugging. The screenshots directory `tests/e2e/screenshots/` already exists (test-results subdirectory).
+*   **Tip:** For testing the WebSocket client (`frontend/src/api/websocket.ts`) and ResponseViewer component, you'll need to mock WebSocket. Create a mock WebSocket class in your test file. The existing ResponseViewer.test.tsx likely already has this pattern - study it.
 
-*   **Tip:** To wait for services to be healthy in the Makefile, you can use a simple loop checking `docker-compose ps` output or use `docker-compose up --wait` if your docker-compose version supports it. Alternatively, use a shell script that polls the health endpoints (`http://localhost:3000` for frontend, `http://localhost:8000/docs` for backend).
+*   **Note:** The frontend uses MUI (Material-UI) components. These render with specific ARIA roles. Use `screen.getByRole()` queries in tests for better accessibility testing. For example, CircularProgress has role="progressbar".
 
-*   **Warning:** The current Makefile `test` target runs all tests (backend, frontend, E2E) sequentially. Your `make e2e` target SHOULD be separate and independent, so it can be run in isolation. The general `make test` target can remain as is or be updated to call `make e2e` if desired.
+*   **Warning:** The current Makefile target for frontend tests uses `|| true` which causes it to always succeed. This is INCORRECT for CI/CD. You MUST remove this so that test failures properly fail the build.
 
-*   **Tip:** Playwright projects feature allows you to run tests across multiple browsers. Configure projects for `chromium` and `firefox` in playwright.config.ts. You can skip webkit for now to keep test duration under 5 minutes.
+*   **Tip:** Vitest coverage threshold can be configured in vite.config.ts under `test.coverage.thresholds`. Set `lines: 80, branches: 80, functions: 80, statements: 80` to enforce the 80% requirement. The build should fail if coverage drops below this.
 
-*   **Note:** The frontend uses MUI components which may have dynamic IDs. When writing selectors, prefer `page.getByRole()`, `page.getByLabel()`, `page.getByText()`, or `data-testid` attributes over CSS selectors. This makes tests more robust to UI changes.
+*   **Note:** For pre-commit hooks, the task suggests using husky. However, this is marked as OPTIONAL. Given time constraints, you MAY skip husky setup and just document the manual lint/format commands in the README. CI enforcement is more important.
 
-*   **Tip:** For the auth test, verify that the username appears in the header after login. Based on the LoginPage implementation, after login the user is redirected to dashboard. The header should be visible on all authenticated pages (since it's part of the Layout component from I3.T8).
+*   **Tip:** When creating new test files for untested components, prioritize coverage of:
+    1. `LoadingSpinner.tsx` - Simple, test rendering with different props
+    2. `EmptyState.tsx` - Simple, test rendering with different props
+    3. `ProtectedRoute.tsx` - Critical, test auth states (loading, authenticated, not authenticated)
+    4. `VehicleSelector.tsx` - Test vehicle fetching and selection
+    5. `Sidebar.tsx` - Test navigation rendering
+    6. `Layout.tsx` - Test children rendering and header/sidebar integration
+    7. Pages (VehiclesPage, CommandPage, ResponsePage, DashboardPage) - Test page rendering and component integration
+    8. API client utility functions
+    9. AuthContext provider
 
----
+*   **Note:** The acceptance criteria specifically mentions "No console errors or warnings in tests". You MUST ensure your tests don't trigger console warnings. Common issues: missing act() warnings, React key warnings, unhandled promise rejections. Clean these up.
 
-## 4. Additional Context: Environment and Services
+*   **Tip:** For testing API integration with mocked responses, use `vi.mock()` to mock the entire `../api/client` module. Return mock implementations of the API methods. See existing test files for patterns.
 
-**Docker Compose Services:**
-- **Frontend:** Runs on port 3000, Vite dev server with HMR
-- **Backend:** Runs on port 8000, FastAPI with uvicorn
-- **Database:** PostgreSQL on port 5432, initialized with seed data (2 users, 2 vehicles)
-- **Redis:** Runs on port 6379, used for WebSocket pub/sub
+*   **Critical:** The task requires updating the GitHub Actions workflow to run frontend tests and linting. You MUST ensure the workflow includes:
+    - A job that runs `npm install` in the frontend directory
+    - A job that runs `npm run lint` (fails on errors)
+    - A job that runs `npm run test:coverage` (fails if coverage < 80% or tests fail)
+    - Proper caching of node_modules for faster builds
+    - Upload of coverage reports as artifacts
 
-**Seed Data (from README.md):**
-- Admin user: `admin` / `admin123`
-- Engineer user: `engineer` / `engineer123`
-- Test vehicles: VINs `TESTVIN0000000001` and `TESTVIN0000000002`
-
-**Application URLs:**
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- API Docs (Swagger): `http://localhost:8000/docs`
-
-**Testing Infrastructure:**
-- Backend tests: pytest (unit + integration tests exist in `backend/tests/`)
-- Frontend tests: Vitest (component tests exist in `frontend/tests/components/`)
-- E2E tests: Playwright (to be set up in this task)
+*   **Note:** The plan specifies that the CI pipeline should complete in ~15 minutes total. Frontend tests should be fast (< 3 minutes). If tests are slow, consider running them in parallel or optimizing test setup.
 
 ---
 
-## 5. Task Execution Strategy
+## 4. Missing Components Requiring Test Coverage
 
-Based on my analysis, here is the recommended implementation order:
+Based on my analysis, the following components/modules exist in the codebase but do NOT have corresponding test files:
 
-1. **Initialize Playwright in tests/e2e/**
-   - Create `tests/e2e/package.json` with Playwright dependency
-   - Run `npm install` to install Playwright and browsers
-   - Create `tests/e2e/playwright.config.ts` with proper configuration
+**High Priority (Critical functionality):**
+1. `frontend/src/components/auth/ProtectedRoute.tsx` - No test file exists
+2. `frontend/src/components/common/LoadingSpinner.tsx` - No test file exists
+3. `frontend/src/components/common/EmptyState.tsx` - No test file exists
+4. `frontend/src/components/common/Sidebar.tsx` - No test file exists
+5. `frontend/src/components/common/Layout.tsx` - No test file exists
+6. `frontend/src/components/vehicles/VehicleSelector.tsx` - No test file exists
+7. `frontend/src/context/AuthContext.tsx` - No test file exists
+8. `frontend/src/api/client.ts` - No test file exists (complex logic with interceptors)
+9. `frontend/src/api/websocket.ts` - No test file exists
 
-2. **Write auth.spec.ts**
-   - Test complete auth flow: login → dashboard → logout
-   - Verify JWT token handling and session persistence
-   - Verify header displays username after login
+**Medium Priority (Pages):**
+10. `frontend/src/pages/VehiclesPage.tsx` - No test file exists
+11. `frontend/src/pages/CommandPage.tsx` - No test file exists
+12. `frontend/src/pages/ResponsePage.tsx` - No test file exists
+13. `frontend/src/pages/DashboardPage.tsx` - No test file exists
+14. `frontend/src/pages/HistoryPage.tsx` - No test file exists
+15. `frontend/src/pages/CommandsPage.tsx` - No test file exists
 
-3. **Write vehicle_management.spec.ts**
-   - Navigate to vehicles page and verify list renders
-   - Test search filtering by VIN
-   - Test status filter dropdown functionality
+**Lower Priority (Utilities):**
+16. `frontend/src/utils/dateUtils.ts` - No test file exists
+17. `frontend/src/App.tsx` - No test file exists
 
-4. **Write command_execution.spec.ts**
-   - Full flow: select vehicle → choose command → fill params → submit
-   - Wait for command_id in success message
-   - Verify ResponseViewer shows real-time WebSocket responses
+**Already Tested (Existing test files):**
+- ✅ `frontend/tests/components/VehicleList.test.tsx`
+- ✅ `frontend/tests/components/CommandForm.test.tsx`
+- ✅ `frontend/tests/components/ResponseViewer.test.tsx`
+- ✅ `frontend/tests/components/ErrorBoundary.test.tsx`
+- ✅ `frontend/tests/components/Header.test.tsx`
+- ✅ `frontend/tests/components/LoginPage.test.tsx`
 
-5. **Update Makefile**
-   - Create or update `e2e` target with service orchestration
-   - Ensure proper startup, health checks, test execution, and teardown
-
-6. **Update README.md**
-   - Add E2E Testing section with clear instructions
-   - Document troubleshooting tips and debugging commands
-
-7. **Validate**
-   - Run `make e2e` end-to-end to ensure all acceptance criteria pass
-   - Verify tests run in headless mode successfully
-   - Check screenshot capture on failure works
+**Recommendation:** Focus on the High Priority items first, then Medium Priority. You can achieve 80% coverage without testing every single page if you focus on components with complex logic (AuthContext, API client, ProtectedRoute, etc.) and the critical user flows.
 
 ---
 
-**End of Task Briefing Package**
+## 5. Acceptance Criteria Checklist
+
+When you complete this task, verify ALL of these criteria:
+
+- [ ] `make frontend:test` runs all frontend tests successfully (0 failures)
+- [ ] Coverage report shows ≥80% line coverage for `frontend/src/` directory
+- [ ] `npm run lint` (or `make frontend:lint`) passes with no errors
+- [ ] `npm run format` (or `make frontend:format`) formats all files consistently
+- [ ] Coverage HTML report generated in `frontend/coverage/` directory
+- [ ] GitHub Actions workflow runs frontend tests and linting on push (verify workflow syntax is valid)
+- [ ] Component tests cover: all pages, key components (VehicleList, CommandForm, ResponseViewer), common components (Header, ErrorBoundary)
+- [ ] Tests verify: rendering, user interactions, API integration (with mocked API), error handling
+- [ ] No console errors or warnings in tests
+- [ ] All frontend code follows ESLint and Prettier rules
+
+**Commands to verify:**
+```bash
+cd frontend
+npm run lint                     # Should pass with 0 errors
+npm run format                   # Should format files
+npm run test:coverage            # Should show ≥80% coverage, 0 failures
+cd ..
+make frontend:test               # Should run tests successfully
+make frontend:lint               # Should pass linting
+```

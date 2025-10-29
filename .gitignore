@@ -44,6 +44,7 @@ build/
 coverage.json
 htmlcov/
 .pytest_cache/
+frontend/coverage/
 
 # Logs
 *.log

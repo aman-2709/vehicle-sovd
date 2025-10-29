@@ -13,10 +13,7 @@ interface LoadingSpinnerProps {
   message?: string;
 }
 
-const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
-  size = 40,
-  message = 'Loading...'
-}) => {
+const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ size = 40, message = 'Loading...' }) => {
   return (
     <Box
       sx={{

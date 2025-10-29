@@ -71,10 +71,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               textAlign: 'center',
             }}
           >
-            <ErrorIcon
-              color="error"
-              sx={{ fontSize: 64, mb: 2 }}
-            />
+            <ErrorIcon color="error" sx={{ fontSize: 64, mb: 2 }} />
             <Typography variant="h4" component="h1" gutterBottom>
               Something went wrong
             </Typography>
@@ -107,12 +104,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </Box>
             )}
 
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={this.handleReload}
-              sx={{ mt: 3 }}
-            >
+            <Button variant="contained" color="primary" onClick={this.handleReload} sx={{ mt: 3 }}>
               Reload Page
             </Button>
           </Paper>

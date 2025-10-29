@@ -37,9 +37,7 @@ interface VehicleListProps {
 /**
  * Gets the color for a connection status chip.
  */
-const getStatusColor = (
-  status: string
-): 'success' | 'error' | 'default' => {
+const getStatusColor = (status: string): 'success' | 'error' | 'default' => {
   if (status === 'connected') return 'success';
   if (status === 'error') return 'error';
   return 'default';
@@ -80,9 +78,7 @@ const VehicleList: React.FC<VehicleListProps> = ({
           No vehicles found
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {isFiltered
-            ? 'Try adjusting your filters'
-            : 'No vehicles available'}
+          {isFiltered ? 'Try adjusting your filters' : 'No vehicles available'}
         </Typography>
       </Box>
     );

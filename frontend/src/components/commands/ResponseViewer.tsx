@@ -4,23 +4,11 @@
  */
 
 import React, { useEffect, useState, useRef } from 'react';
-import {
-  Box,
-  Paper,
-  Typography,
-  Chip,
-  Alert,
-  CircularProgress,
-  Divider,
-} from '@mui/material';
+import { Box, Paper, Typography, Chip, Alert, CircularProgress, Divider } from '@mui/material';
 import ReactJson from '@microlink/react-json-view';
 import { getAccessToken } from '../../api/client';
 import { WebSocketReconnectionManager } from '../../api/websocket';
-import {
-  WebSocketEvent,
-  ConnectionStatus,
-  ResponseItem,
-} from '../../types/response';
+import { WebSocketEvent, ConnectionStatus, ResponseItem } from '../../types/response';
 
 /**
  * Component props
@@ -34,9 +22,7 @@ export interface ResponseViewerProps {
 /**
  * Get status chip color based on connection status
  */
-const getStatusColor = (
-  status: ConnectionStatus
-): 'default' | 'primary' | 'success' | 'error' => {
+const getStatusColor = (status: ConnectionStatus): 'default' | 'primary' | 'success' | 'error' => {
   switch (status) {
     case 'connecting':
       return 'default';
@@ -211,7 +197,13 @@ export const ResponseViewer: React.FC<ResponseViewerProps> = ({
           {commandStatus !== 'pending' && (
             <Chip
               label={`Status: ${commandStatus}`}
-              color={commandStatus === 'completed' ? 'success' : commandStatus === 'failed' ? 'error' : 'default'}
+              color={
+                commandStatus === 'completed'
+                  ? 'success'
+                  : commandStatus === 'failed'
+                    ? 'error'
+                    : 'default'
+              }
               size="small"
             />
           )}

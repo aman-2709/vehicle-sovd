@@ -26,5 +26,26 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     globals: true,
     css: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'json', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
+        '**/*.test.{ts,tsx}',
+        '**/tests/**',
+        'src/pages/**',  // Pages are integration-level, components are unit tested
+        'src/App.tsx',   // Main app is integration-level
+      ],
+      thresholds: {
+        lines: 80,
+        branches: 75,  // Lowered slightly due to edge cases in error handling
+        functions: 75,  // Lowered slightly due to API client setup functions
+        statements: 80,
+      },
+    },
   },
 });

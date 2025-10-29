@@ -1,7 +1,6 @@
 ---
 # CI/CD Pipeline for SOVD Command WebApp
-# This workflow will be fully configured in a future iteration
-# Placeholder for GitHub Actions automation
+# Runs linting, testing, and coverage checks for frontend and backend
 
 name: CI/CD Pipeline
 
@@ -12,20 +11,177 @@ on:
     branches: [ main, master, develop ]
 
 jobs:
-  placeholder:
+  # Frontend linting job
+  frontend-lint:
+    name: Frontend Linting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
-      - name: Placeholder step
-        run: echo "CI/CD pipeline to be configured"
 
-  # Future jobs will include:
-  # - backend-lint
-  # - backend-test
-  # - frontend-lint
-  # - frontend-test
-  # - e2e-test
-  # - build-images
-  # - deploy
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Check Prettier formatting
+        working-directory: ./frontend
+        run: npx prettier --check "src/**/*.{ts,tsx,json,css,md}"
+
+  # Frontend testing job
+  frontend-test:
+    name: Frontend Tests & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: ./frontend
+        run: npm run test:coverage
+
+      - name: Check coverage thresholds
+        working-directory: ./frontend
+        run: |
+          echo "Checking coverage thresholds (minimum 80%)..."
+          npm run test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
+          retention-days: 30
+
+  # Backend linting job
+  backend-lint:
+    name: Backend Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+          pip install ruff black mypy
+
+      - name: Run Ruff
+        working-directory: ./backend
+        run: ruff check app/
+
+      - name: Run Black
+        working-directory: ./backend
+        run: black --check app/
+
+      - name: Run mypy
+        working-directory: ./backend
+        run: mypy app/
+
+  # Backend testing job
+  backend-test:
+    name: Backend Tests & Coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sovd_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio httpx
+
+      - name: Run tests with coverage
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sovd_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET_KEY: test-secret-key-for-ci
+        run: pytest --cov=app --cov-report=html --cov-report=term --cov-fail-under=80
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: backend-coverage-report
+          path: backend/htmlcov/
+          retention-days: 30
+
+  # Summary job that requires all tests to pass
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [frontend-lint, frontend-test, backend-lint, backend-test]
+    if: always()
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ needs.frontend-lint.result }}" != "success" ] || \
+             [ "${{ needs.frontend-test.result }}" != "success" ] || \
+             [ "${{ needs.backend-lint.result }}" != "success" ] || \
+             [ "${{ needs.backend-test.result }}" != "success" ]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed successfully!"

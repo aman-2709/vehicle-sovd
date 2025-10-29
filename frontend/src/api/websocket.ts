@@ -143,7 +143,7 @@ export class WebSocketReconnectionManager {
       },
       onError: (error) => {
         this.config.onError?.(error);
-      }
+      },
     });
   }
 
@@ -159,7 +159,9 @@ export class WebSocketReconnectionManager {
     const delay = Math.min(1000 * Math.pow(2, this.retryCount - 1), 30000); // Max 30s
 
     // eslint-disable-next-line no-console
-    console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`);
+    console.log(
+      `[WebSocket] Reconnecting in ${delay}ms (attempt ${this.retryCount}/${this.maxRetries})`
+    );
 
     this.retryTimeout = setTimeout(() => {
       // eslint-disable-next-line no-console

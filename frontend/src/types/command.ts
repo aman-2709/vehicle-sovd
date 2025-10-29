@@ -34,7 +34,11 @@ export interface ReadDataByIDParams {
 /**
  * Union type for all command parameters
  */
-export type CommandParams = ReadDTCParams | ClearDTCParams | ReadDataByIDParams | Record<string, unknown>;
+export type CommandParams =
+  | ReadDTCParams
+  | ClearDTCParams
+  | ReadDataByIDParams
+  | Record<string, unknown>;
 
 /**
  * Request schema for submitting a new command

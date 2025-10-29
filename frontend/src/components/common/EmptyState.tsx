@@ -32,9 +32,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
         textAlign: 'center',
       }}
     >
-      <Box sx={{ color: 'text.disabled', mb: 2 }}>
-        {icon}
-      </Box>
+      <Box sx={{ color: 'text.disabled', mb: 2 }}>{icon}</Box>
       <Typography variant="h6" color="text.secondary" gutterBottom>
         {title}
       </Typography>

@@ -6,14 +6,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import {
-  Box,
-  Container,
-  Typography,
-  TextField,
-  MenuItem,
-  Grid,
-} from '@mui/material';
+import { Box, Container, Typography, TextField, MenuItem, Grid } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { vehicleAPI } from '../api/client';
 import VehicleList from '../components/vehicles/VehicleList';
@@ -42,12 +35,10 @@ const VehiclesPage: React.FC = () => {
 
     return vehicles.filter((vehicle) => {
       const matchesSearch =
-        searchTerm === '' ||
-        vehicle.vin.toLowerCase().includes(searchTerm.toLowerCase());
+        searchTerm === '' || vehicle.vin.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus =
-        statusFilter === 'All' ||
-        vehicle.connection_status === statusFilter.toLowerCase();
+        statusFilter === 'All' || vehicle.connection_status === statusFilter.toLowerCase();
 
       return matchesSearch && matchesStatus;
     });

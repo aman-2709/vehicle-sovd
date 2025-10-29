@@ -124,9 +124,7 @@ export const CommandForm: React.FC<CommandFormProps> = ({
               <MenuItem value="ClearDTC">ClearDTC</MenuItem>
               <MenuItem value="ReadDataByID">ReadDataByID</MenuItem>
             </Select>
-            {errors.command_name && (
-              <FormHelperText>{errors.command_name.message}</FormHelperText>
-            )}
+            {errors.command_name && <FormHelperText>{errors.command_name.message}</FormHelperText>}
           </FormControl>
         )}
       />

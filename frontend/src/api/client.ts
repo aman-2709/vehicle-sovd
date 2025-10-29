@@ -13,11 +13,7 @@ import type {
   UserProfile,
   LogoutResponse,
 } from '../types/auth';
-import type {
-  VehicleResponse,
-  VehicleStatusResponse,
-  VehicleListParams,
-} from '../types/vehicle';
+import type { VehicleResponse, VehicleStatusResponse, VehicleListParams } from '../types/vehicle';
 import type { CommandSubmitRequest, CommandResponse } from '../types/command';
 
 // Get API base URL from environment variable or default to localhost
