@@ -246,6 +246,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -300,6 +301,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -357,6 +359,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -425,6 +428,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep") as mock_sleep,
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -529,6 +533,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep") as mock_sleep,
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -605,6 +610,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -661,6 +667,7 @@ class TestExecuteCommand:
             ),
             patch("app.connectors.vehicle_connector.redis.from_url") as mock_redis_from_url,
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
@@ -711,6 +718,7 @@ class TestExecuteCommand:
                 mock_response_repo,
             ),
             patch("app.connectors.vehicle_connector.asyncio.sleep"),
+            patch("app.connectors.vehicle_connector.random.random", return_value=0.99),
         ):
             # Configure async session maker to return mock session
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session

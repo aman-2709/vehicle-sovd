@@ -24,6 +24,13 @@ from app.services import audit_service
 logger = structlog.get_logger(__name__)
 
 
+# Error simulation probabilities (configurable)
+ERROR_PROBABILITY_TIMEOUT = 0.10  # 10% of commands timeout
+ERROR_PROBABILITY_UNREACHABLE = 0.05  # 5% of commands fail immediately
+ERROR_PROBABILITY_MALFORMED = 0.03  # 3% of commands send invalid data
+COMMAND_TIMEOUT_SECONDS = 30  # Timeout threshold
+
+
 def _generate_read_dtc_response() -> dict[str, Any]:
     """
     Generate mock response for ReadDTC command.
@@ -338,6 +345,54 @@ async def execute_command(
             delay_seconds=delay,
         )
         await asyncio.sleep(delay)
+
+        # Simulate error scenarios based on configured probabilities
+        error_roll = random.random()
+
+        if error_roll < ERROR_PROBABILITY_TIMEOUT:
+            # Timeout scenario (10% probability)
+            logger.warning(
+                "mock_command_simulating_timeout",
+                command_id=str(command_id),
+                timeout_seconds=COMMAND_TIMEOUT_SECONDS,
+            )
+            await asyncio.sleep(COMMAND_TIMEOUT_SECONDS + 1)
+            raise TimeoutError("Vehicle connection timeout")
+
+        elif error_roll < ERROR_PROBABILITY_TIMEOUT + ERROR_PROBABILITY_UNREACHABLE:
+            # Vehicle unreachable scenario (5% probability)
+            logger.warning(
+                "mock_command_simulating_unreachable",
+                command_id=str(command_id),
+            )
+            raise ConnectionError("Vehicle unreachable")
+
+        elif error_roll < (
+            ERROR_PROBABILITY_TIMEOUT
+            + ERROR_PROBABILITY_UNREACHABLE
+            + ERROR_PROBABILITY_MALFORMED
+        ):
+            # Malformed response scenario (3% probability)
+            logger.warning(
+                "mock_command_simulating_malformed_response",
+                command_id=str(command_id),
+            )
+            # First publish a malformed chunk
+            redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
+            try:
+                channel = f"response:{command_id}"
+                malformed_data = '{"incomplete": "json", "missing_closing_brace"'
+                await redis_client.publish(channel, malformed_data)
+                logger.debug(
+                    "mock_command_malformed_chunk_published",
+                    command_id=str(command_id),
+                    channel=channel,
+                )
+            finally:
+                await redis_client.aclose()
+
+            # Then raise error
+            raise ValueError("Invalid response format from vehicle")
 
         # Update command status to 'in_progress'
         async with async_session_maker() as db_session:

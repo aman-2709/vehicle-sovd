@@ -1,6 +1,6 @@
 @startuml
 
-title Error Handling Flow - SOVD WebApp (Validation & Timeout Scenarios)
+title Error Handling Flow - Vehicle Timeout Scenario (I3.T3)
 
 actor Engineer
 participant "Web App" as WebApp
@@ -14,36 +14,10 @@ box "Application Server Components" #LightBlue
 end box
 participant "Database" as DB
 participant "Redis\nPub/Sub" as Redis
-participant "WebSocket Server\n(Placeholder)" as WSServer
+participant "WebSocket Server" as WSServer
 participant "Vehicle" as Vehicle
 
-== Scenario 1: Validation Error (400 Bad Request) ==
-
-Engineer -> WebApp : Submits invalid command\n"ReadDTC" with missing ecuAddress
-WebApp -> Gateway : POST /api/v1/commands\n{vehicle_id, command_name: "ReadDTC",\ncommand_params: {}} [INVALID]
-Gateway -> AppServer : POST /commands (with JWT)
-AppServer -> AuthService : Validate JWT token
-AuthService --> AppServer : Authenticated user
-AppServer -> CommandService : submit_command()
-CommandService -> DB : Validate vehicle exists
-DB --> CommandService : Vehicle record
-
-CommandService -> SOVDHandler : validate_command("ReadDTC", {})
-activate SOVDHandler
-SOVDHandler -> SOVDHandler : Check SOVD 2.0 specification\n- Missing required param: ecuAddress
-SOVDHandler --> CommandService : Validation error:\n"Missing required parameter: ecuAddress"
-deactivate SOVDHandler
-
-note right of SOVDHandler : **SYNCHRONOUS ERROR**\n\nValidation happens BEFORE\ndatabase insertion.\nNo command record created.\nNo background task triggered.
-
-CommandService --> AppServer : None (validation failed)
-AppServer --> Gateway : 400 Bad Request\n{"detail": "Invalid SOVD command:\nMissing required parameter: ecuAddress"}
-Gateway --> WebApp : Error response
-WebApp -> Engineer : Display error notification:\n"Command validation failed.\nMissing required parameter: ecuAddress.\nPlease check SOVD specification."
-
-note right of Engineer : User can correct input\nand resubmit.
-
-== Scenario 2: Vehicle Timeout (After Async Execution) ==
+== Vehicle Timeout Scenario (10% Probability) ==
 
 Engineer -> WebApp : Submits valid command
 WebApp -> Gateway : POST /api/v1/commands\n{vehicle_id, command_name: "ReadDTC",\ncommand_params: {"ecuAddress": "0x10"}}
@@ -64,45 +38,47 @@ WebApp -> Engineer : "Command executing...\n(command_id: {uuid})"
 
 note right of VehicleConnector : Async execution begins.\nMain thread already returned 202.
 
-VehicleConnector -> DB : Update status='in_progress'
+VehicleConnector -> VehicleConnector : Simulate error roll (random.random())\nIf roll < 0.10: trigger timeout
+
+note right of VehicleConnector : **TIMEOUT SIMULATION (10%)**\n\nConnector simulates timeout:\n1. Sleep for 31 seconds\n2. Raise TimeoutError exception\n\nSimulates real-world scenarios:\n- Network connectivity loss\n- Vehicle powered off\n- ECU not responding
+
+VehicleConnector -> VehicleConnector : await asyncio.sleep(31)\nraise TimeoutError("Vehicle connection timeout")
+
+note right of VehicleConnector : **EXCEPTION HANDLING**\n\nExisting error handler (lines 472-544)\ncatches TimeoutError and executes\ngraceful degradation flow.
+
+VehicleConnector -> DB : Update command\nstatus='failed'\nerror_message="Vehicle connection timeout"\ncompleted_at=now
+activate DB
 DB --> VehicleConnector : Updated
+deactivate DB
 
-VehicleConnector -> Vehicle : Execute SOVD command\n(gRPC/WebSocket call)
-activate Vehicle
+VehicleConnector -> Redis : PUBLISH response:{command_id}\n{"event": "error",\n"command_id": "{uuid}",\n"error_message": "Vehicle connection timeout",\n"failed_at": "{iso_timestamp}"}
+activate Redis
+Redis --> VehicleConnector : Published (error event)
+deactivate Redis
 
-note right of Vehicle : **TIMEOUT SCENARIO**\n\nVehicle does not respond due to:\n- Network connectivity loss\n- Vehicle powered off\n- ECU not responding\n- Firewall blocking connection
-
-... 30 seconds pass with no response ...
-
-Vehicle --x VehicleConnector : (timeout - no response)
-deactivate Vehicle
-
-VehicleConnector -> VehicleConnector : Detect timeout\n(asyncio.TimeoutError or similar)
-
-note right of VehicleConnector : **GRACEFUL ERROR HANDLING**\n\nCatch exception, update database,\npublish error event, log audit trail.\nNo crash or unhandled exception.
-
-VehicleConnector -> DB : Update command\nstatus='failed'\nerror_message="Vehicle connection timeout\n(30s). Vehicle may be offline."\ncompleted_at=now
-DB --> VehicleConnector : Updated
-
-VehicleConnector -> DB : Insert audit log\n(action: command_failed,\ndetails: {"error": "timeout"})
+VehicleConnector -> DB : Insert audit log\naction='command_failed'\ndetails={"command_name": "ReadDTC",\n"error": "Vehicle connection timeout"}
+activate DB
 DB --> VehicleConnector : Audit log saved
-
-VehicleConnector -> Redis : PUBLISH response:{command_id}\n{event: "error",\nerror_message: "Vehicle connection timeout"}
-Redis --> VehicleConnector : Published
+deactivate DB
 
 deactivate VehicleConnector
 
-note right of VehicleConnector : Background task complete.\nCommand marked as failed.\nError event available for WebSocket.
+note right of VehicleConnector : Background task complete.\nCommand marked as failed.\nError event published to Redis.
 
-== Real-Time Error Notification (Future Feature) ==
+== Real-Time Error Notification via WebSocket ==
 
-Redis -[#gray]-> WSServer : <color:gray>[PLACEHOLDER] Error event received
-WSServer -[#gray]-> WebApp : <color:gray>[PLACEHOLDER] WS: {event: "error",\n<color:gray>error_message: "Vehicle timeout"}
-WebApp -[#gray]-> Engineer : <color:gray>[PLACEHOLDER] Real-time error notification
+Redis -> WSServer : Error event received from channel\nresponse:{command_id}
+activate WSServer
+WSServer -> WSServer : Parse error event JSON
+WSServer -> WebApp : WS message: {event: "error",\nerror_message: "Vehicle connection timeout",\nfailed_at: "{timestamp}"}
+deactivate WSServer
+WebApp -> Engineer : Real-time error notification:\n"Command failed: Vehicle connection timeout"
 
-note right of WSServer : When WebSocket is implemented,\nerror events will be pushed\nimmediately to client.
+note right of WSServer : WebSocket server subscribes to\nRedis channel and forwards\nerror events immediately.
 
-== Current Polling-Based Error Detection ==
+== Alternative: Polling-Based Error Detection ==
+
+note right of Engineer : If WebSocket connection is lost,\nuser can still poll for status updates.
 
 Engineer -> WebApp : Checks command status\n(manual refresh or polling)
 WebApp -> Gateway : GET /api/v1/commands/{command_id}
@@ -111,12 +87,16 @@ AppServer -> DB : Query command record
 DB --> AppServer : Command\n{status: "failed",\nerror_message: "Vehicle connection timeout"}
 AppServer --> Gateway : 200 OK + Command object
 Gateway --> WebApp : Command data
-WebApp -> Engineer : Display error message:\n"Command failed: Vehicle connection timeout.\nVehicle may be offline. Please check:\n- Vehicle power status\n- Network connectivity\n- Vehicle configuration"
+WebApp -> Engineer : Display error message:\n"Command failed: Vehicle connection timeout"
 
-note right of Engineer : User can:\n- Check vehicle status\n- Retry command later\n- Contact support
+note right of Engineer : User actions:\n- Check vehicle connectivity\n- Retry command later\n- Review vehicle logs
 
-== Scenario 3: Vehicle-Returned Error (Future Implementation) ==
+== Other Error Scenarios ==
 
-note over Vehicle, Engineer : **FUTURE SCENARIO (Not Yet Implemented)**\n\nVehicle responds with error code:\n- Invalid ECU address\n- Command not supported\n- Access denied\n\nFlow:\n1. Vehicle returns gRPC error status\n2. Vehicle Connector interprets error\n3. Command marked as failed\n4. Error details saved in error_message field\n5. User receives specific error guidance
+note over VehicleConnector : **Vehicle Unreachable (5%)**\nImmediate ConnectionError\nSame error handling flow
+
+note over VehicleConnector : **Malformed Response (3%)**\nPublish invalid JSON chunk,\nthen ValueError exception.\nSame error handling flow
+
+note over VehicleConnector : All error types result in:\n1. Command status = 'failed'\n2. Error message saved to DB\n3. Error event published to Redis\n4. Audit log entry created
 
 @enduml
