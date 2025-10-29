@@ -1,0 +1,122 @@
+@startuml
+
+title Error Handling Flow - SOVD WebApp (Validation & Timeout Scenarios)
+
+actor Engineer
+participant "Web App" as WebApp
+participant "API Gateway" as Gateway
+participant "Application Server" as AppServer
+box "Application Server Components" #LightBlue
+  participant "Auth Service" as AuthService
+  participant "Command Service" as CommandService
+  participant "SOVD Protocol\nHandler" as SOVDHandler
+  participant "Vehicle Connector" as VehicleConnector
+end box
+participant "Database" as DB
+participant "Redis\nPub/Sub" as Redis
+participant "WebSocket Server\n(Placeholder)" as WSServer
+participant "Vehicle" as Vehicle
+
+== Scenario 1: Validation Error (400 Bad Request) ==
+
+Engineer -> WebApp : Submits invalid command\n"ReadDTC" with missing ecuAddress
+WebApp -> Gateway : POST /api/v1/commands\n{vehicle_id, command_name: "ReadDTC",\ncommand_params: {}} [INVALID]
+Gateway -> AppServer : POST /commands (with JWT)
+AppServer -> AuthService : Validate JWT token
+AuthService --> AppServer : Authenticated user
+AppServer -> CommandService : submit_command()
+CommandService -> DB : Validate vehicle exists
+DB --> CommandService : Vehicle record
+
+CommandService -> SOVDHandler : validate_command("ReadDTC", {})
+activate SOVDHandler
+SOVDHandler -> SOVDHandler : Check SOVD 2.0 specification\n- Missing required param: ecuAddress
+SOVDHandler --> CommandService : Validation error:\n"Missing required parameter: ecuAddress"
+deactivate SOVDHandler
+
+note right of SOVDHandler : **SYNCHRONOUS ERROR**\n\nValidation happens BEFORE\ndatabase insertion.\nNo command record created.\nNo background task triggered.
+
+CommandService --> AppServer : None (validation failed)
+AppServer --> Gateway : 400 Bad Request\n{"detail": "Invalid SOVD command:\nMissing required parameter: ecuAddress"}
+Gateway --> WebApp : Error response
+WebApp -> Engineer : Display error notification:\n"Command validation failed.\nMissing required parameter: ecuAddress.\nPlease check SOVD specification."
+
+note right of Engineer : User can correct input\nand resubmit.
+
+== Scenario 2: Vehicle Timeout (After Async Execution) ==
+
+Engineer -> WebApp : Submits valid command
+WebApp -> Gateway : POST /api/v1/commands\n{vehicle_id, command_name: "ReadDTC",\ncommand_params: {"ecuAddress": "0x10"}}
+Gateway -> AppServer : POST /commands (with JWT)
+AppServer -> CommandService : submit_command()
+CommandService -> DB : Validate vehicle exists
+DB --> CommandService : Vehicle record
+CommandService -> SOVDHandler : validate_command()
+SOVDHandler --> CommandService : Valid (OK)
+CommandService -> DB : Insert command\n(status='pending')
+DB --> CommandService : Command created
+CommandService -> VehicleConnector : execute_command()\n(via BackgroundTasks)
+activate VehicleConnector
+CommandService --> AppServer : Command object
+AppServer --> Gateway : 202 Accepted\n{command_id, status: "pending"}
+Gateway --> WebApp : Command submitted
+WebApp -> Engineer : "Command executing...\n(command_id: {uuid})"
+
+note right of VehicleConnector : Async execution begins.\nMain thread already returned 202.
+
+VehicleConnector -> DB : Update status='in_progress'
+DB --> VehicleConnector : Updated
+
+VehicleConnector -> Vehicle : Execute SOVD command\n(gRPC/WebSocket call)
+activate Vehicle
+
+note right of Vehicle : **TIMEOUT SCENARIO**\n\nVehicle does not respond due to:\n- Network connectivity loss\n- Vehicle powered off\n- ECU not responding\n- Firewall blocking connection
+
+... 30 seconds pass with no response ...
+
+Vehicle --x VehicleConnector : (timeout - no response)
+deactivate Vehicle
+
+VehicleConnector -> VehicleConnector : Detect timeout\n(asyncio.TimeoutError or similar)
+
+note right of VehicleConnector : **GRACEFUL ERROR HANDLING**\n\nCatch exception, update database,\npublish error event, log audit trail.\nNo crash or unhandled exception.
+
+VehicleConnector -> DB : Update command\nstatus='failed'\nerror_message="Vehicle connection timeout\n(30s). Vehicle may be offline."\ncompleted_at=now
+DB --> VehicleConnector : Updated
+
+VehicleConnector -> DB : Insert audit log\n(action: command_failed,\ndetails: {"error": "timeout"})
+DB --> VehicleConnector : Audit log saved
+
+VehicleConnector -> Redis : PUBLISH response:{command_id}\n{event: "error",\nerror_message: "Vehicle connection timeout"}
+Redis --> VehicleConnector : Published
+
+deactivate VehicleConnector
+
+note right of VehicleConnector : Background task complete.\nCommand marked as failed.\nError event available for WebSocket.
+
+== Real-Time Error Notification (Future Feature) ==
+
+Redis -[#gray]-> WSServer : <color:gray>[PLACEHOLDER] Error event received
+WSServer -[#gray]-> WebApp : <color:gray>[PLACEHOLDER] WS: {event: "error",\n<color:gray>error_message: "Vehicle timeout"}
+WebApp -[#gray]-> Engineer : <color:gray>[PLACEHOLDER] Real-time error notification
+
+note right of WSServer : When WebSocket is implemented,\nerror events will be pushed\nimmediately to client.
+
+== Current Polling-Based Error Detection ==
+
+Engineer -> WebApp : Checks command status\n(manual refresh or polling)
+WebApp -> Gateway : GET /api/v1/commands/{command_id}
+Gateway -> AppServer : GET /commands/{command_id}
+AppServer -> DB : Query command record
+DB --> AppServer : Command\n{status: "failed",\nerror_message: "Vehicle connection timeout"}
+AppServer --> Gateway : 200 OK + Command object
+Gateway --> WebApp : Command data
+WebApp -> Engineer : Display error message:\n"Command failed: Vehicle connection timeout.\nVehicle may be offline. Please check:\n- Vehicle power status\n- Network connectivity\n- Vehicle configuration"
+
+note right of Engineer : User can:\n- Check vehicle status\n- Retry command later\n- Contact support
+
+== Scenario 3: Vehicle-Returned Error (Future Implementation) ==
+
+note over Vehicle, Engineer : **FUTURE SCENARIO (Not Yet Implemented)**\n\nVehicle responds with error code:\n- Invalid ECU address\n- Command not supported\n- Access denied\n\nFlow:\n1. Vehicle returns gRPC error status\n2. Vehicle Connector interprets error\n3. Command marked as failed\n4. Error details saved in error_message field\n5. User receives specific error guidance
+
+@enduml

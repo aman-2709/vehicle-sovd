@@ -1,0 +1,154 @@
+@startuml
+
+title Command Execution Flow - SOVD WebApp (End-to-End)
+
+actor Engineer as "Automotive\nEngineer"
+participant "Web App\n(React)" as WebApp
+participant "API Gateway\n(Nginx)" as Gateway
+participant "Application Server\n(FastAPI)" as AppServer
+box "Application Server Components" #LightBlue
+  participant "Auth Service" as AuthService
+  participant "Command Service" as CommandService
+  participant "SOVD Protocol\nHandler" as SOVDHandler
+  participant "Vehicle Connector\n(Mock)" as VehicleConnector
+end box
+participant "Database\n(PostgreSQL)" as DB
+participant "Redis\nPub/Sub" as Redis
+participant "WebSocket Server\n(Not Yet Implemented)" as WSServer
+participant "Vehicle\n(Mock)" as Vehicle
+
+== 1. User Login (Authentication Flow) ==
+
+Engineer -> WebApp : Enters credentials\n(username, password)
+WebApp -> Gateway : POST /api/v1/auth/login
+Gateway -> AppServer : POST /auth/login
+AppServer -> AuthService : authenticate_user(username, password)
+AuthService -> DB : Query users table\n(validate credentials)
+DB --> AuthService : User record (if valid)
+AuthService --> AppServer : User object
+AppServer -> AuthService : create_access_token()\ncreate_refresh_token()
+AuthService --> AppServer : JWT tokens (access + refresh)
+AppServer -> DB : Insert session record\n(store refresh token)
+DB --> AppServer : Session created
+AppServer -> DB : Insert audit log\n(action: user_login)
+DB --> AppServer : Audit log saved
+AppServer --> Gateway : 200 OK + TokenResponse\n{access_token, refresh_token, expires_in}
+Gateway --> WebApp : JWT tokens
+WebApp -> Engineer : Display dashboard\n(authenticated)
+
+note right of AuthService : JWT contains:\n- user_id\n- username\n- role\n- expiration (15 min)
+
+== 2. User Selects Vehicle (GET /vehicles) ==
+
+Engineer -> WebApp : Navigates to Vehicles page
+WebApp -> Gateway : GET /api/v1/vehicles\n(Authorization: Bearer {token})
+Gateway -> AppServer : GET /vehicles (with JWT)
+AppServer -> AuthService : Validate JWT token\n(dependency injection)
+AuthService --> AppServer : Authenticated user
+AppServer -> DB : Query vehicles table\n(filter by user permissions)
+DB --> AppServer : List of vehicles
+AppServer --> Gateway : 200 OK + [vehicles]\n[{vehicle_id, vin, make, model, status}]
+Gateway --> WebApp : Vehicle data
+WebApp -> Engineer : Display vehicle list
+
+== 3. User Submits Command (POST /commands) ==
+
+Engineer -> WebApp : Selects vehicle\nEnters command: "ReadDTC"\nParams: {"ecuAddress": "0x10"}
+WebApp -> Gateway : POST /api/v1/commands\n{vehicle_id, command_name, command_params}
+Gateway -> AppServer : POST /commands (with JWT)
+AppServer -> AuthService : Validate JWT token
+AuthService --> AppServer : Authenticated user
+
+== 4. Backend Validates Command (SOVD Handler) ==
+
+AppServer -> CommandService : submit_command()
+CommandService -> DB : Validate vehicle exists\n(query vehicles table)
+DB --> CommandService : Vehicle record
+CommandService -> SOVDHandler : validate_command(command_name, params)
+SOVDHandler -> SOVDHandler : Check against SOVD 2.0 spec\n(command schema validation)
+SOVDHandler --> CommandService : Validation result (OK)
+
+note right of SOVDHandler : Validation checks:\n- Command name in allowed list\n- Required params present\n- Param types correct\n- Returns error if invalid
+
+== 5. Command Record Created (Database) ==
+
+CommandService -> DB : Insert command record\n(status='pending', user_id, vehicle_id)
+activate CommandService
+DB --> CommandService : Command object\n(command_id assigned)
+
+CommandService --> AppServer : Command object
+AppServer --> Gateway : 202 Accepted + CommandResponse\n{command_id, status="pending", stream_url}
+Gateway --> WebApp : Command submitted
+WebApp -> Engineer : "Command executing...\n(command_id: {uuid})"
+
+note right of CommandService : Returns 202 immediately\n(non-blocking async design)
+
+== 6. Async Execution Triggered (Vehicle Connector) ==
+
+CommandService -> VehicleConnector : execute_command()\n(via BackgroundTasks)
+deactivate CommandService
+activate VehicleConnector
+
+note right of VehicleConnector : Execution runs in background.\nMain request thread already returned 202.
+
+VehicleConnector -> VehicleConnector : Simulate network delay\n(0.5-1.5 seconds)
+VehicleConnector -> DB : Update command status='in_progress'
+DB --> VehicleConnector : Updated
+
+== 7. Mock Vehicle Response Generated ==
+
+VehicleConnector -> Vehicle : [MOCK] Execute SOVD command\n(ReadDTC)
+activate Vehicle
+note right of Vehicle : **MOCK IMPLEMENTATION**\nReal implementation will use\ngRPC to actual vehicle endpoint.\n\nMock generates realistic SOVD\nresponse payload.
+Vehicle -> Vehicle : Generate mock DTC data\n{dtcs: [P0420, P0171, P0300]}
+Vehicle --> VehicleConnector : Mock response payload
+deactivate Vehicle
+
+note right of VehicleConnector : Blueprint shows multi-chunk streaming.\nCurrent mock sends single chunk.\nFuture: will support sequence_number\nfor progressive responses.
+
+== 8. Response Published to Redis ==
+
+VehicleConnector -> DB : Insert response record\n(response_payload, sequence_number=1, is_final=true)
+DB --> VehicleConnector : Response object\n(response_id assigned)
+
+VehicleConnector -> Redis : PUBLISH response:{command_id}\n{event: "response", response_payload, is_final}
+Redis --> VehicleConnector : Published
+
+note right of Redis : Pub/Sub channel:\n"response:{command_id}"\n\nWebSocket Server will subscribe\nto deliver real-time updates to UI.
+
+== 9. Response Saved to Database ==
+
+note over VehicleConnector, DB : Response already saved in step 8\n(combined for efficiency)
+
+== 10. Command Status Updated to Completed ==
+
+VehicleConnector -> DB : Update command\n(status='completed', completed_at=now)
+DB --> VehicleConnector : Updated
+
+VehicleConnector -> DB : Insert audit log\n(action: command_completed)
+DB --> VehicleConnector : Audit log saved
+
+deactivate VehicleConnector
+
+note right of VehicleConnector : Async execution complete.\nUser can poll GET /commands/{id}\nor receive WebSocket event.
+
+== Real-Time Response Delivery (Future Feature) ==
+
+Redis -[#gray]-> WSServer : <color:gray>[PLACEHOLDER] Subscribe to response:{command_id}
+note right of WSServer : **WEBSOCKET NOT YET IMPLEMENTED**\n\nFuture implementation will:\n1. Client connects: wss://.../ws/responses/{command_id}\n2. Server subscribes to Redis channel\n3. Server pushes events to client in real-time\n4. Event types: response, status, error
+
+WSServer -[#gray]-> WebApp : <color:gray>[PLACEHOLDER] WS message:\n<color:gray>{event: "response", response_payload}
+WebApp -[#gray]-> Engineer : <color:gray>[PLACEHOLDER] Display real-time results
+
+== Current Polling-Based Response Retrieval ==
+
+Engineer -> WebApp : Clicks "View Response"\n(or auto-refresh polling)
+WebApp -> Gateway : GET /api/v1/commands/{command_id}/responses
+Gateway -> AppServer : GET /commands/{command_id}/responses
+AppServer -> DB : Query responses table\n(ORDER BY sequence_number)
+DB --> AppServer : List of responses
+AppServer --> Gateway : 200 OK + [responses]
+Gateway --> WebApp : Response data
+WebApp -> Engineer : Display command results\n(DTC codes: P0420, P0171, P0300)
+
+@enduml
