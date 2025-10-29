@@ -199,7 +199,7 @@ async def redis_listener(
         # Cleanup: unsubscribe from Redis channel
         try:
             await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            await pubsub.aclose()
             logger.info("redis_pubsub_unsubscribed", command_id=command_id, channel=channel)
         except Exception as e:
             logger.error(
