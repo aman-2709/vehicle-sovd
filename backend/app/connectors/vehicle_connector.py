@@ -368,9 +368,7 @@ async def execute_command(
             raise ConnectionError("Vehicle unreachable")
 
         elif error_roll < (
-            ERROR_PROBABILITY_TIMEOUT
-            + ERROR_PROBABILITY_UNREACHABLE
-            + ERROR_PROBABILITY_MALFORMED
+            ERROR_PROBABILITY_TIMEOUT + ERROR_PROBABILITY_UNREACHABLE + ERROR_PROBABILITY_MALFORMED
         ):
             # Malformed response scenario (3% probability)
             logger.warning(
@@ -485,7 +483,7 @@ async def execute_command(
                 "mock_command_status_event_published",
                 command_id=str(command_id),
                 channel=channel,
-                status="completed"
+                status="completed",
             )
         finally:
             await redis_client.aclose()

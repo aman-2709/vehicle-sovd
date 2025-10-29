@@ -106,9 +106,7 @@ async def submit_command(
     return command
 
 
-async def get_command_by_id(
-    command_id: uuid.UUID, db_session: AsyncSession
-) -> Command | None:
+async def get_command_by_id(command_id: uuid.UUID, db_session: AsyncSession) -> Command | None:
     """
     Retrieve a command by its ID.
 
@@ -130,9 +128,7 @@ async def get_command_by_id(
     return command
 
 
-async def get_command_history(
-    filters: dict[str, Any], db_session: AsyncSession
-) -> list[Command]:
+async def get_command_history(filters: dict[str, Any], db_session: AsyncSession) -> list[Command]:
     """
     Retrieve command history with filtering and pagination.
 
@@ -164,9 +160,7 @@ async def get_command_history(
     return commands
 
 
-async def get_command_responses(
-    command_id: uuid.UUID, db_session: AsyncSession
-) -> list[Response]:
+async def get_command_responses(command_id: uuid.UUID, db_session: AsyncSession) -> list[Response]:
     """
     Retrieve all responses for a command, ordered by sequence number.
 
@@ -180,9 +174,7 @@ async def get_command_responses(
     """
     logger.info("command_responses_retrieval", command_id=str(command_id))
 
-    responses = await response_repository.get_responses_by_command_id(
-        db_session, command_id
-    )
+    responses = await response_repository.get_responses_by_command_id(db_session, command_id)
 
     logger.info(
         "command_responses_retrieved",

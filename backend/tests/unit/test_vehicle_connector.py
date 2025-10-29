@@ -151,17 +151,13 @@ class TestExecuteCommand:
         mock_response_repo = AsyncMock()
 
         # Mock response objects (ReadDTC now generates 3 chunks)
-        mock_response_repo.create_response.return_value = MagicMock(
-            response_id=uuid.uuid4()
-        )
+        mock_response_repo.create_response.return_value = MagicMock(response_id=uuid.uuid4())
 
         # Mock Redis client
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -217,7 +213,7 @@ class TestExecuteCommand:
         command_id = uuid.uuid4()
         vehicle_id = uuid.uuid4()
         command_name = "ClearDTC"
-        command_params = {}
+        command_params: dict[str, str] = {}
 
         # Mock database session and repositories
         mock_db_session = AsyncMock()
@@ -233,9 +229,7 @@ class TestExecuteCommand:
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -288,9 +282,7 @@ class TestExecuteCommand:
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -330,7 +322,7 @@ class TestExecuteCommand:
         command_id = uuid.uuid4()
         vehicle_id = uuid.uuid4()
         command_name = "UnknownCommand"
-        command_params = {}
+        command_params: dict[str, str] = {}
 
         # Mock database session and repositories
         mock_db_session = AsyncMock()
@@ -346,9 +338,7 @@ class TestExecuteCommand:
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -415,9 +405,7 @@ class TestExecuteCommand:
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -520,9 +508,7 @@ class TestExecuteCommand:
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -581,7 +567,7 @@ class TestExecuteCommand:
         command_id = uuid.uuid4()
         vehicle_id = uuid.uuid4()
         command_name = "ReadDTC"
-        command_params = {}
+        command_params: dict[str, str] = {}
 
         # Mock database session and repositories
         mock_db_session = AsyncMock()
@@ -589,17 +575,13 @@ class TestExecuteCommand:
         mock_response_repo = AsyncMock()
 
         # Mock response objects
-        mock_response_repo.create_response.return_value = MagicMock(
-            response_id=uuid.uuid4()
-        )
+        mock_response_repo.create_response.return_value = MagicMock(response_id=uuid.uuid4())
 
         # Mock Redis client
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -638,7 +620,7 @@ class TestExecuteCommand:
         command_id = uuid.uuid4()
         vehicle_id = uuid.uuid4()
         command_name = "ReadDTC"
-        command_params = {}
+        command_params: dict[str, str] = {}
 
         # Mock database session and repositories
         mock_db_session = AsyncMock()
@@ -646,17 +628,13 @@ class TestExecuteCommand:
         mock_response_repo = AsyncMock()
 
         # Mock response objects
-        mock_response_repo.create_response.return_value = MagicMock(
-            response_id=uuid.uuid4()
-        )
+        mock_response_repo.create_response.return_value = MagicMock(response_id=uuid.uuid4())
 
         # Mock Redis client
         mock_redis_client = AsyncMock()
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -682,8 +660,7 @@ class TestExecuteCommand:
 
             # Extract all is_final flags
             is_final_flags = [
-                call[1]["is_final"]
-                for call in mock_response_repo.create_response.call_args_list
+                call[1]["is_final"] for call in mock_response_repo.create_response.call_args_list
             ]
 
             # Verify is_final flags are [False, False, True]
@@ -695,7 +672,7 @@ class TestExecuteCommand:
         command_id = uuid.uuid4()
         vehicle_id = uuid.uuid4()
         command_name = "ReadDTC"
-        command_params = {}
+        command_params: dict[str, str] = {}
 
         # Mock database session and repositories
         mock_db_session = AsyncMock()
@@ -706,9 +683,7 @@ class TestExecuteCommand:
         mock_response_repo.create_response.side_effect = Exception("Database error")
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,

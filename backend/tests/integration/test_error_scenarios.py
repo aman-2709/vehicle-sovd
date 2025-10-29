@@ -75,9 +75,7 @@ class TestErrorScenarios:
         await pubsub.subscribe(channel)
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -114,7 +112,8 @@ class TestErrorScenarios:
 
             # Verify command status was updated to 'failed'
             failed_calls = [
-                call for call in mock_command_repo.update_command_status.call_args_list
+                call
+                for call in mock_command_repo.update_command_status.call_args_list
                 if call[1].get("status") == "failed"
             ]
             assert len(failed_calls) >= 1
@@ -127,7 +126,8 @@ class TestErrorScenarios:
 
             # Verify audit log was created for command failure
             audit_calls = [
-                call for call in mock_audit_service.log_audit_event.call_args_list
+                call
+                for call in mock_audit_service.log_audit_event.call_args_list
                 if call[1].get("action") == "command_failed"
             ]
             assert len(audit_calls) >= 1
@@ -187,9 +187,7 @@ class TestErrorScenarios:
         await pubsub.subscribe(channel)
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -221,14 +219,16 @@ class TestErrorScenarios:
             # Verify NO timeout sleep was called (only network delay)
             # Should only have 1 sleep call for network delay
             timeout_sleeps = [
-                call for call in mock_sleep.call_args_list
+                call
+                for call in mock_sleep.call_args_list
                 if call[0][0] > 10  # Timeout would be 31 seconds
             ]
             assert len(timeout_sleeps) == 0
 
             # Verify command status was updated to 'failed'
             failed_calls = [
-                call for call in mock_command_repo.update_command_status.call_args_list
+                call
+                for call in mock_command_repo.update_command_status.call_args_list
                 if call[1].get("status") == "failed"
             ]
             assert len(failed_calls) >= 1
@@ -283,9 +283,7 @@ class TestErrorScenarios:
         await pubsub.subscribe(channel)
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -325,7 +323,8 @@ class TestErrorScenarios:
 
             # Verify command status was updated to 'failed'
             failed_calls = [
-                call for call in mock_command_repo.update_command_status.call_args_list
+                call
+                for call in mock_command_repo.update_command_status.call_args_list
                 if call[1].get("status") == "failed"
             ]
             assert len(failed_calls) >= 1
@@ -367,9 +366,7 @@ class TestErrorScenarios:
         await pubsub.get_message(timeout=1.0)
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -382,9 +379,7 @@ class TestErrorScenarios:
             mock_session_maker.return_value.__aenter__.return_value = mock_db_session
 
             # Execute command (will trigger timeout)
-            await vehicle_connector.execute_command(
-                command_id, vehicle_id, "ReadDTC", {}
-            )
+            await vehicle_connector.execute_command(command_id, vehicle_id, "ReadDTC", {})
 
             # Wait for Redis publish to propagate
             await asyncio.sleep(0.2)
@@ -452,9 +447,7 @@ class TestErrorScenarios:
         await pubsub.subscribe(channel)
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
@@ -482,7 +475,8 @@ class TestErrorScenarios:
 
             # Verify command was updated to 'completed' (not 'failed')
             completed_calls = [
-                call for call in mock_command_repo.update_command_status.call_args_list
+                call
+                for call in mock_command_repo.update_command_status.call_args_list
                 if call[1].get("status") == "completed"
             ]
             assert len(completed_calls) >= 1
@@ -499,7 +493,8 @@ class TestErrorScenarios:
 
             # Verify audit log for completion (not failure)
             completion_audit_calls = [
-                call for call in mock_audit_service.log_audit_event.call_args_list
+                call
+                for call in mock_audit_service.log_audit_event.call_args_list
                 if call[1].get("action") == "command_completed"
             ]
             assert len(completion_audit_calls) >= 1
@@ -564,9 +559,7 @@ class TestErrorScenarios:
         mock_command_repo.get_command_by_id.return_value = mock_command
 
         with (
-            patch(
-                "app.connectors.vehicle_connector.async_session_maker"
-            ) as mock_session_maker,
+            patch("app.connectors.vehicle_connector.async_session_maker") as mock_session_maker,
             patch(
                 "app.connectors.vehicle_connector.command_repository",
                 mock_command_repo,
