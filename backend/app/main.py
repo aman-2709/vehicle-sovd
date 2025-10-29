@@ -25,7 +25,7 @@ configure_logging()
 app = FastAPI(
     title="SOVD Command WebApp API",
     description="Cloud-based SOVD 2.0 command execution platform",
-    version="0.1.0",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -59,7 +59,7 @@ async def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
         "service": "sovd-backend",
-        "version": "0.1.0",
+        "version": "1.0.0",
     }
 
 

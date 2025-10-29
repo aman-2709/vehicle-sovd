@@ -1,0 +1,865 @@
+openapi: 3.1.0
+info:
+  title: SOVD Command WebApp API
+  description: Cloud-based SOVD 2.0 command execution platform. This API enables remote diagnostic operations on vehicles
+    using the SOVD protocol. Features include user authentication, vehicle management, and command execution with real-time
+    response streaming.
+  version: 1.0.0
+paths:
+  /api/v1/auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      description: "Authenticate user and return access and refresh tokens.\n\nArgs:\n    credentials: Username and password\n\
+        \    request: FastAPI Request object for extracting IP/user-agent\n    db: Database session\n\nReturns:\n    TokenResponse\
+        \ with access_token, refresh_token, and expiration info\n\nRaises:\n    HTTPException: 401 if credentials are invalid"
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: engineer1
+              password: securePassword123
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/refresh:
+    post:
+      tags:
+      - auth
+      summary: Refresh
+      description: "Validate refresh token and issue new access token.\n\nArgs:\n    request: Refresh token\n    db: Database\
+        \ session\n\nReturns:\n    RefreshResponse with new access_token\n\nRaises:\n    HTTPException: 401 if refresh token\
+        \ is invalid or not found in database"
+      operationId: refresh_api_v1_auth_refresh_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Logout
+      description: "Invalidate all refresh tokens for the current user (logout).\n\nArgs:\n    request: FastAPI Request object\
+        \ for extracting IP/user-agent\n    current_user: Authenticated user from JWT\n    db: Database session\n\nReturns:\n\
+        \    LogoutResponse with confirmation message"
+      operationId: logout_api_v1_auth_logout_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+        '422':
+          description: Validation Error
+      security:
+      - bearerAuth: []
+  /api/v1/auth/me:
+    get:
+      tags:
+      - auth
+      summary: Get Current User Profile
+      description: "Get current user profile from JWT token.\n\nArgs:\n    current_user: Authenticated user from JWT\n\nReturns:\n\
+        \    UserResponse with user profile information"
+      operationId: get_current_user_profile_api_v1_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+        '422':
+          description: Validation Error
+      security:
+      - bearerAuth: []
+  /api/v1/vehicles:
+    get:
+      tags:
+      - vehicles
+      summary: List Vehicles
+      description: "Get list of vehicles with optional filtering and pagination.\n\nQuery parameters:\n- status: Filter by\
+        \ connection status (connected, disconnected, error)\n- search: Search by VIN (partial match, case-insensitive)\n\
+        - limit: Maximum number of results (1-100, default: 50)\n- offset: Number of results to skip (default: 0)\n\nRequires\
+        \ authentication via JWT bearer token.\n\nReturns:\n    List of vehicle objects with details (vehicle_id, vin, make,\
+        \ model, year,\n    connection_status, last_seen_at, metadata)\n\nRaises:\n    401 Unauthorized: If JWT token is missing\
+        \ or invalid\n    422 Unprocessable Entity: If query parameters are invalid\n\nExample:\n    GET /api/v1/vehicles?status=connected&limit=10&offset=0\n\
+        \    Headers: Authorization: Bearer {jwt_token}"
+      operationId: list_vehicles_api_v1_vehicles_get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by connection status (connected, disconnected, error)
+          title: Status
+        description: Filter by connection status (connected, disconnected, error)
+      - name: search
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Search by VIN (partial match, case-insensitive)
+          title: Search
+        description: Search by VIN (partial match, case-insensitive)
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Maximum number of results to return
+          default: 50
+          title: Limit
+        description: Maximum number of results to return
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Number of results to skip for pagination
+          default: 0
+          title: Offset
+        description: Number of results to skip for pagination
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              example:
+                vehicles:
+                - vehicle_id: 123e4567-e89b-12d3-a456-426614174000
+                  vin: 1HGCM82633A123456
+                  make: Honda
+                  model: Accord
+                  year: 2024
+                  connection_status: connected
+                  last_seen_at: '2025-10-28T10:00:00Z'
+                total: 1
+                limit: 20
+                offset: 0
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /api/v1/vehicles/{vehicle_id}:
+    get:
+      tags:
+      - vehicles
+      summary: Get Vehicle
+      description: "Get a single vehicle by ID.\n\nPath parameters:\n- vehicle_id: UUID of the vehicle to retrieve\n\nRequires\
+        \ authentication via JWT bearer token.\n\nReturns:\n    Vehicle object with full details (vehicle_id, vin, make, model,\
+        \ year,\n    connection_status, last_seen_at, metadata)\n\nRaises:\n    401 Unauthorized: If JWT token is missing\
+        \ or invalid\n    404 Not Found: If vehicle with given ID does not exist\n    422 Unprocessable Entity: If vehicle_id\
+        \ is not a valid UUID\n\nExample:\n    GET /api/v1/vehicles/123e4567-e89b-12d3-a456-426614174000\n    Headers: Authorization:\
+        \ Bearer {jwt_token}"
+      operationId: get_vehicle_api_v1_vehicles__vehicle_id__get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: vehicle_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vehicle Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleResponse'
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /api/v1/vehicles/{vehicle_id}/status:
+    get:
+      tags:
+      - vehicles
+      summary: Get Vehicle Status
+      description: "Get vehicle connection status (cached in Redis for 30 seconds).\n\nThis endpoint is optimized for frequent\
+        \ polling by frontend dashboards.\nVehicle status is cached in Redis with a 30-second TTL to reduce database load.\n\
+        \nPath parameters:\n- vehicle_id: UUID of the vehicle to get status for\n\nRequires authentication via JWT bearer\
+        \ token.\n\nReturns:\n    Vehicle status object with connection_status, last_seen_at, and health metrics\n\nRaises:\n\
+        \    401 Unauthorized: If JWT token is missing or invalid\n    404 Not Found: If vehicle with given ID does not exist\n\
+        \    422 Unprocessable Entity: If vehicle_id is not a valid UUID\n\nExample:\n    GET /api/v1/vehicles/123e4567-e89b-12d3-a456-426614174000/status\n\
+        \    Headers: Authorization: Bearer {jwt_token}\n\nNote:\n    Second request within 30 seconds will return cached\
+        \ data (faster response).\n    Check logs for \"cache_hit\" vs \"cache_miss\" to verify caching behavior."
+      operationId: get_vehicle_status_api_v1_vehicles__vehicle_id__status_get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: vehicle_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Vehicle Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleStatusResponse'
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /api/v1/commands:
+    post:
+      tags:
+      - commands
+      summary: Submit Command
+      description: "Submit a new command to a vehicle.\n\nRequires authentication and engineer/admin role.\nValidates vehicle\
+        \ existence and SOVD command format before creating command.\n\nArgs:\n    command_request: Command submission request\n\
+        \    http_request: FastAPI Request object for extracting IP/user-agent\n    background_tasks: Background tasks for\
+        \ async command execution\n    current_user: Authenticated user (injected)\n    db: Database session (injected)\n\n\
+        Returns:\n    CommandResponse with command details\n\nRaises:\n    HTTPException 400: Vehicle not found or invalid\
+        \ SOVD command\n    HTTPException 401: Not authenticated\n    HTTPException 403: Insufficient permissions"
+      operationId: submit_command_api_v1_commands_post
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandSubmitRequest'
+            example:
+              vehicle_id: 123e4567-e89b-12d3-a456-426614174000
+              command_name: ReadDTC
+              command_params:
+                ecuAddress: '0x10'
+                format: UDS
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+    get:
+      tags:
+      - commands
+      summary: List Commands
+      description: "List commands with optional filtering and pagination.\n\nRequires authentication.\n\nArgs:\n    vehicle_id:\
+        \ Optional vehicle ID filter\n    status: Optional status filter\n    limit: Maximum records to return (1-100)\n \
+        \   offset: Number of records to skip\n    current_user: Authenticated user (injected)\n    db: Database session (injected)\n\
+        \nReturns:\n    CommandListResponse with list of commands\n\nRaises:\n    HTTPException 401: Not authenticated"
+      operationId: list_commands_api_v1_commands_get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: vehicle_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          description: Filter by vehicle ID
+          title: Vehicle Id
+        description: Filter by vehicle ID
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by command status
+          title: Status
+        description: Filter by command status
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Maximum number of records
+          default: 50
+          title: Limit
+        description: Maximum number of records
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Number of records to skip
+          default: 0
+          title: Offset
+        description: Number of records to skip
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandListResponse'
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /api/v1/commands/{command_id}:
+    get:
+      tags:
+      - commands
+      summary: Get Command
+      description: "Retrieve details of a specific command.\n\nRequires authentication.\n\nArgs:\n    command_id: Command\
+        \ UUID\n    current_user: Authenticated user (injected)\n    db: Database session (injected)\n\nReturns:\n    CommandResponse\
+        \ with command details\n\nRaises:\n    HTTPException 401: Not authenticated\n    HTTPException 404: Command not found"
+      operationId: get_command_api_v1_commands__command_id__get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: command_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Command Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandResponse'
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /api/v1/commands/{command_id}/responses:
+    get:
+      tags:
+      - commands
+      summary: Get Command Responses
+      description: "Retrieve all responses for a specific command.\n\nReturns responses ordered by sequence_number (ascending)\
+        \ to maintain\nproper streaming order. Returns empty list if no responses exist.\n\nArgs:\n    command_id: Command\
+        \ UUID\n    current_user: Authenticated user (injected)\n    db: Database session (injected)\n\nReturns:\n    List\
+        \ of ResponseDetail objects (empty if no responses)\n\nRaises:\n    HTTPException 401: Not authenticated"
+      operationId: get_command_responses_api_v1_commands__command_id__responses_get
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: command_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Command Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ResponseDetail-Output'
+                title: Response Get Command Responses Api V1 Commands  Command Id  Responses Get
+        '422':
+          description: Validation Error
+        '401':
+          description: Unauthorized - Missing or invalid access token
+        '403':
+          description: Forbidden - Insufficient permissions
+  /health:
+    get:
+      summary: Health Check
+      description: "Health check endpoint for Docker healthcheck and monitoring.\n\nReturns:\n    dict: Status message indicating\
+        \ the service is operational"
+      operationId: health_check_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Health Check Health Get
+  /:
+    get:
+      summary: Root
+      description: "Root endpoint providing basic API information.\n\nReturns:\n    dict: Welcome message and documentation\
+        \ links"
+      operationId: root__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Root  Get
+components:
+  schemas:
+    CommandListResponse:
+      properties:
+        commands:
+          items:
+            $ref: '#/components/schemas/CommandResponse'
+          type: array
+          title: Commands
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - commands
+      - limit
+      - offset
+      title: CommandListResponse
+      description: Response schema for paginated command list.
+    CommandResponse:
+      properties:
+        command_id:
+          type: string
+          title: Command Id
+        user_id:
+          type: string
+          title: User Id
+        vehicle_id:
+          type: string
+          title: Vehicle Id
+        command_name:
+          type: string
+          title: Command Name
+        command_params:
+          additionalProperties: true
+          type: object
+          title: Command Params
+        status:
+          type: string
+          title: Status
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Message
+        submitted_at:
+          type: string
+          format: date-time
+          title: Submitted At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+      type: object
+      required:
+      - command_id
+      - user_id
+      - vehicle_id
+      - command_name
+      - command_params
+      - status
+      - error_message
+      - submitted_at
+      - completed_at
+      title: CommandResponse
+      description: Response schema for command details.
+    CommandSubmitRequest:
+      properties:
+        command_name:
+          type: string
+          maxLength: 100
+          title: Command Name
+          description: SOVD command identifier
+        vehicle_id:
+          type: string
+          format: uuid
+          title: Vehicle Id
+          description: Target vehicle UUID
+        command_params:
+          additionalProperties: true
+          type: object
+          title: Command Params
+          description: Command-specific parameters
+      type: object
+      required:
+      - command_name
+      - vehicle_id
+      title: CommandSubmitRequest
+      description: Request schema for submitting a new command.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    LoginRequest:
+      properties:
+        username:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Username
+          description: Username
+        password:
+          type: string
+          minLength: 1
+          title: Password
+          description: Password
+      type: object
+      required:
+      - username
+      - password
+      title: LoginRequest
+      description: Request schema for user login.
+    LogoutResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: Logout confirmation message
+      type: object
+      required:
+      - message
+      title: LogoutResponse
+      description: Response schema for logout.
+    RefreshRequest:
+      properties:
+        refresh_token:
+          type: string
+          title: Refresh Token
+          description: JWT refresh token
+      type: object
+      required:
+      - refresh_token
+      title: RefreshRequest
+      description: Request schema for token refresh.
+    RefreshResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+          description: New JWT access token
+        token_type:
+          type: string
+          title: Token Type
+          description: Token type
+          default: bearer
+        expires_in:
+          type: integer
+          title: Expires In
+          description: Access token expiration time in seconds
+      type: object
+      required:
+      - access_token
+      - expires_in
+      title: RefreshResponse
+      description: Response schema for token refresh.
+    ResponseDetail-Input:
+      properties:
+        response_id:
+          type: string
+          format: uuid
+          title: Response Id
+        command_id:
+          type: string
+          format: uuid
+          title: Command Id
+        response_payload:
+          additionalProperties: true
+          type: object
+          title: Response Payload
+        sequence_number:
+          type: integer
+          title: Sequence Number
+        is_final:
+          type: boolean
+          title: Is Final
+        received_at:
+          type: string
+          format: date-time
+          title: Received At
+      type: object
+      required:
+      - response_id
+      - command_id
+      - response_payload
+      - sequence_number
+      - is_final
+      - received_at
+      title: ResponseDetail
+      description: 'Schema for streaming command response details.
+
+
+        Represents a single response chunk from a vehicle command execution.
+
+        Multiple responses can be associated with one command for streaming data.'
+    ResponseDetail-Output:
+      properties:
+        response_id:
+          type: string
+          title: Response Id
+        command_id:
+          type: string
+          title: Command Id
+        response_payload:
+          additionalProperties: true
+          type: object
+          title: Response Payload
+        sequence_number:
+          type: integer
+          title: Sequence Number
+        is_final:
+          type: boolean
+          title: Is Final
+        received_at:
+          type: string
+          format: date-time
+          title: Received At
+      type: object
+      required:
+      - response_id
+      - command_id
+      - response_payload
+      - sequence_number
+      - is_final
+      - received_at
+      title: ResponseDetail
+      description: 'Schema for streaming command response details.
+
+
+        Represents a single response chunk from a vehicle command execution.
+
+        Multiple responses can be associated with one command for streaming data.'
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+          description: JWT access token
+        refresh_token:
+          type: string
+          title: Refresh Token
+          description: JWT refresh token
+        token_type:
+          type: string
+          title: Token Type
+          description: Token type
+          default: bearer
+        expires_in:
+          type: integer
+          title: Expires In
+          description: Access token expiration time in seconds
+      type: object
+      required:
+      - access_token
+      - refresh_token
+      - expires_in
+      title: TokenResponse
+      description: Response schema for token generation.
+    UserResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+          description: User unique identifier (UUID)
+        username:
+          type: string
+          title: Username
+          description: Username
+        role:
+          type: string
+          title: Role
+          description: User role (e.g., 'engineer', 'admin')
+        email:
+          type: string
+          title: Email
+          description: User email address
+      type: object
+      required:
+      - user_id
+      - username
+      - role
+      - email
+      title: UserResponse
+      description: Response schema for user profile information.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VehicleResponse:
+      properties:
+        vehicle_id:
+          type: string
+          title: Vehicle Id
+        vin:
+          type: string
+          title: Vin
+        make:
+          type: string
+          title: Make
+        model:
+          type: string
+          title: Model
+        year:
+          type: integer
+          title: Year
+        connection_status:
+          type: string
+          title: Connection Status
+        last_seen_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Seen At
+        vehicle_metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Vehicle Metadata
+      type: object
+      required:
+      - vehicle_id
+      - vin
+      - make
+      - model
+      - year
+      - connection_status
+      - last_seen_at
+      title: VehicleResponse
+      description: "Vehicle details response schema.\n\nReturned by GET /api/v1/vehicles and GET /api/v1/vehicles/{vehicle_id}\
+        \ endpoints.\n\nAttributes:\n    vehicle_id: UUID string identifier\n    vin: Vehicle Identification Number (17 characters)\n\
+        \    make: Vehicle manufacturer name\n    model: Vehicle model name\n    year: Vehicle manufacturing year\n    connection_status:\
+        \ Current connection status (connected, disconnected, error)\n    last_seen_at: Timestamp when vehicle was last seen\
+        \ (nullable)\n    metadata: Additional vehicle-specific attributes stored in JSONB (nullable)"
+    VehicleStatusResponse:
+      properties:
+        connection_status:
+          type: string
+          title: Connection Status
+        last_seen_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Seen At
+        health:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Health
+      type: object
+      required:
+      - connection_status
+      - last_seen_at
+      title: VehicleStatusResponse
+      description: "Vehicle status response schema.\n\nReturned by GET /api/v1/vehicles/{vehicle_id}/status endpoint.\nThis\
+        \ endpoint is optimized with Redis caching (TTL=30s).\n\nAttributes:\n    connection_status: Current connection status\
+        \ (connected, disconnected, error)\n    last_seen_at: Timestamp when vehicle was last seen (nullable)\n    health:\
+        \ Health metrics like signal strength, battery voltage (nullable)"
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from /api/v1/auth/login
