@@ -8,6 +8,7 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import Layout from './components/common/Layout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/VehiclesPage';
@@ -40,7 +41,9 @@ const App: React.FC = () => {
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <DashboardPage />
+            <Layout>
+              <DashboardPage />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -48,7 +51,9 @@ const App: React.FC = () => {
         path="/vehicles"
         element={
           <ProtectedRoute>
-            <VehiclesPage />
+            <Layout>
+              <VehiclesPage />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -56,7 +61,9 @@ const App: React.FC = () => {
         path="/commands"
         element={
           <ProtectedRoute>
-            <CommandPage />
+            <Layout>
+              <CommandPage />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -64,7 +71,9 @@ const App: React.FC = () => {
         path="/history"
         element={
           <ProtectedRoute>
-            <HistoryPage />
+            <Layout>
+              <HistoryPage />
+            </Layout>
           </ProtectedRoute>
         }
       />

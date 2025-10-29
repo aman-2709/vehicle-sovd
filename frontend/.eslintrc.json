@@ -58,5 +58,13 @@
     "dist",
     "node_modules",
     "vite.config.ts"
+  ],
+  "overrides": [
+    {
+      "files": ["tests/**/*.test.{ts,tsx}", "tests/**/*.spec.{ts,tsx}"],
+      "rules": {
+        "@typescript-eslint/no-unsafe-call": "off"
+      }
+    }
   ]
 }

@@ -10,24 +10,32 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I3.T7",
+  "task_id": "I3.T8",
   "iteration_id": "I3",
   "iteration_goal": "Real-Time WebSocket Communication & Frontend Foundation",
-  "description": "Create response viewer component `src/components/commands/ResponseViewer.tsx` that connects to WebSocket endpoint and displays real-time responses. Implement: 1) WebSocket client `src/api/websocket.ts` that connects to `/ws/responses/{command_id}?token={jwt}`, 2) Component receives command_id as prop, 3) On mount, establish WebSocket connection, 4) Listen for events: `response` (append to response list), `status` (update command status indicator), `error` (display error message), 5) Display responses in scrollable list (newest at bottom, auto-scroll), 6) Format response payload as JSON with syntax highlighting (use library like react-json-view), 7) Show connection status indicator (connected/disconnected), 8) Handle connection errors gracefully (retry with exponential backoff), 9) Clean up WebSocket connection on unmount. Integrate into CommandPage or create dedicated ResponsePage. Write component tests in `frontend/tests/components/ResponseViewer.test.tsx` using mock WebSocket.",
+  "description": "Implement common UI components and application layout. Create: 1) Header component `src/components/common/Header.tsx` with app title, user profile menu (displays username, logout button), navigation links (Dashboard, Vehicles, Commands, History), 2) Sidebar component `src/components/common/Sidebar.tsx` for navigation (alternative to header nav, can use MUI Drawer), 3) Main layout component `src/components/common/Layout.tsx` that wraps pages with header/sidebar and content area, 4) Error boundary `src/components/common/ErrorBoundary.tsx` to catch React errors and display fallback UI, 5) Loading spinner component `src/components/common/LoadingSpinner.tsx`, 6) Empty state component `src/components/common/EmptyState.tsx` (icon + message), 7) Implement logout functionality in header (call `/api/v1/auth/logout`, clear tokens, redirect to login). Update all page components to use Layout wrapper. Write component tests for header (logout functionality) and error boundary.",
   "agent_type_hint": "FrontendAgent",
-  "inputs": "Architecture Blueprint Section 3.7 (WebSocket Protocol); WebSocket implementation from I3.T1.",
+  "inputs": "Standard web app UX patterns; MUI component library documentation.",
   "target_files": [
-    "frontend/src/components/commands/ResponseViewer.tsx",
-    "frontend/src/api/websocket.ts",
-    "frontend/src/pages/ResponsePage.tsx",
-    "frontend/tests/components/ResponseViewer.test.tsx"
+    "frontend/src/components/common/Header.tsx",
+    "frontend/src/components/common/Sidebar.tsx",
+    "frontend/src/components/common/Layout.tsx",
+    "frontend/src/components/common/ErrorBoundary.tsx",
+    "frontend/src/components/common/LoadingSpinner.tsx",
+    "frontend/src/components/common/EmptyState.tsx",
+    "frontend/tests/components/Header.test.tsx",
+    "frontend/tests/components/ErrorBoundary.test.tsx"
   ],
   "input_files": [
-    "frontend/src/context/AuthContext.tsx"
+    "frontend/src/context/AuthContext.tsx",
+    "frontend/src/styles/theme.ts"
   ],
-  "deliverables": "WebSocket client module; response viewer component with real-time updates; connection status indicator; component tests.",
-  "acceptance_criteria": "Response viewer component connects to WebSocket on mount; JWT token included in WebSocket connection query parameter; Responses appear in real-time as they're received (verify by submitting ReadDTC command and seeing DTC chunks appear sequentially); Response payload displayed as formatted JSON (syntax highlighting); Command status updates when final response received (e.g., \"Completed\" badge); Error events displayed prominently (red alert/banner); Connection status indicator shows \"Connected\" when active, \"Disconnected\" on close; Auto-scrolls to newest response; WebSocket closed and cleaned up on component unmount (verify no memory leak); Component tests verify: connection establishment, event handling, error scenarios; No console errors (except expected WebSocket close on unmount); No linter errors",
-  "dependencies": ["I3.T1", "I3.T4"],
+  "deliverables": "Complete common component library; application layout with header/sidebar; error boundary; logout functionality; component tests.",
+  "acceptance_criteria": "All pages wrapped in Layout component (Header visible on all pages); Header displays username from auth context; Clicking logout button calls `/api/v1/auth/logout`, clears tokens, redirects to login; Navigation links in header/sidebar navigate correctly (Dashboard, Vehicles, Commands); Error boundary catches component errors and displays fallback UI (test by throwing error in child component); Loading spinner used in vehicle and command pages (consistent styling); Empty state component used when no data available (consistent messaging); Component tests verify: logout flow, navigation, error boundary behavior; UI consistent with MUI theme; No console errors; No linter errors",
+  "dependencies": [
+    "I3.T4",
+    "I2.T1"
+  ],
   "parallelizable": true,
   "done": false
 }
@@ -37,120 +45,108 @@ This is the full specification of the task you must complete.
 
 ## 2. Architectural & Planning Context
 
-The following are the relevant sections from the architecture and plan documents.
+The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: WebSocket Protocol Specification
+### Context: Technology Stack (from README.md)
 
-**WebSocket Endpoint**: `/ws/responses/{command_id}`
+```markdown
+## Technology Stack
 
-**Connection URL**: `ws://localhost:8000/ws/responses/{command_id}?token={jwt}`
+### Frontend
+- **Framework:** React 18 with TypeScript
+- **UI Library:** Material-UI (MUI)
+- **State Management:** React Query
+- **Build Tool:** Vite
+- **Code Quality:** ESLint, Prettier, TypeScript
 
-**Protocol Flow** (from backend/app/api/v1/websocket.py):
-1. Client connects with JWT token in query parameter
-2. Server validates token and accepts connection (or closes with WS_1008_POLICY_VIOLATION)
-3. Server subscribes to Redis Pub/Sub channel: `response:{command_id}`
-4. Server forwards all events from Redis to WebSocket client
-5. Connection closes when command completes, error occurs, or client disconnects
+### Backend
+- **Framework:** Python 3.11+ with FastAPI
+- **Server:** Uvicorn (ASGI)
+- **ORM:** SQLAlchemy 2.0
+- **Migrations:** Alembic
+- **Authentication:** JWT (python-jose, passlib)
+- **Code Quality:** Ruff, Black, mypy
 
-**Event Types** sent to client (JSON messages):
+### Infrastructure
+- **Database:** PostgreSQL 15+
+- **Cache/Messaging:** Redis 7
+- **Vehicle Communication:** gRPC (primary), WebSocket (fallback)
+- **API Gateway:** Nginx (production)
+- **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
+- **CI/CD:** GitHub Actions
+- **Monitoring:** Prometheus + Grafana, structlog
+- **Tracing:** OpenTelemetry + Jaeger
 
-1. **Response Event** (streaming data chunks):
-   ```json
-   {
-     "event": "response",
-     "command_id": "uuid-string",
-     "response": {
-       "dtcCode": "P0420",
-       "description": "Catalyst System Efficiency Below Threshold"
-     },
-     "sequence_number": 1
-   }
-   ```
-
-2. **Status Event** (command completion):
-   ```json
-   {
-     "event": "status",
-     "command_id": "uuid-string",
-     "status": "completed",
-     "completed_at": "2025-10-28T12:34:56Z"
-   }
-   ```
-
-3. **Error Event** (execution failure):
-   ```json
-   {
-     "event": "error",
-     "command_id": "uuid-string",
-     "error_message": "Vehicle connection timeout"
-   }
-   ```
-
-### Context: Backend WebSocket Implementation Details
-
-From **backend/app/api/v1/websocket.py** (lines 238-366):
-
-**Authentication**:
-- JWT token passed via query parameter `?token={jwt}`
-- Server validates token and fetches user from database
-- Rejects with WS_1008_POLICY_VIOLATION if token missing, invalid, or user inactive
-- Logs all auth events with structlog
-
-**Connection Lifecycle**:
-- Server accepts WebSocket connection first (line 277)
-- Authenticates user (lines 286-289)
-- Registers connection with websocket_manager (line 299)
-- Creates Redis client for Pub/Sub (lines 302-304)
-- Spawns two async tasks (lines 310-315):
-  - `redis_listener`: Listens to Redis and forwards events to client
-  - `websocket_receiver`: Detects client disconnection
-- Uses `asyncio.wait` with FIRST_COMPLETED to handle either task finishing
-- Cleanup: unsubscribes from Redis, closes connections, logs closure
-
-**Event Processing** (redis_listener, lines 135-170):
-- Subscribes to channel `response:{command_id}`
-- Parses JSON messages from Redis
-- Forwards to WebSocket client via `websocket.send_json(event_data)`
-- Auto-stops listening after "status:completed" or "error" events
-- Handles JSON decode errors and WebSocket send failures
-
-### Context: Response Data Format
-
-From **backend/app/schemas/response.py**:
-
-**ResponseDetail Schema**:
-```python
-response_id: UUID
-command_id: UUID
-response_payload: dict[str, Any]  # Arbitrary JSON data from vehicle
-sequence_number: int              # Incrementing number for ordering
-is_final: bool                    # True for last chunk
-received_at: datetime
+### Testing
+- **Backend:** pytest, pytest-asyncio, httpx
+- **Frontend:** Vitest, React Testing Library
+- **E2E:** Playwright
 ```
 
-**Mock Vehicle Response Examples** (from connector):
-- **ReadDTC**: `{"dtcCode": "P0420", "description": "..."}`
-- **ClearDTC**: `{"success": true, "cleared_count": 2}`
-- **ReadDataByID**: `{"dataId": "0x1234", "value": "..."}`
+### Context: Authentication API Endpoints (from docs/api/README.md)
 
-Responses are streamed in 2-3 chunks with ~0.5s intervals between chunks.
+```markdown
+### Authentication Endpoints
 
-### Context: Frontend Authentication Integration
+All API endpoints (except `/health` and `/`) require JWT authentication.
 
-From **frontend/src/context/AuthContext.tsx**:
+- `POST /api/v1/auth/login` - Authenticate and get tokens
+- `POST /api/v1/auth/refresh` - Refresh access token
+- `POST /api/v1/auth/logout` - Invalidate refresh tokens
+- `GET /api/v1/auth/me` - Get current user profile
 
-**Token Management**:
-- Access token stored in memory (via `setAccessToken()` in api/client.ts)
-- Access token retrievable via `getAccessToken()` export
-- JWT expires in 15 minutes, auto-refreshes on 401
+## Authentication
 
-**Usage Pattern**:
-```typescript
-import { getAccessToken } from '../api/client';
+The API uses **JWT Bearer token authentication**:
 
-// In component
-const token = getAccessToken();
-const wsUrl = `ws://localhost:8000/ws/responses/${commandId}?token=${token}`;
+1. **Login**: Send credentials to `POST /api/v1/auth/login`
+   ```json
+   {
+     "username": "engineer1",
+     "password": "your_password"
+   }
+   ```
+
+2. **Receive tokens**:
+   ```json
+   {
+     "access_token": "eyJhbGc...",
+     "refresh_token": "eyJhbGc...",
+     "expires_in": 900
+   }
+   ```
+
+3. **Use access token**: Include in all requests:
+   ```
+   Authorization: Bearer eyJhbGc...
+   ```
+
+4. **Token expiration**:
+   - Access tokens expire in 15 minutes
+   - Refresh tokens expire in 7 days
+   - Use `POST /api/v1/auth/refresh` to get a new access token
+
+## Logout
+
+Call `POST /api/v1/auth/logout` to invalidate the current refresh token. This ensures the user cannot use the refresh token to obtain new access tokens.
+```
+
+### Context: Project Goals (from README.md)
+
+```markdown
+## Goals
+
+- User authentication and role-based access control (Engineer, Admin roles)
+- Vehicle registry with connection status monitoring
+- SOVD command submission with parameter validation
+- Real-time response streaming via WebSocket
+- Command history and audit logging
+- <2 second round-trip time for 95% of commands
+- Support for 100+ concurrent users
+- Secure communication (TLS, JWT, RBAC)
+- Docker-based deployment ready for cloud platforms (AWS/GCP/Azure)
+- 80%+ test coverage with CI/CD pipeline
+- OpenAPI/Swagger documentation for all backend APIs
 ```
 
 ---
@@ -161,232 +157,251 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `backend/app/api/v1/websocket.py` (lines 238-366)
-    *   **Summary:** Complete WebSocket server implementation with JWT auth, Redis Pub/Sub integration, dual-task async coordination, and comprehensive error handling.
-    *   **Recommendation:** Study lines 135-170 (redis_listener) to understand the exact event format you'll receive. Note that events are already JSON-parsed objects when sent via `websocket.send_json()`.
-    *   **Key Insight:** WebSocket closes automatically after receiving "status:completed" or "error" event. Your client MUST handle this graceful closure.
+*   **File:** `frontend/src/context/AuthContext.tsx`
+    *   **Summary:** This file implements the authentication context provider that manages JWT tokens and authentication state. It stores the access token in memory and refresh token in localStorage.
+    *   **Recommendation:** You MUST import and use the `useAuth()` hook from this file in your Header component to:
+        - Access the current user profile (`user` object with `username` and `role`)
+        - Access the `isAuthenticated` boolean state
+        - Call the `logout()` function when the logout button is clicked
+    *   **Key Methods:**
+        - `login()`: Authenticates user and stores tokens
+        - `logout()`: Calls `/api/v1/auth/logout` API, clears tokens from memory and localStorage, resets state
+        - `user`: Contains `{ user_id, username, role }` from the profile
+        - `isAuthenticated`: Boolean indicating if user is logged in
 
-*   **File:** `frontend/src/api/client.ts` (lines 55-61)
-    *   **Summary:** Exports `getAccessToken()` function to retrieve current JWT from memory.
-    *   **Recommendation:** You MUST use this function to get the token for WebSocket authentication. DO NOT access localStorage directly.
-    *   **Example:**
-        ```typescript
-        import { getAccessToken } from '../api/client';
-        const token = getAccessToken();
+*   **File:** `frontend/src/styles/theme.ts`
+    *   **Summary:** This file exports the MUI theme configuration with an automotive-inspired color scheme. It defines primary colors (blue), secondary colors (dark gray), and component style overrides.
+    *   **Recommendation:** You MUST use this theme in your components. All new components should follow the established color scheme:
+        - Primary color: `#1976d2` (deep blue)
+        - Secondary color: `#424242` (dark gray)
+        - Success: `#2e7d32` (green)
+        - Error: `#d32f2f` (red)
+        - Warning: `#ed6c02` (orange)
+        - Background: `#f5f5f5` (light gray)
+    *   **Typography:** Buttons use `textTransform: 'none'` (no uppercase), font weights are 500 for headings
+    *   **Border Radius:** Default is 4px for all components
+
+*   **File:** `frontend/src/App.tsx`
+    *   **Summary:** This is the main application component with React Router route definitions. It currently renders routes directly without a layout wrapper.
+    *   **Recommendation:** You MUST update this file to wrap all protected routes with your new `Layout` component. The current structure has routes for:
+        - `/` - Redirects to dashboard or login based on auth state
+        - `/login` - Public login page (should NOT have layout)
+        - `/dashboard`, `/vehicles`, `/commands`, `/history` - Protected routes (SHOULD be wrapped in Layout)
+    *   **Pattern to Follow:** Wrap the `<ProtectedRoute>` children with your `<Layout>` component like this:
+        ```tsx
+        <ProtectedRoute>
+          <Layout>
+            <DashboardPage />
+          </Layout>
+        </ProtectedRoute>
         ```
 
-*   **File:** `frontend/src/context/AuthContext.tsx` (lines 122-140)
-    *   **Summary:** Provides authentication state via `useAuth()` hook.
-    *   **Recommendation:** You CAN use `const { isAuthenticated } = useAuth()` to check auth state before connecting, but getting the actual token requires `getAccessToken()` from api/client.ts.
+*   **File:** `frontend/src/pages/VehiclesPage.tsx`
+    *   **Summary:** Example of a current page implementation. It has its own container and header, which will be replaced by the Layout component.
+    *   **Recommendation:** After you implement the Layout component, you SHOULD remove the redundant `<Box sx={{ minHeight: '100vh', bgcolor: 'background.default', py: 4 }}>` wrapper from all pages. The Layout component will provide this.
+    *   **Current Pattern:** Pages currently have their own page-level Box with padding and background color. Your Layout component should provide this so pages can just render their content.
 
-*   **File:** `frontend/src/pages/VehiclesPage.tsx` (lines 1-110)
-    *   **Summary:** Example page component using React Query, useState, MUI components, and child component integration.
-    *   **Recommendation:** Use this as your TEMPLATE for ResponsePage.tsx structure:
-        - React Query for initial data fetching (command details)
-        - useState for component state (connection status, responses)
-        - MUI Container, Paper, Typography for layout
-        - Pass props to child component (ResponseViewer)
+*   **File:** `frontend/src/pages/DashboardPage.tsx`
+    *   **Summary:** The dashboard page currently implements its own logout button and navigation. This demonstrates the logout pattern you need to implement in the Header.
+    *   **Recommendation:** You SHOULD follow the same logout pattern from this file:
+        ```tsx
+        const { logout } = useAuth();
+        const navigate = useNavigate();
 
-*   **File:** `frontend/src/components/vehicles/VehicleList.tsx` (lines 1-100)
-    *   **Summary:** Presentational component with loading/error/empty states, TypeScript interface for props, MUI components.
-    *   **Recommendation:** Follow this PATTERN for ResponseViewer:
-        - Clear TypeScript interface for props (commandId, onStatusChange?, etc.)
-        - Separate handling of loading, error, empty states
-        - Consistent MUI component usage (Box, Typography, Alert, Chip)
-
-*   **File:** `frontend/src/types/command.ts` (lines 49-63)
-    *   **Summary:** TypeScript interfaces matching backend schemas. CommandResponse includes command_id, status, etc.
-    *   **Recommendation:** Create `frontend/src/types/response.ts` for WebSocket event types. Define interfaces for ResponseEvent, StatusEvent, ErrorEvent matching the JSON formats documented in Section 2.
-
-*   **File:** `frontend/src/pages/CommandPage.tsx` (lines 1-141)
-    *   **Summary:** Complete page with vehicle selector, command form, React Query mutation, success/error handling.
-    *   **Recommendation:** You will need to MODIFY this file to integrate ResponseViewer. After successful command submission (line 32-34), either:
-        - Option A: Navigate to ResponsePage with command_id
-        - Option B: Show ResponseViewer inline on same page
-
-*   **File:** `frontend/package.json`
-    *   **Summary:** Current dependencies include React 18, MUI 5, React Query, axios.
-    *   **Recommendation:** You MUST install `react-json-view` for JSON syntax highlighting:
-        ```bash
-        cd frontend && npm install react-json-view
+        const handleLogout = () => {
+          void (async () => {
+            await logout();
+            navigate('/login', { replace: true });
+          })();
+        };
         ```
-    *   **Note:** Check if @types/react-json-view is needed (may be bundled).
+    *   **Note:** After implementing the Header with logout, you can remove the standalone logout button from DashboardPage since it will be in the header.
+
+*   **File:** `frontend/src/api/client.ts`
+    *   **Summary:** This file exports the API client with axios configured for JWT authentication and token refresh. It exports specialized API objects like `authAPI`, `vehicleAPI`, `commandAPI`.
+    *   **Recommendation:** The `authAPI.logout()` function is already implemented and available. You MUST use this in your Header logout handler. The function signature is:
+        ```tsx
+        authAPI.logout(): Promise<LogoutResponse>
+        ```
+    *   **Important:** The AuthContext's `logout()` method already calls `authAPI.logout()` internally, so you just need to call `logout()` from the auth context.
 
 ### Implementation Tips & Notes
 
-*   **CRITICAL - Missing Dependency:** The task requires `react-json-view` for JSON formatting. You MUST install it:
-    ```bash
-    cd frontend && npm install react-json-view @types/react-json-view
+*   **Tip - MUI Drawer for Sidebar:** I recommend using MUI's `Drawer` component for the sidebar. Since this is a desktop-focused application, you can use a permanent drawer that's always visible. Example structure:
+    ```tsx
+    import { Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
     ```
+    Consider making it 240px wide (MUI standard) with a light background.
 
-*   **Tip - WebSocket Base URL:** Use environment variable or derive from API base URL:
-    ```typescript
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-    const WS_BASE_URL = API_BASE_URL.replace('http', 'ws'); // ws://localhost:8000
+*   **Tip - Header Structure:** The Header should use MUI's `AppBar` component with `Toolbar`. Position it at the top with `position="sticky"` or `position="fixed"`. Include:
+    1. App title on the left
+    2. Navigation links in the center (using MUI `Tabs` or `Button` components)
+    3. User profile menu on the right (using MUI `Menu` component with `IconButton` trigger)
+
+*   **Tip - Navigation Links:** Use React Router's `useNavigate()` hook for navigation. The routes you need to link to are:
+    - Dashboard: `/dashboard`
+    - Vehicles: `/vehicles`
+    - Commands: `/commands`
+    - History: `/history`
+    Use React Router's `useLocation()` hook to highlight the active link.
+
+*   **Tip - Error Boundary Implementation:** React Error Boundaries must be class components (not functional components). Use the following pattern:
+    ```tsx
+    class ErrorBoundary extends React.Component<Props, State> {
+      static getDerivedStateFromError(error: Error) { ... }
+      componentDidCatch(error: Error, errorInfo: ErrorInfo) { ... }
+      render() { ... }
+    }
     ```
+    Display a fallback UI with a "Reload Page" button when an error is caught.
 
-*   **Tip - Auto-Scroll Implementation:** Use a ref to scroll to bottom when new responses arrive:
-    ```typescript
-    const responseEndRef = useRef<HTMLDivElement>(null);
+*   **Tip - LoadingSpinner Component:** Create a simple reusable spinner using MUI's `CircularProgress`. Accept optional `size` and `message` props. Center it in the container with flexbox. This will be used in pages during data fetching.
 
-    useEffect(() => {
-      responseEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [responses]);
-    ```
+*   **Tip - EmptyState Component:** Create a component that displays an icon (from `@mui/icons-material`), a title, and an optional message. Use MUI's `Box` and `Typography`. Accept props for `icon`, `title`, `message`. This will be used when lists are empty.
 
-*   **Tip - Reconnection with Exponential Backoff:** Implement retry logic:
-    ```typescript
-    const [retryCount, setRetryCount] = useState(0);
-    const delay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Max 30s
-
-    setTimeout(() => connectWebSocket(), delay);
-    ```
-    Limit retries to 5 attempts to avoid infinite loops.
-
-*   **Tip - Connection Status State:** Use enum for clarity:
-    ```typescript
-    type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
-    const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
-    ```
-
-*   **Tip - Event Type Discrimination:** Use type guards for event handling:
-    ```typescript
-    interface ResponseEvent { event: 'response'; command_id: string; response: any; sequence_number: number; }
-    interface StatusEvent { event: 'status'; command_id: string; status: string; completed_at?: string; }
-    interface ErrorEvent { event: 'error'; command_id: string; error_message: string; }
-    type WebSocketEvent = ResponseEvent | StatusEvent | ErrorEvent;
-
-    const handleMessage = (event: WebSocketEvent) => {
-      if (event.event === 'response') { /* ... */ }
-      else if (event.event === 'status') { /* ... */ }
-      else if (event.event === 'error') { /* ... */ }
+*   **Warning - Layout Component:** The Layout component should accept `children` as a prop and render the page content in a main content area. DO NOT hardcode specific pages in the Layout. Use this pattern:
+    ```tsx
+    const Layout: React.FC<{ children: ReactNode }> = ({ children }) => {
+      return (
+        <Box sx={{ display: 'flex' }}>
+          <Sidebar />
+          <Box sx={{ flexGrow: 1 }}>
+            <Header />
+            <Box component="main" sx={{ p: 3 }}>
+              {children}
+            </Box>
+          </Box>
+        </Box>
+      );
     };
     ```
 
-*   **Tip - Cleanup on Unmount:** Use useEffect cleanup function:
-    ```typescript
-    useEffect(() => {
-      const ws = connectWebSocket();
-      return () => {
-        ws?.close();
-      };
-    }, [commandId]);
+*   **Warning - Testing with Vitest:** When writing component tests, you MUST mock the `useAuth` hook since it depends on AuthContext. Example:
+    ```tsx
+    import { vi } from 'vitest';
+    import * as AuthContext from '../context/AuthContext';
+
+    vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
+      isAuthenticated: true,
+      user: { user_id: '1', username: 'testuser', role: 'engineer' },
+      logout: vi.fn(),
+      // ... other required properties
+    });
     ```
 
-*   **Warning - WebSocket Close Events:** Normal closure (code 1000) is expected. Only log errors for unexpected codes (1006, 1008).
+*   **Warning - React Router in Tests:** You MUST wrap components that use React Router hooks (`useNavigate`, `useLocation`) in a `MemoryRouter` when testing:
+    ```tsx
+    import { MemoryRouter } from 'react-router-dom';
 
-*   **Warning - Multiple Re-renders:** Be careful with state updates in WebSocket message handlers. Batch updates or use useReducer if state becomes complex.
-
-*   **Note - react-json-view Usage:**
-    ```typescript
-    import ReactJson from 'react-json-view';
-
-    <ReactJson
-      src={response.response}
-      theme="monokai"
-      collapsed={false}
-      displayDataTypes={false}
-      displayObjectSize={false}
-    />
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Header />
+      </MemoryRouter>
+    );
     ```
 
-*   **Note - Integration with CommandPage:** After successful command submission, you have two options:
-    1. **Navigate to ResponsePage**: Use React Router navigate
-    2. **Inline display**: Conditionally render ResponseViewer in CommandPage
+*   **Note - Responsive Design:** While the primary focus is desktop, ensure the layout is reasonably responsive. Consider using MUI's responsive drawer (temporary drawer on mobile) if time permits, but a simple permanent drawer is acceptable for the MVP.
 
-    For MVP simplicity, I recommend Option 2 (inline).
-
-*   **Note - Test Mocking Strategy:** For tests, mock WebSocket constructor:
-    ```typescript
-    const mockWebSocket = {
-      send: vi.fn(),
-      close: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    };
-    global.WebSocket = vi.fn(() => mockWebSocket) as any;
+*   **Note - Accessibility:** Use semantic HTML elements (`<nav>`, `<header>`, `<main>`) and ensure all interactive elements have proper ARIA labels. MUI components generally handle this well, but add labels to IconButtons:
+    ```tsx
+    <IconButton aria-label="User menu" onClick={handleMenuOpen}>
+      <AccountCircle />
+    </IconButton>
     ```
 
-### Key Files You Will Create/Modify
+*   **Note - Code Organization:** The `frontend/src/components/common/` directory currently exists but is empty. This is the correct location for all your new common components. Maintain consistent file naming (PascalCase for component files).
 
-1. **CREATE** `frontend/src/types/response.ts` - WebSocket event type definitions
-2. **CREATE** `frontend/src/api/websocket.ts` - WebSocket client connection manager
-3. **CREATE** `frontend/src/components/commands/ResponseViewer.tsx` - Main viewer component
-4. **CREATE** `frontend/src/pages/ResponsePage.tsx` - Dedicated page for viewing responses
-5. **MODIFY** `frontend/src/pages/CommandPage.tsx` - Integrate ResponseViewer after submission
-6. **CREATE** `frontend/tests/components/ResponseViewer.test.tsx` - Component test suite
-7. **MODIFY** `frontend/package.json` - Add react-json-view dependency
+### Project File Structure Reference
 
-### Recommended Implementation Order
+```
+frontend/src/
+├── api/
+│   ├── client.ts          (API client with JWT auth - USE authAPI from here)
+│   └── websocket.ts       (WebSocket client)
+├── components/
+│   ├── auth/
+│   │   └── ProtectedRoute.tsx
+│   ├── commands/
+│   │   ├── CommandForm.tsx
+│   │   └── ResponseViewer.tsx
+│   ├── vehicles/
+│   │   ├── VehicleList.tsx
+│   │   └── VehicleSelector.tsx
+│   └── common/            (YOUR NEW COMPONENTS GO HERE)
+│       ├── Header.tsx     (TO CREATE)
+│       ├── Sidebar.tsx    (TO CREATE)
+│       ├── Layout.tsx     (TO CREATE)
+│       ├── ErrorBoundary.tsx (TO CREATE)
+│       ├── LoadingSpinner.tsx (TO CREATE)
+│       └── EmptyState.tsx (TO CREATE)
+├── context/
+│   └── AuthContext.tsx    (USE useAuth() hook from here)
+├── pages/
+│   ├── LoginPage.tsx      (DO NOT wrap with Layout)
+│   ├── DashboardPage.tsx  (WRAP with Layout - see handleLogout pattern)
+│   ├── VehiclesPage.tsx   (WRAP with Layout - remove page-level wrapper)
+│   ├── CommandPage.tsx    (WRAP with Layout)
+│   └── HistoryPage.tsx    (WRAP with Layout)
+├── styles/
+│   └── theme.ts           (USE this MUI theme)
+├── types/
+│   ├── auth.ts            (UserProfile type is here)
+│   ├── command.ts
+│   ├── response.ts
+│   └── vehicle.ts
+├── App.tsx                (UPDATE to use Layout wrapper)
+└── main.tsx               (Entry point with theme provider)
+```
 
-1. **Install dependencies**: `cd frontend && npm install react-json-view @types/react-json-view`
-2. **Create** `frontend/src/types/response.ts` (event type definitions)
-3. **Create** `frontend/src/api/websocket.ts` (connection logic with retry)
-4. **Create** `frontend/src/components/commands/ResponseViewer.tsx` (component skeleton with connection status)
-5. **Test WebSocket connection** (manual testing with browser console)
-6. **Add event handling** (response/status/error events)
-7. **Add response list rendering** (with react-json-view)
-8. **Add auto-scroll** (ref-based scrolling)
-9. **Add error handling and retry logic** (exponential backoff)
-10. **Create** `frontend/src/pages/ResponsePage.tsx` (optional dedicated page)
-11. **Modify** `frontend/src/pages/CommandPage.tsx` (integrate ResponseViewer)
-12. **Create** `frontend/tests/components/ResponseViewer.test.tsx` (comprehensive tests)
-13. **Manual E2E testing** (submit ReadDTC, verify streaming)
+### Testing Strategy
+
+1. **Header Component Tests** (`frontend/tests/components/Header.test.tsx`):
+   - Test that username is displayed from auth context
+   - Test logout button click calls `logout()` and navigates to `/login`
+   - Test navigation links render and navigate correctly
+   - Test user menu opens and closes
+   - Mock `useAuth` and `useNavigate` hooks
+
+2. **ErrorBoundary Component Tests** (`frontend/tests/components/ErrorBoundary.test.tsx`):
+   - Test that normal children render without errors
+   - Test that fallback UI displays when child throws error
+   - Test that error is logged to console
+   - Create a test component that throws an error on render
+   - Test reload button functionality (should call `window.location.reload()`)
+
+3. **Integration Testing:**
+   - After wrapping pages with Layout, ensure all pages still render correctly
+   - Test navigation flow between pages
+   - Test that logout from any page redirects to login
 
 ### Acceptance Criteria Checklist
 
-- [ ] ResponseViewer component connects to WebSocket on mount
-- [ ] JWT token included in WebSocket URL query parameter
-- [ ] Responses appear in real-time (verify with ReadDTC command)
-- [ ] Response payloads displayed as formatted JSON with syntax highlighting
-- [ ] Command status updates when final response received (badge/chip indicator)
-- [ ] Error events displayed prominently (MUI Alert with severity="error")
-- [ ] Connection status indicator visible (Chip: green=connected, red=disconnected)
-- [ ] Auto-scrolls to newest response
-- [ ] WebSocket closed on component unmount (cleanup verified)
-- [ ] Component tests verify: connection, event handling, errors
-- [ ] No console errors (except expected close on unmount)
-- [ ] No linter errors
+Use this checklist to verify your implementation meets all requirements:
 
-### WebSocket Connection Example
+- [ ] Header component created with app title
+- [ ] Header displays username from `useAuth().user.username`
+- [ ] Header has user profile menu with logout button
+- [ ] Header has navigation links (Dashboard, Vehicles, Commands, History)
+- [ ] Navigation links use React Router and highlight active route
+- [ ] Logout button calls `POST /api/v1/auth/logout` via authContext.logout()
+- [ ] Logout clears tokens and redirects to `/login`
+- [ ] Sidebar component created with navigation (can be simpler version of header nav)
+- [ ] Layout component created that wraps Header + Sidebar + children
+- [ ] All protected routes in App.tsx wrapped with Layout
+- [ ] Login page NOT wrapped with Layout (remains standalone)
+- [ ] ErrorBoundary component catches React errors and displays fallback UI
+- [ ] LoadingSpinner component created and styled consistently
+- [ ] EmptyState component created with icon + message
+- [ ] Component tests written for Header (logout, navigation)
+- [ ] Component tests written for ErrorBoundary (error catching, fallback)
+- [ ] All tests pass (`npm run test` or `vitest`)
+- [ ] No linter errors (`npm run lint`)
+- [ ] No console errors in browser when running app
+- [ ] UI consistent with MUI theme from `theme.ts`
+- [ ] Layout is responsive (at minimum, works on desktop)
 
-Here's a reference implementation snippet for the WebSocket client:
+---
 
-```typescript
-// src/api/websocket.ts
-export const createWebSocketConnection = (
-  commandId: string,
-  token: string,
-  onMessage: (event: WebSocketEvent) => void,
-  onStatusChange: (status: ConnectionStatus) => void
-): WebSocket => {
-  const wsBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace('http', 'ws');
-  const url = `${wsBaseUrl}/ws/responses/${commandId}?token=${token}`;
+**END OF TASK BRIEFING PACKAGE**
 
-  const ws = new WebSocket(url);
-
-  ws.onopen = () => {
-    console.log('WebSocket connected:', commandId);
-    onStatusChange('connected');
-  };
-
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
-    onStatusChange('error');
-  };
-
-  ws.onclose = (event) => {
-    console.log('WebSocket closed:', event.code, event.reason);
-    onStatusChange('disconnected');
-  };
-
-  return ws;
-};
-```
-
-Good luck! Follow the patterns from VehicleList and CommandPage, and the implementation will be straightforward. The WebSocket server is fully functional and tested, so focus on client-side event handling and UI presentation.
+You now have all the context, guidance, and references needed to complete Task I3.T8. Please implement the common UI components and layout as specified, following the patterns and recommendations above.
