@@ -227,7 +227,7 @@ async def execute_command(
             )
 
         # Publish response event to Redis Pub/Sub
-        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
         try:
             channel = f"response:{command_id}"
             event_data = {
