@@ -1,19 +1,30 @@
 /**
  * SOVD Command WebApp - Frontend Entry Point
  *
- * This is a minimal placeholder for the React application.
- * The full implementation will be added in task I1.T7.
+ * Sets up React application with routing, authentication, and theming.
  */
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 import App from './App';
+import { AuthProvider } from './context/AuthContext';
+import theme from './styles/theme';
 
 // Mount the React application to the root element
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
 root.render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ThemeProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );

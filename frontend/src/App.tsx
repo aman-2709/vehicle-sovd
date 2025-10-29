@@ -1,46 +1,78 @@
 /**
  * SOVD Command WebApp - Main Application Component
  *
- * This is a minimal placeholder component.
- * The full implementation with routing, authentication, and UI components
- * will be added in task I1.T7.
+ * Root component with React Router route definitions.
  */
 
-function App() {
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
+import ProtectedRoute from './components/auth/ProtectedRoute';
+import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import VehiclesPage from './pages/VehiclesPage';
+import CommandsPage from './pages/CommandsPage';
+import HistoryPage from './pages/HistoryPage';
+
+const App: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // Don't render routes until auth state is determined
+  if (isLoading) {
+    return null;
+  }
+
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        flexDirection: 'column',
-        gap: '20px',
-      }}
-    >
-      <h1>SOVD Command WebApp</h1>
-      <p>Frontend Development Server Running</p>
-      <p style={{ fontSize: '14px', color: '#666' }}>Hot Module Replacement (HMR) is enabled</p>
-      <div
-        style={{
-          padding: '20px',
-          backgroundColor: '#f5f5f5',
-          borderRadius: '8px',
-          maxWidth: '500px',
-        }}
-      >
-        <h3>Status</h3>
-        <ul style={{ textAlign: 'left' }}>
-          <li>Frontend: ✅ Running on port 3000</li>
-          <li>Backend: Check http://localhost:8000/health</li>
-          <li>Database: Check docker-compose ps</li>
-          <li>Redis: Check docker-compose ps</li>
-        </ul>
-      </div>
-      <p style={{ fontSize: '12px', color: '#999' }}>Full UI implementation coming in task I1.T7</p>
-    </div>
+    <Routes>
+      {/* Root path redirects based on authentication */}
+      <Route
+        path="/"
+        element={
+          isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
+        }
+      />
+
+      {/* Public routes */}
+      <Route path="/login" element={<LoginPage />} />
+
+      {/* Protected routes */}
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vehicles"
+        element={
+          <ProtectedRoute>
+            <VehiclesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/commands"
+        element={
+          <ProtectedRoute>
+            <CommandsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/history"
+        element={
+          <ProtectedRoute>
+            <HistoryPage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Catch-all redirect */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
-}
+};
 
 export default App;
