@@ -19,11 +19,13 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies required for PostgreSQL and other Python packages
 # - postgresql-client: For pg_isready and psql CLI tools
 # - gcc, python3-dev, musl-dev: For compiling Python packages with C extensions
+# - curl: For Docker health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     gcc \
     python3-dev \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

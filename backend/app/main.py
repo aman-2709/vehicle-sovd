@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from app.api import health
 from app.api.v1 import auth, commands, vehicles, websocket
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.utils.logging import configure_logging
@@ -44,6 +45,7 @@ app.add_middleware(
 )
 
 # Register API routers
+app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(vehicles.router, prefix="/api/v1", tags=["vehicles"])
 app.include_router(commands.router, prefix="/api/v1", tags=["commands"])

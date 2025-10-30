@@ -10,24 +10,27 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T2",
+  "task_id": "I4.T4",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Integrate Prometheus metrics into backend using prometheus-fastapi-instrumentator. Add custom metrics: commands_executed_total, command_execution_duration_seconds, websocket_connections_active, vehicle_connections_active. Expose /metrics endpoint. Add Prometheus to docker-compose.",
+  "description": "Implement health check endpoints: GET /health/live (liveness), GET /health/ready (readiness with db/redis checks). Add health service to check dependencies. Configure docker-compose healthcheck. Write integration tests.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.8 (Monitoring - Metrics).",
+  "inputs": "Architecture Blueprint Section 3.8 (Health Checks); Kubernetes best practices.",
   "target_files": [
-    "backend/app/utils/metrics.py",
+    "backend/app/api/health.py",
+    "backend/app/services/health_service.py",
     "backend/app/main.py",
-    "backend/app/services/command_service.py",
-    "infrastructure/docker/prometheus.yml",
     "docker-compose.yml",
-    "README.md"
+    "backend/tests/integration/test_health.py"
   ],
-  "input_files": ["backend/app/main.py"],
-  "deliverables": "Prometheus metrics exporter with custom SOVD metrics; Prometheus server in docker-compose; documentation.",
-  "acceptance_criteria": "GET /metrics returns Prometheus metrics; HTTP and custom metrics present; Metrics update correctly; Prometheus accessible at :9090; Successfully scrapes backend; README documents access; No errors",
-  "dependencies": ["I2.T1"],
+  "input_files": [
+    "backend/app/database.py"
+  ],
+  "deliverables": "Liveness/readiness health check endpoints; health service; docker-compose healthchecks; tests.",
+  "acceptance_criteria": "/health/live returns 200; /health/ready returns 200 when healthy, 503 when dependencies fail; Docker healthcheck uses /health/ready; Tests verify both endpoints; Coverage ≥80%; No errors",
+  "dependencies": [
+    "I1.T10"
+  ],
   "parallelizable": true,
   "done": false
 }
@@ -39,131 +42,65 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Logging & Monitoring (from 05_Operational_Architecture.md)
+### Context: Kubernetes Health Check Best Practices
 
-```markdown
-<!-- anchor: logging-monitoring -->
-#### Logging & Monitoring
+According to Kubernetes best practices, health checks should be implemented with two distinct endpoints:
 
-<!-- anchor: logging-strategy -->
-**Logging Strategy: Structured Logging with Correlation**
+1. **Liveness Probe (`/health/live`)**: Indicates if the application is running. If this check fails, Kubernetes will restart the container. This should be a simple check that doesn't verify external dependencies.
 
-**Framework:** `structlog` (Python) for structured, JSON-formatted logs
+2. **Readiness Probe (`/health/ready`)**: Indicates if the application is ready to serve traffic. If this check fails, Kubernetes will stop routing traffic to the pod. This should verify external dependencies like database and Redis connections.
 
-**Log Levels:**
-- **DEBUG**: Detailed diagnostic info (disabled in production)
-- **INFO**: General informational messages (command execution, API calls)
-- **WARNING**: Unexpected but handled situations (vehicle timeout, retry attempts)
-- **ERROR**: Errors requiring attention (failed commands, database errors)
-- **CRITICAL**: System-level failures (database connection lost, service crash)
+**Key Principles:**
+- Liveness checks should be lightweight and fast (< 1 second)
+- Liveness should NOT check external dependencies (to avoid cascading failures)
+- Readiness checks can be more thorough and check external dependencies
+- Health endpoints should return appropriate HTTP status codes (200 for healthy, 503 for unhealthy)
+- Health endpoints should include meaningful response bodies with status details
 
-**Structured Log Format:**
-```json
-{
-  "timestamp": "2025-10-28T10:00:01.234Z",
-  "level": "INFO",
-  "logger": "sovd.command_service",
-  "event": "command_executed",
-  "correlation_id": "uuid",
-  "user_id": "uuid",
-  "vehicle_id": "uuid",
-  "command_id": "uuid",
-  "command_name": "ReadDTC",
-  "duration_ms": 1234,
-  "status": "completed"
-}
+### Context: Docker Compose Health Checks
+
+Docker Compose healthchecks follow this format:
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
 ```
 
-**Correlation IDs:**
-- Generated for each API request (X-Request-ID header)
-- Propagated through all services (database queries, vehicle communication)
-- Enables end-to-end request tracing in logs
+The `start_period` gives the application time to initialize before health checks start failing.
 
-**Log Destinations:**
-- **Development**: Console output (pretty-printed for readability)
-- **Production**:
-  - AWS CloudWatch Logs (primary, searchable, alerting)
-  - ELK Stack (Elasticsearch, Logstash, Kibana) for advanced analytics (optional)
+### Context: FastAPI Health Check Implementation Pattern
 
-**Log Retention:**
-- Application logs: 30 days
-- Audit logs: 7 years (compliance requirement for automotive industry)
+FastAPI health checks are typically implemented as simple GET endpoints that:
+1. Return JSON responses with status information
+2. Set appropriate HTTP status codes (200, 503)
+3. Are lightweight and fast
+4. Can optionally check external service connectivity
+
+Example structure:
+```python
+@app.get("/health/live")
+async def liveness():
+    return {"status": "ok"}
+
+@app.get("/health/ready")
+async def readiness():
+    # Check database, Redis, etc.
+    if not all_services_healthy:
+        raise HTTPException(status_code=503, detail="Service unavailable")
+    return {"status": "ready", "checks": {...}}
 ```
 
-### Context: Monitoring Strategy - Metrics & Alerting (from 05_Operational_Architecture.md)
+### Context: Existing Project Monitoring Infrastructure
 
-```markdown
-<!-- anchor: monitoring-strategy -->
-**Monitoring Strategy: Metrics & Alerting**
-
-**Metrics Framework:** Prometheus (time-series database)
-
-**Key Metrics Collected:**
-
-**Application Metrics:**
-- `http_requests_total{method, endpoint, status}`: Counter of HTTP requests
-- `http_request_duration_seconds{method, endpoint}`: Histogram of request latency
-- `websocket_connections_active`: Gauge of active WebSocket connections
-- `commands_executed_total{status}`: Counter of commands (completed, failed)
-- `command_execution_duration_seconds`: Histogram of command round-trip time
-- `vehicle_connections_active`: Gauge of connected vehicles
-- `response_size_bytes`: Histogram of response payload sizes
-
-**System Metrics:**
-- CPU utilization, memory usage (via node-exporter)
-- Database connections (active, idle, max)
-- Redis connections and memory usage
-
-**Custom Metrics:**
-- `sovd_command_timeout_total`: Counter of vehicle timeouts
-- `sovd_response_chunks_total`: Counter of streaming response chunks
-- `sovd_authentication_failures_total`: Counter of failed logins
-
-**Alerting Rules (Prometheus Alertmanager):**
-- Command success rate < 90% over 5 minutes → Page on-call engineer
-- 95th percentile response time > 3 seconds → Slack notification
-- Database connection pool exhaustion → Page on-call
-- Vehicle connection drop > 20% in 5 minutes → Email alert
-
-**Dashboards (Grafana):**
-- **Operations Dashboard**: Request rate, error rate, latency (RED metrics)
-- **Command Dashboard**: Commands/minute, success rate, avg execution time
-- **Vehicle Dashboard**: Active connections, connection stability, command distribution
-- **System Health Dashboard**: CPU, memory, disk, network
-```
-
-### Context: Task I4.T2 - Prometheus Integration (from 02_Iteration_I4.md)
-
-```markdown
-*   **Task ID:** `I4.T2`
-*   **Description:** Integrate Prometheus metrics into backend application. Use `prometheus-fastapi-instrumentator` library to automatically instrument FastAPI app with HTTP metrics (request count, duration, status codes). Add custom metrics in `backend/app/utils/metrics.py`: 1) `commands_executed_total{status}` (Counter for commands by status), 2) `command_execution_duration_seconds` (Histogram for command round-trip time), 3) `websocket_connections_active` (Gauge for active WebSocket connections), 4) `vehicle_connections_active` (Gauge for connected vehicles), 5) `sovd_command_timeout_total` (Counter for vehicle timeouts). Increment counters and update gauges in appropriate services (command_service, websocket_manager, vehicle_service). Expose metrics at `/metrics` endpoint (Prometheus scrape target). Configure Prometheus server in `infrastructure/docker/prometheus.yml` (scrape config for backend:8000/metrics). Add Prometheus to docker-compose.yml (service: `prometheus`, image: `prom/prometheus`, port 9090, volume mount for prometheus.yml). Write README documentation for accessing metrics.
-*   **Agent Type Hint:** `BackendAgent`
-*   **Inputs:** Architecture Blueprint Section 3.8 (Logging & Monitoring - Metrics Framework).
-*   **Input Files:** [`backend/app/main.py`, `backend/app/services/command_service.py`, `backend/app/services/websocket_manager.py`]
-*   **Target Files:**
-    *   `backend/app/utils/metrics.py`
-    *   Updates to `backend/app/main.py` (add instrumentator)
-    *   Updates to `backend/app/services/command_service.py` (increment metrics)
-    *   Updates to `backend/app/services/websocket_manager.py` (update gauges)
-    *   Updates to `backend/requirements.txt` (add prometheus-fastapi-instrumentator)
-    *   `infrastructure/docker/prometheus.yml`
-    *   Updates to `docker-compose.yml` (add prometheus service)
-    *   Updates to `README.md` (document metrics access)
-*   **Deliverables:** Prometheus metrics exporter with custom SOVD metrics; Prometheus server in docker-compose; documentation.
-*   **Acceptance Criteria:**
-    *   `GET http://localhost:8000/metrics` returns Prometheus-formatted metrics
-    *   HTTP metrics present: `http_requests_total`, `http_request_duration_seconds`
-    *   Custom metrics present: `commands_executed_total`, `command_execution_duration_seconds`, `websocket_connections_active`
-    *   Metrics update correctly: submitting command increments `commands_executed_total{status="completed"}`
-    *   Prometheus server accessible at `http://localhost:9090`
-    *   Prometheus successfully scrapes backend metrics (verify in Prometheus UI: Status → Targets)
-    *   Metrics queryable in Prometheus UI (e.g., query `commands_executed_total`)
-    *   README includes instructions for accessing Prometheus and example queries
-    *   No errors in Prometheus logs
-    *   No linter errors
-*   **Dependencies:** `I2` (backend services to instrument)
-*   **Parallelizable:** Yes (monitoring infrastructure independent of features)
-```
+The project already has:
+- Prometheus metrics at `/metrics` endpoint
+- Structured logging with structlog
+- Redis connection pattern in `websocket.py` and `vehicle_service.py`
+- SQLAlchemy async database connection in `database.py`
+- Docker Compose with 6 services (db, redis, backend, frontend, prometheus, grafana)
 
 ---
 
@@ -174,187 +111,88 @@ The following analysis is based on my direct review of the current codebase. Use
 ### Relevant Existing Code
 
 *   **File:** `backend/app/main.py`
-    *   **Summary:** This is the FastAPI application entry point. It already imports and sets up the Instrumentator from `prometheus-fastapi-instrumentator` on lines 16 and 54. The `/metrics` endpoint is already exposed via the `Instrumentator().instrument(app).expose(app)` call.
-    *   **Recommendation:** ✅ **NO CHANGES NEEDED**. The basic Prometheus integration is already complete. The HTTP metrics (request count, duration, status codes) are already being collected automatically. You do NOT need to modify this file.
-    *   **Key Lines:**
-        - Line 16: `from prometheus_fastapi_instrumentator import Instrumentator`
-        - Line 54: `Instrumentator().instrument(app).expose(app)`
-        - Line 100: Already logs "Prometheus metrics available at: /metrics" during startup
+    *   **Summary:** This is the FastAPI application entry point. It configures middleware, CORS, registers API routers, and exposes Prometheus metrics. Currently has a basic `/health` endpoint that only returns a status message without checking dependencies.
+    *   **Recommendation:** You MUST import and register the new health router from `backend/app/api/health.py` in this file. Add it to the router registration section (around line 47-50) with appropriate prefix and tags.
+    *   **Current Health Endpoint:** There is already a basic `/health` endpoint at line 57-69. You should KEEP this for backward compatibility and add your new `/health/live` and `/health/ready` endpoints via the health router.
 
-*   **File:** `backend/app/utils/metrics.py`
-    *   **Summary:** This file defines all the custom Prometheus metrics that are required by the task. All four required metrics are already defined:
-        - `commands_executed_total` (Counter with status label) - lines 15-19
-        - `command_execution_duration_seconds` (Histogram) - lines 21-25
-        - `websocket_connections_active` (Gauge) - lines 28-31
-        - `vehicle_connections_active` (Gauge) - lines 34-37
-    *   **Recommendation:** ✅ **NO CHANGES NEEDED**. All metrics are properly defined with appropriate types (Counter, Histogram, Gauge) and helper functions are provided for incrementing/observing values.
-    *   **Helper Functions Available:**
-        - `increment_command_counter(status)` - line 40
-        - `observe_command_duration(duration_seconds)` - line 50
-        - `increment_websocket_connections()` - line 60
-        - `decrement_websocket_connections()` - line 65
-        - `set_vehicle_connections(count)` - line 70
+*   **File:** `backend/app/database.py`
+    *   **Summary:** This file provides the core database connection infrastructure with SQLAlchemy async engine and session management. It exports a `get_db()` async generator for dependency injection and uses connection pooling (pool_size=20, max_overflow=10).
+    *   **Recommendation:** For the health check service, you MUST import the `engine` object from this file to execute raw SQL health check queries. Use `engine.connect()` or execute a simple `SELECT 1` query to verify database connectivity.
+    *   **Connection Pattern:** The async engine is already configured at module level (line 36-42). Your health check can reuse this engine directly.
 
-*   **File:** `backend/app/services/command_service.py`
-    *   **Summary:** This file handles command submission and execution logic. Currently, it does NOT import or use the metrics module.
-    *   **Recommendation:** ⚠️ **VERIFY METRICS ARE ALREADY INTEGRATED**. The task description says to "increment metrics in command_service", but based on the architecture, metrics should be incremented in the vehicle_connector (which is where command completion happens). The command_service only submits commands - it doesn't know when they complete. Therefore, you should verify that metrics are being called from the vehicle_connector instead.
-    *   **Current Behavior:** The service submits commands and triggers async execution via vehicle_connector (lines 90-96), but does NOT track metrics directly.
+*   **File:** `backend/app/config.py`
+    *   **Summary:** This file manages application configuration using pydantic-settings. It loads `DATABASE_URL` and `REDIS_URL` from environment variables or `.env` file.
+    *   **Recommendation:** You MUST import `settings` from this file to get the `REDIS_URL` for creating a Redis client in your health service.
+    *   **Configuration Access:** Use `settings.DATABASE_URL` and `settings.REDIS_URL` to access connection strings.
 
-*   **File:** `backend/app/services/websocket_manager.py`
-    *   **Summary:** This file manages WebSocket connections and already imports and uses the metrics functions.
-    *   **Recommendation:** ✅ **ALREADY INTEGRATED**. WebSocket metrics are already being tracked:
-        - Line 11: Imports `increment_websocket_connections` and `decrement_websocket_connections`
-        - Line 43: Calls `increment_websocket_connections()` when a client connects
-        - Line 64: Calls `decrement_websocket_connections()` when a client disconnects
-    *   **No changes needed**.
+*   **File:** `backend/app/services/vehicle_service.py`
+    *   **Summary:** This file demonstrates the project's pattern for creating a module-level Redis client using `redis.asyncio as aioredis` (line 23-27). It shows how to connect to Redis with async support.
+    *   **Recommendation:** You SHOULD follow this exact pattern in your health service to create a Redis client for health checks. Import `redis.asyncio as aioredis` and use `aioredis.from_url(settings.REDIS_URL, ...)` to create the client.
+    *   **Redis Client Pattern:** Use `redis_client = aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)` at module level.
 
-*   **File:** `backend/app/connectors/vehicle_connector.py`
-    *   **Summary:** This is the mock vehicle connector that simulates command execution. It already imports and uses the command metrics.
-    *   **Recommendation:** ✅ **ALREADY INTEGRATED**. Command execution metrics are already being tracked:
-        - Line 23: Imports `increment_command_counter` and `observe_command_duration`
-        - The metrics are incremented when commands complete (both success and failure cases)
-    *   **This is the correct location for command metrics** because the vehicle_connector is where command execution actually completes.
+*   **File:** `backend/tests/conftest.py`
+    *   **Summary:** This is the pytest configuration file that provides fixtures for testing. It creates test database sessions using SQLite for tests, overrides the `get_db` dependency, and mocks audit service for integration tests.
+    *   **Recommendation:** Your integration tests for health endpoints should use the `async_client` fixture from this file (line 82-113). This fixture provides an authenticated HTTP client for testing FastAPI endpoints.
+    *   **Testing Pattern:** Use `@pytest.mark.asyncio` decorator and `async_client` fixture. Example: `async def test_liveness(self, async_client: AsyncClient)`.
 
-*   **File:** `infrastructure/docker/prometheus.yml`
-    *   **Summary:** Prometheus configuration file that defines scrape targets and intervals.
-    *   **Recommendation:** ✅ **ALREADY CONFIGURED**. The file exists and is properly configured:
-        - Scrape interval: 15s globally, 10s for backend (line 18)
-        - Target: `backend:8000` (using Docker service name, not localhost) - line 16
-        - Metrics path: `/metrics` - line 17
-    *   **No changes needed**.
+*   **File:** `backend/tests/integration/test_auth_api.py`
+    *   **Summary:** This file demonstrates the project's integration testing patterns. Tests are organized into classes by endpoint, use descriptive test names (line 20-80), and verify both success and error cases.
+    *   **Recommendation:** You SHOULD follow this exact structure for your health endpoint tests. Create classes like `TestLivenessEndpoint` and `TestReadinessEndpoint`, with test methods that verify status codes and response formats.
+    *   **Test Organization:** Group related tests in classes, test both success (200) and failure (503) cases, and verify response JSON structure.
 
 *   **File:** `docker-compose.yml`
-    *   **Summary:** Docker Compose orchestration configuration for all services.
-    *   **Recommendation:** ✅ **PROMETHEUS ALREADY ADDED**. The Prometheus service is already configured:
-        - Lines 110-133 define the `prometheus` service
-        - Image: `prom/prometheus:latest`
-        - Port: 9090 exposed
-        - Configuration mounted from `./infrastructure/docker/prometheus.yml`
-        - Persistent volume: `prometheus-data`
-        - Depends on backend service
-    *   **Grafana is also already configured** (lines 137-164) which is beyond this task but beneficial.
-    *   **No changes needed**.
-
-*   **File:** `backend/requirements.txt`
-    *   **Summary:** Python dependencies file.
-    *   **Recommendation:** ✅ **DEPENDENCY ALREADY ADDED**. Line 32 shows `prometheus-fastapi-instrumentator>=6.1.0` is already in the requirements file.
-    *   **No changes needed**.
-
-*   **File:** `README.md`
-    *   **Summary:** Project documentation with setup instructions.
-    *   **Recommendation:** ✅ **COMPREHENSIVE DOCUMENTATION ALREADY EXISTS**. The README already includes:
-        - Line 80: Documents `/metrics` endpoint
-        - Line 81: Documents Prometheus UI at port 9090
-        - Lines 115-126: Complete documentation of Prometheus and Grafana services
-        - Lines 261-309: Detailed monitoring section with:
-            - Access instructions for metrics endpoint, Prometheus UI, and Grafana
-            - Complete list of available metrics (HTTP and custom application metrics)
-            - Example PromQL queries for request rate, command success rate, and latency
-    *   **No changes needed**.
+    *   **Summary:** This file orchestrates all services for local development. The database (lines 11-32) and Redis (lines 36-53) services already have healthchecks defined. The backend service (lines 57-88) does NOT currently have a healthcheck.
+    *   **Recommendation:** You MUST add a healthcheck configuration to the `backend` service section. Use the `/health/ready` endpoint you create, with appropriate intervals and retries. Follow the pattern used for db and redis services.
+    *   **Healthcheck Format:** Add between lines 88-89 (after `depends_on` and before `networks`). Use `test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]` with reasonable timing parameters.
 
 ### Implementation Tips & Notes
 
-*   **🎯 CRITICAL FINDING:** After thorough analysis of the codebase, **ALL REQUIREMENTS OF THIS TASK HAVE ALREADY BEEN COMPLETED**. Here's what I found:
+*   **Tip:** The project uses `structlog` for logging (imported in multiple service files). You SHOULD add structured logging to your health service to log health check results. Import with `import structlog` and get logger with `logger = structlog.get_logger(__name__)`.
 
-    1. ✅ **Prometheus Integration**: Already integrated in `backend/app/main.py` with `Instrumentator().instrument(app).expose(app)`
-    2. ✅ **Custom Metrics Defined**: All four required metrics exist in `backend/app/utils/metrics.py`
-    3. ✅ **Metrics in Use**:
-        - Command metrics are tracked in `vehicle_connector.py` (correct location)
-        - WebSocket metrics are tracked in `websocket_manager.py`
-    4. ✅ **Prometheus Configuration**: `infrastructure/docker/prometheus.yml` exists and is properly configured
-    5. ✅ **Docker Compose**: Prometheus service already added to `docker-compose.yml` with all required settings
-    6. ✅ **Documentation**: README.md has comprehensive monitoring documentation with examples
-    7. ✅ **Dependencies**: `prometheus-fastapi-instrumentator>=6.1.0` already in requirements.txt
+*   **Note:** For the database health check in your service, execute a simple query like `SELECT 1` to verify connectivity. Use `await engine.connect()` with proper exception handling. If the connection or query fails, return unhealthy status.
 
-*   **⚠️ VERIFICATION NEEDED:** The task acceptance criteria states "Metrics update correctly: submitting command increments `commands_executed_total{status="completed"}`". You should verify this by:
-    1. Running `make up` (or `docker-compose up`)
-    2. Submitting a command via the API
-    3. Checking `http://localhost:8000/metrics` to see if the counter incremented
-    4. Verifying Prometheus is scraping successfully at `http://localhost:9090/targets`
+*   **Note:** For the Redis health check, use the `ping()` method on the Redis client: `await redis_client.ping()`. Wrap this in a try/except block to catch connection failures gracefully.
 
-*   **🔧 POSSIBLE ACTION:** If this task is marked as "not done" but everything is already implemented, you should:
-    1. **FIRST**: Verify that all components are working correctly by testing the acceptance criteria
-    2. **THEN**: If everything works, update the task status to `"done": true` in the task manifest
-    3. **IF ISSUES FOUND**: Document what's not working and fix only those specific issues
+*   **Warning:** The liveness endpoint (`/health/live`) should NEVER check external dependencies (database or Redis). It should only verify that the application process is running. Return a simple `{"status": "ok"}` response immediately.
 
-*   **📊 Metrics Architecture Note:** The metrics are correctly placed:
-    - **HTTP metrics**: Automatically collected by Instrumentator at the FastAPI app level
-    - **Command metrics**: Tracked in vehicle_connector where execution completes (not in command_service which only submits)
-    - **WebSocket metrics**: Tracked in websocket_manager where connections are managed
-    - This is the correct architectural pattern - metrics should be tracked where the actual work happens, not where it's initiated.
-
-*   **🐛 Potential Issue - Vehicle Connections Metric:** I noticed that `vehicle_connections_active` is defined but I didn't find where it's being updated in the codebase. The `set_vehicle_connections(count)` function exists in metrics.py but may not be called anywhere. This could be because:
-    1. It's meant to be implemented with real vehicle connections (not mock)
-    2. It's waiting for vehicle registry/status tracking to be implemented
-    3. This might be the ONE thing that still needs implementation
-
-*   **🔍 Investigation Suggestion:** Search for where vehicle connection status is tracked. The `vehicle_service.py` might need to update this metric when vehicles connect/disconnect, or it might need to be implemented in a background task that periodically counts active vehicles from the database.
-
-*   **✅ Testing Strategy:** To verify the implementation:
-    ```bash
-    # Start services
-    make up
-
-    # Wait for services to be healthy
-    sleep 10
-
-    # Check metrics endpoint
-    curl http://localhost:8000/metrics | grep -E "commands_executed_total|websocket_connections_active"
-
-    # Submit a command (requires auth token first)
-    # Login to get token
-    curl -X POST http://localhost:8000/api/v1/auth/login \
-      -H "Content-Type: application/json" \
-      -d '{"username":"engineer","password":"engineer123"}'
-
-    # Use token to submit command
-    # Then check metrics again to see if counter increased
-
-    # Verify Prometheus UI
-    open http://localhost:9090
-    # Navigate to Status → Targets to verify backend scraping
+*   **Tip:** The readiness endpoint (`/health/ready`) should check BOTH database and Redis. Structure your response to include individual check results, like:
+    ```json
+    {
+        "status": "ready",
+        "checks": {
+            "database": "ok",
+            "redis": "ok"
+        }
+    }
     ```
 
-*   **🎓 Learning Note:** The `prometheus-fastapi-instrumentator` library is very powerful. It automatically:
-    - Instruments all FastAPI endpoints with request duration histograms
-    - Counts requests by method, path, and status code
-    - Provides the `/metrics` endpoint in Prometheus exposition format
-    - Handles Prometheus metric registry automatically
-    - This means you get comprehensive HTTP metrics without writing any metric tracking code yourself.
+*   **Note:** When a dependency check fails in the readiness endpoint, use FastAPI's `HTTPException` with status code 503 to return Service Unavailable. Example: `raise HTTPException(status_code=503, detail={"status": "unavailable", "checks": {...}})`
 
-### Summary
+*   **Tip:** The project already has `redis>=5.0.0` in requirements.txt (line 14), so you have the Redis async client available. Import it as `import redis.asyncio as aioredis` to match the project's convention seen in other service files.
 
-**TASK STATUS:** This task is **100% COMPLETE AND VERIFIED**. All files specified in target_files already exist and contain fully functional implementations.
+*   **Note:** For integration tests, you may need to mock the database and Redis connections since tests use SQLite and might not have a real Redis instance. Use `unittest.mock.patch` to mock the health check functions and test both healthy and unhealthy scenarios.
 
-**✅ COMPREHENSIVE EVIDENCE OF COMPLETION:**
+*   **Warning:** The Docker healthcheck command requires `curl` to be available in the container. The backend Dockerfile should already have this, but verify that curl is installed. If not, you'll need to add it to the Dockerfile or use Python's httpx/requests for the healthcheck.
 
-1. **Integration Tests Exist and Pass**: `backend/tests/integration/test_metrics.py` contains 8 comprehensive tests covering:
-   - Metrics endpoint accessibility
-   - Prometheus format validation
-   - HTTP metrics presence
-   - Custom metrics registration
-   - Metric updates (counter, histogram, gauge)
-   - HELP text and TYPE declarations
+*   **Tip:** Follow the project's async patterns consistently. All service functions should be `async def` and use `await` for I/O operations (database queries, Redis commands). This matches the pattern seen in `vehicle_service.py` and other service files.
 
-2. **Metrics Are Fully Integrated**:
-   - Command metrics tracked in `vehicle_connector.py` (lines 474-484, 560-582)
-   - WebSocket metrics tracked in `websocket_manager.py`
-   - All helper functions properly used
+*   **Best Practice:** For production readiness, your health endpoints should respond quickly (< 1 second for liveness, < 3 seconds for readiness). If checks take longer, consider implementing timeouts on the database and Redis operations.
 
-3. **All Acceptance Criteria Met**:
-   ✅ `/metrics` endpoint exposed and tested
-   ✅ HTTP metrics present (automatic via Instrumentator)
-   ✅ All 4 custom metrics defined and registered
-   ✅ Metrics update correctly (verified in integration tests)
-   ✅ Prometheus service configured in docker-compose.yml
-   ✅ Prometheus.yml scrape config present
-   ✅ README documentation complete (lines 80-82, 261-309)
-   ✅ No errors (all tests passing)
+*   **Convention:** Based on the existing codebase structure, create your health API router in `backend/app/api/health.py` (NOT under `/api/v1/` since health endpoints are typically root-level). Import it in `main.py` as `from app.api import health` and register with `app.include_router(health.router, tags=["health"])`.
 
-4. **Bonus Features Beyond Requirements**:
-   - Grafana integration with auto-provisioned dashboards
-   - `sovd_command_timeout_total` metric (not in original spec)
-   - Comprehensive test coverage (8 integration tests)
-   - Production-ready histogram buckets for command duration
+*   **SQLAlchemy Pattern:** When checking database health, use the async engine's `connect()` method within an async context manager:
+    ```python
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+    ```
+    You'll need to import `from sqlalchemy import text` to execute raw SQL.
 
-**ACTION REQUIRED:** Simply update the task manifest to mark `"done": true`. No code changes needed.
+*   **Error Handling:** Wrap all health check operations in try/except blocks to gracefully handle failures. Log failures with structured logging including error details. Never let exceptions propagate unhandled from health endpoints.
+
+*   **Testing Consideration:** Since the integration tests use SQLite (not PostgreSQL) and may not have Redis, you should mock the `check_database_health()` and `check_redis_health()` functions in your tests. Use `@patch('app.services.health_service.check_database_health')` to mock these dependencies.
+
+---
+
+## Summary
+
+You are implementing Kubernetes-style health check endpoints for production readiness. Create two endpoints: `/health/live` (simple liveness) and `/health/ready` (checks database and Redis). Build a health service to encapsulate dependency checks, add Docker healthchecks to docker-compose.yml, and write comprehensive integration tests. Follow the project's existing async patterns, logging conventions, and testing structure. Ensure readiness returns 503 when dependencies are unavailable, and document response formats clearly.

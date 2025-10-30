@@ -84,6 +84,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      # Verify backend is ready to serve traffic using readiness endpoint
+      # Checks database and Redis connectivity
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s  # Allow 30 seconds for application startup
     networks:
       - sovd-network
 
