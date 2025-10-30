@@ -49,3 +49,6 @@ frontend/coverage/
 # Logs
 *.log
 logs/
+
+# Pip install logs
+=*

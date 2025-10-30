@@ -11,11 +11,12 @@ All endpoints require JWT authentication.
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.middleware.rate_limiting_middleware import RATE_LIMIT_GENERAL, get_user_id_key, limiter
 from app.models.user import User
 from app.schemas.vehicle import VehicleResponse, VehicleStatusResponse
 from app.services import vehicle_service
@@ -25,8 +26,9 @@ router = APIRouter()
 
 
 @router.get("/vehicles", response_model=list[VehicleResponse])
+@limiter.limit(RATE_LIMIT_GENERAL, key_func=get_user_id_key)
 async def list_vehicles(  # type: ignore[no-untyped-def]
-
+    request: Request,
     status: str | None = Query(
         None,
         description="Filter by connection status (connected, disconnected, error)"

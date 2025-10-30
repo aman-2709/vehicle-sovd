@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.middleware.rate_limiting_middleware import RATE_LIMIT_AUTH, get_client_ip_key, limiter
 from app.models.session import Session
 from app.models.user import User
 from app.schemas.auth import (
@@ -39,6 +40,7 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@limiter.limit(RATE_LIMIT_AUTH, key_func=get_client_ip_key)
 async def login(
     credentials: LoginRequest,
     request: Request,

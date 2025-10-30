@@ -16,17 +16,21 @@ from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import health
 from app.api.v1 import auth, commands, vehicles, websocket
 from app.config import settings
 from app.middleware.error_handling_middleware import (
+    format_error_response,  # Used in rate_limit_exception_handler
     handle_http_exception,
     handle_unexpected_exception,
     handle_validation_error,
 )
 from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.rate_limiting_middleware import limiter
+from app.utils.error_codes import ErrorCode
 from app.utils.logging import configure_logging
 
 # Configure structured logging before creating the app
@@ -40,6 +44,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Add limiter to app state (required by slowapi)
+app.state.limiter = limiter
 
 
 # Register global exception handlers
@@ -73,6 +80,61 @@ async def validation_exception_handler(
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle all other unexpected exceptions."""
     return await handle_unexpected_exception(request, exc)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """
+    Handle rate limit exceeded errors.
+
+    Returns standardized error response with:
+    - Error code RATE_001
+    - Retry-After header
+    - Rate limit headers (X-RateLimit-Limit, X-RateLimit-Remaining)
+    """
+    from structlog.contextvars import get_contextvars
+
+    from app.utils.error_codes import get_error_message
+
+    # Get correlation ID from context (set by LoggingMiddleware)
+    context_vars = get_contextvars()
+    correlation_id = context_vars.get("correlation_id", "unknown")
+
+    # Extract retry_after from exception detail
+    # slowapi formats detail as: "Rate limit exceeded: X per Y minute"
+    retry_after = 60  # Default to 60 seconds
+
+    # Get error message for RATE_001
+    message = get_error_message(ErrorCode.RATE_LIMIT_EXCEEDED)
+
+    # Format standardized error response with retry_after added
+    error_response = format_error_response(
+        error_code=ErrorCode.RATE_LIMIT_EXCEEDED,
+        message=message,
+        correlation_id=correlation_id,
+        path=str(request.url.path),
+    )
+
+    # Add retry_after to error response
+    error_response["error"]["retry_after"] = retry_after
+
+    # Create JSON response
+    response = JSONResponse(
+        status_code=429,
+        content=error_response,
+    )
+
+    # Add Retry-After header (required by HTTP spec)
+    response.headers["Retry-After"] = str(retry_after)
+
+    # Add rate limit headers for client visibility
+    # Note: slowapi adds these automatically when headers_enabled=True
+    # but we ensure they're present
+    if hasattr(exc, "limit"):
+        response.headers["X-RateLimit-Limit"] = str(exc.limit)
+        response.headers["X-RateLimit-Remaining"] = "0"
+
+    return response
 
 # Register middleware (order matters - LIFO execution)
 # Execution order: LoggingMiddleware → CORSMiddleware → Endpoints

@@ -20,6 +20,9 @@ class ErrorCode(str, Enum):
     - SYS_xxx: System and internal errors (500-599)
     """
 
+    # Rate Limiting Errors (000)
+    RATE_LIMIT_EXCEEDED = "RATE_001"
+
     # Authentication & Authorization Errors (001-099)
     AUTH_INVALID_CREDENTIALS = "AUTH_001"
     AUTH_TOKEN_EXPIRED = "AUTH_002"
@@ -59,6 +62,8 @@ class ErrorCode(str, Enum):
 
 # Error code to human-readable message mapping
 ERROR_MESSAGES: dict[ErrorCode, str] = {
+    # Rate Limiting
+    ErrorCode.RATE_LIMIT_EXCEEDED: "Rate limit exceeded. Please try again later.",
     # Authentication & Authorization
     ErrorCode.AUTH_INVALID_CREDENTIALS: "Invalid username or password",
     ErrorCode.AUTH_TOKEN_EXPIRED: "Authentication token has expired",
@@ -95,6 +100,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
 
 # HTTP status code mapping for error codes
 ERROR_STATUS_CODES: dict[ErrorCode, int] = {
+    # Rate Limiting (429)
+    ErrorCode.RATE_LIMIT_EXCEEDED: 429,
     # Authentication & Authorization (401, 403)
     ErrorCode.AUTH_INVALID_CREDENTIALS: 401,
     ErrorCode.AUTH_TOKEN_EXPIRED: 401,

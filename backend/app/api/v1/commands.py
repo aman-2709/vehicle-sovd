@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_role
+from app.middleware.rate_limiting_middleware import RATE_LIMIT_COMMANDS, get_user_id_key, limiter
 from app.models.user import User
 from app.schemas.command import (
     CommandListResponse,
@@ -25,9 +26,10 @@ logger = structlog.get_logger(__name__)
 
 
 @router.post("/commands", response_model=CommandResponse, status_code=201)
+@limiter.limit(RATE_LIMIT_COMMANDS, key_func=get_user_id_key)
 async def submit_command(
+    request: Request,
     command_request: CommandSubmitRequest,
-    http_request: Request,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_role(["engineer", "admin"])),
     db: AsyncSession = Depends(get_db),
@@ -54,8 +56,8 @@ async def submit_command(
         HTTPException 403: Insufficient permissions
     """
     # Extract client information for audit logging
-    client_ip = get_client_ip(http_request)
-    user_agent = get_user_agent(http_request)
+    client_ip = get_client_ip(request)
+    user_agent = get_user_agent(request)
 
     logger.info(
         "api_submit_command",

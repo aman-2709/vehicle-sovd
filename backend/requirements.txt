@@ -12,6 +12,7 @@ asyncpg>=0.29.0
 
 # Redis client for caching and session management
 redis>=5.0.0
+slowapi>=0.1.9
 
 # Authentication and security
 python-jose[cryptography]>=3.3.0
