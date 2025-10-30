@@ -10,25 +10,30 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T6",
+  "task_id": "I4.T7",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Implement rate limiting using slowapi with Redis backend. Configure different limits: auth (5/min), commands (10/min), general (100/min). Return 429 with Retry-After. Add admin exemptions. Write integration tests.",
-  "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.8 (Security - Rate Limiting).",
+  "description": "Create operational runbooks: deployment.md (procedures for local/staging/prod), troubleshooting.md (common issues), disaster_recovery.md (backup/restore), monitoring.md (metrics/alerts guide). Create engineer_guide.md user documentation. Update README with links.",
+  "agent_type_hint": "DocumentationAgent",
+  "inputs": "Architecture Blueprint Section 3.9; implemented features.",
   "target_files": [
-    "backend/app/middleware/rate_limiting_middleware.py",
-    "backend/app/main.py",
-    "backend/requirements.txt",
-    "backend/tests/integration/test_rate_limiting.py"
+    "docs/runbooks/deployment.md",
+    "docs/runbooks/troubleshooting.md",
+    "docs/runbooks/disaster_recovery.md",
+    "docs/runbooks/monitoring.md",
+    "docs/user-guides/engineer_guide.md",
+    "README.md"
   ],
-  "input_files": [
-    "backend/app/main.py"
-  ],
-  "deliverables": "Rate limiting middleware; Redis-backed storage; admin exemptions; tests.",
-  "acceptance_criteria": "6th login request in 1min returns 429; Response includes Retry-After; 11th command returns 429; Admins exceed limits; Limits reset after window; Tests verify enforcement, reset, exemption; Coverage ≥80%; No errors",
+  "input_files": [],
+  "deliverables": "Complete operational runbooks; user guide; updated README.",
+  "acceptance_criteria": "deployment.md includes step-by-step for all environments; troubleshooting.md covers ≥5 issues; disaster_recovery.md includes backup script; monitoring.md explains metrics; engineer_guide.md shows UI workflow; README links all docs",
   "dependencies": [
-    "I2.T1"
+    "I4.T1",
+    "I4.T2",
+    "I4.T3",
+    "I4.T4",
+    "I4.T5",
+    "I4.T6"
   ],
   "parallelizable": true,
   "done": false
@@ -41,88 +46,238 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: NFR - Security - Rate Limiting
+### Context: Deployment Strategy (from 05_Operational_Architecture.md)
 
-**Non-Functional Requirements: Security**
+```markdown
+**Development Environment:**
+- **Tool**: Docker Compose
+- **Services**: Frontend (React dev server, Vite HMR), Backend (FastAPI with hot reload), PostgreSQL, Redis
+- **Deployment Command**:
+  ```bash
+  docker-compose up -d
+  ```
+- **Benefits**: Fast iteration, matches production architecture, easy onboarding
 
-The SOVD Command WebApp must implement comprehensive security measures including rate limiting to prevent DoS attacks and abuse:
+**Production Environment:**
+- **Platform**: AWS EKS (Elastic Kubernetes Service)
+- **Container Orchestration**: Kubernetes with Helm charts
+- **Services**: Frontend (Nginx serving static build), Backend (Uvicorn), PostgreSQL (AWS RDS), Redis (AWS ElastiCache)
 
-**Rate Limiting Requirements:**
-- API endpoints SHALL implement rate limiting to prevent DoS attacks and abuse
-- Authentication endpoints: 5 requests/minute per IP address
-- Command execution: 10 requests/minute per user
-- General API: 100 requests/minute per user
-- Admin users: Higher limits (effectively unlimited for operational needs)
-- Rate limiting SHALL use Redis as backend storage for distributed rate limiting across multiple backend instances
+**Architecture:**
+- **Compute**: EKS cluster (3 worker nodes, t3.large, across 3 AZs)
+- **Database**: RDS for PostgreSQL (db.t3.medium, Multi-AZ)
+- **Cache**: ElastiCache for Redis (cache.t3.small, cluster mode)
+- **Load Balancer**: Application Load Balancer (ALB)
+- **Networking**: VPC with public and private subnets
+- **Storage**: EBS volumes for database; S3 for backups and logs
+- **Secrets**: AWS Secrets Manager
+- **DNS**: Route 53 for domain management
+- **TLS Certificates**: AWS Certificate Manager (ACM)
 
-**Error Response Format:**
-When a rate limit is exceeded, the response SHALL:
-- Return HTTP 429 Too Many Requests
-- Include `Retry-After` header with seconds until reset
-- Include standardized error body with code `RATE_001`
-- Include `retry_after` field in error object (seconds)
-- Optionally include `X-RateLimit-Limit` and `X-RateLimit-Remaining` headers
+**Kubernetes Resources:**
+- **Namespaces**: `production`, `staging`
+- **Deployments**:
+  - `frontend-deployment` (3 replicas)
+  - `backend-deployment` (3 replicas)
+  - `vehicle-connector-deployment` (2 replicas)
+- **Services**:
+  - `frontend-service` (ClusterIP, ALB Ingress)
+  - `backend-service` (ClusterIP)
+  - `vehicle-connector-service` (ClusterIP)
+- **Ingress**: ALB Ingress Controller for external access
+- **ConfigMaps**: Non-sensitive configuration
+- **Secrets**: Kubernetes Secrets (synced from AWS Secrets Manager via External Secrets Operator)
 
-### Context: Error Code Standards
-
-**Standardized Error Response Format:**
-
-All API errors SHALL return responses in the following format:
-
-```json
-{
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "Human-readable error message",
-    "correlation_id": "uuid-v4",
-    "timestamp": "2025-10-30T12:00:00Z",
-    "path": "/api/v1/endpoint"
-  }
-}
+**Helm Chart Structure:**
+```
+sovd-helm-chart/
+├── Chart.yaml
+├── values.yaml (defaults)
+├── values-production.yaml (overrides)
+├── templates/
+│   ├── frontend-deployment.yaml
+│   ├── backend-deployment.yaml
+│   ├── vehicle-connector-deployment.yaml
+│   ├── services.yaml
+│   ├── ingress.yaml
+│   ├── configmap.yaml
+│   └── secrets.yaml
 ```
 
-**Error Codes:**
-- `RATE_001`: Rate limit exceeded
-- `AUTH_001`: Invalid credentials
-- `AUTH_002`: Invalid or expired token
-- `VALIDATION_001`: Input validation failed
-- `INTERNAL_001`: Internal server error
+**Deployment Command:**
+```bash
+helm upgrade --install sovd-webapp ./sovd-helm-chart \
+  -f values-production.yaml \
+  -n production
+```
+```
 
-### Context: Technology Stack - Middleware
+### Context: CI/CD Pipeline (from 05_Operational_Architecture.md)
 
-**Backend Middleware Stack:**
+```markdown
+**Workflow Stages:**
 
-The FastAPI application uses the following middleware components:
+1. **Lint & Format Check**
+   - Frontend: ESLint, Prettier
+   - Backend: Ruff, Black, mypy
 
-1. **Rate Limiting**: `slowapi`
-   - Fixed-window rate limiting strategy
-   - Redis backend for distributed rate limiting
-   - Configurable rate limits per endpoint type
-   - Key functions for IP-based and user-based limiting
+2. **Unit Tests**
+   - Frontend: Vitest (coverage threshold 80%)
+   - Backend: pytest (coverage threshold 80%)
 
-2. **Logging**: Custom `LoggingMiddleware`
-   - Injects correlation ID (X-Request-ID) for request tracking
-   - Structured JSON logging with structlog
+3. **Build Docker Images**
+   - Build frontend and backend images
+   - Tag with commit SHA and `latest`
 
-3. **Error Handling**: Custom `ErrorHandlingMiddleware`
-   - Global exception handlers for all error types
-   - Standardized error response formatting
+4. **Integration Tests**
+   - Spin up services with docker-compose
+   - Run API integration tests (pytest + httpx)
+   - Run E2E tests (Playwright)
 
-### Context: Redis Configuration
+5. **Security Scans**
+   - `npm audit` (frontend dependencies)
+   - `pip-audit` (backend dependencies)
+   - Trivy (Docker image vulnerabilities)
 
-**Redis Usage in SOVD WebApp:**
+6. **Push Images**
+   - Push to AWS ECR (Elastic Container Registry)
 
-Redis is used for:
-1. Session Storage: Refresh tokens stored in Redis with TTL
-2. **Rate Limiting**: slowapi uses Redis to store rate limit counters with expiration
-3. Caching: Vehicle status cache with 30-second TTL
-4. Event Pub/Sub: WebSocket response streaming
+7. **Deploy to Staging**
+   - Update Kubernetes deployment with new image
+   - Run smoke tests
 
-**Configuration:**
-- Connection URL: `REDIS_URL` environment variable (default: `redis://localhost:6379`)
-- Database: Default Redis database (0)
-- Connection pooling: Enabled by default
-- Health checks: Backend verifies Redis connectivity
+8. **Manual Approval Gate**
+   - Require approval for production deploy
+
+9. **Deploy to Production**
+   - Blue-green deployment strategy
+   - Gradual rollout (10%, 50%, 100%)
+   - Automatic rollback if error rate spikes
+```
+
+### Context: Fault Tolerance Mechanisms (from 05_Operational_Architecture.md)
+
+```markdown
+**Health Checks:**
+- **Liveness Probe**: `/health/live` (returns 200 if service is running)
+- **Readiness Probe**: `/health/ready` (checks database, Redis connectivity)
+- Kubernetes restarts unhealthy pods automatically
+
+**Circuit Breaker Pattern:**
+- Vehicle communication wrapped in circuit breaker (e.g., `tenacity` library)
+- After 5 consecutive failures, circuit opens (fail fast)
+- Periodic retry attempts to close circuit
+
+**Retry Logic:**
+- Vehicle communication retries (3 attempts with exponential backoff)
+- Database operations retry on transient errors (connection loss)
+
+**Graceful Degradation:**
+- If Redis unavailable, fall back to database for sessions (slower but functional)
+- If vehicle unreachable, return clear error (don't crash service)
+- If database read replica fails, route to primary (higher load but available)
+
+**Data Persistence:**
+- Database backups: Daily automated snapshots (AWS RDS); 30-day retention
+- Point-in-time recovery: Restore to any second within last 7 days
+- Audit logs: Backed up to S3 (long-term retention)
+```
+
+### Context: High Availability (from 05_Operational_Architecture.md)
+
+```markdown
+**Deployment Strategy:**
+- **Multi-AZ**: All services deployed across 3 Availability Zones
+- **Load Balancing**: ALB distributes traffic; Kubernetes service load balances backend pods
+- **Auto-Scaling**: Horizontal Pod Autoscaler scales pods based on CPU/memory
+- **Database**: RDS Multi-AZ with automatic failover (<60 seconds)
+- **Redis**: ElastiCache cluster mode for high availability
+
+**Target Availability:**
+- **SLA**: 99.9% uptime (8.76 hours downtime per year)
+- **Recovery Time Objective (RTO)**: <15 minutes
+- **Recovery Point Objective (RPO)**: <5 minutes (point-in-time recovery)
+
+**Disaster Recovery:**
+- **Automated Backups**: Daily database snapshots to S3
+- **Cross-Region Replication**: Backup replication to secondary region (optional)
+- **Documented Recovery Procedures**: Runbook for restoring from backup
+```
+
+### Context: Monitoring Strategy (from 05_Operational_Architecture.md)
+
+```markdown
+**Metrics Collection:**
+- **Prometheus**: Time-series database for metrics
+- **Exporters**: FastAPI metrics exporter (HTTP metrics, custom business metrics)
+- **Grafana**: Visualization dashboards
+
+**Logging Strategy:**
+- **Structured Logging**: JSON logs with contextual fields (correlation_id, user_id, etc.)
+- **Log Aggregation**: CloudWatch Logs (AWS) or ELK stack
+- **Log Levels**: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- **Retention**: 30 days for application logs; 90 days for audit logs
+
+**Alerting:**
+- **Critical Alerts**: Database down, service unhealthy, error rate >5%
+- **Warning Alerts**: High latency (p95 >3s), low disk space, high CPU
+- **Notification Channels**: Email, Slack, PagerDuty (production)
+```
+
+### Context: Horizontal Scaling Strategy (from 05_Operational_Architecture.md)
+
+```markdown
+**Stateless Services:**
+- All backend services are stateless (session stored in Redis/database)
+- Enables horizontal scaling without session affinity
+
+**Container Orchestration (Kubernetes):**
+- **Horizontal Pod Autoscaler (HPA)**: Scales pods based on CPU/memory or custom metrics (e.g., request rate)
+  - Application Server: Scale from 3 to 10 pods
+  - Vehicle Connector: Scale from 2 to 8 pods
+  - WebSocket Server: Scale from 2 to 6 pods
+- **Cluster Autoscaler**: Adds/removes nodes based on pod resource requests
+
+**Load Balancing:**
+- **External**: AWS ALB distributes traffic across API Gateway pods
+- **Internal**: Kubernetes Service load balances between backend pods
+- **WebSocket Affinity**: Sticky sessions not required (Redis Pub/Sub decouples connections)
+
+**Database Scaling:**
+- **Vertical Scaling**: Initial approach (RDS instance size increase)
+- **Read Replicas**: For read-heavy queries (command history, vehicle list)
+- **Connection Pooling**: SQLAlchemy pool (size=20, overflow=10) prevents connection exhaustion
+- **Future**: Sharding by vehicle_id or partitioning audit_logs by time
+
+**Redis Scaling:**
+- **Redis Cluster**: Horizontal scaling for high availability and throughput
+- Used for: session storage, vehicle status cache, Pub/Sub
+```
+
+### Context: Security Practices (from 05_Operational_Architecture.md)
+
+```markdown
+**Secrets Management:**
+- Sensitive configuration (database passwords, JWT secrets, API keys) stored in environment variables
+- Production: AWS Secrets Manager with automatic rotation
+- Development: `.env` file (never committed to Git)
+
+**Input Validation:**
+- Pydantic models for all request/response validation
+- SOVD command schema validation (JSON Schema)
+- SQL injection prevention: SQLAlchemy parameterized queries
+
+**Dependency Management:**
+- Pin all dependencies (requirements.txt, package.json)
+- Regular updates (monthly review cycle)
+- Security scanning: `pip-audit`, `npm audit`
+
+**Secure Development Lifecycle:**
+- Code review required (CODEOWNERS)
+- Static analysis: Bandit (Python security linter), ESLint security plugin
+- Secrets scanning: git-secrets, TruffleHog
+- Penetration testing: Annual third-party audit (production)
+```
 
 ---
 
@@ -130,184 +285,82 @@ Redis is used for:
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### CRITICAL FINDING: Task Already Completed
-
-**IMPORTANT**: Upon analyzing the codebase, I have discovered that Task I4.T6 has already been fully implemented. All target files exist with complete implementations that satisfy all acceptance criteria.
-
 ### Relevant Existing Code
 
-#### File: `backend/app/middleware/rate_limiting_middleware.py` (171 lines)
-- **Summary**: This file contains a complete, production-ready rate limiting middleware implementation using slowapi with Redis backend. Key features:
-  - Rate limit constants: `RATE_LIMIT_AUTH = "5/minute"`, `RATE_LIMIT_COMMANDS = "10/minute"`, `RATE_LIMIT_GENERAL = "100/minute"`, `RATE_LIMIT_ADMIN = "10000/minute"`
-  - Three key functions for different limiting strategies:
-    - `get_client_ip_key(request)`: IP-based limiting for unauthenticated endpoints (e.g., login)
-    - `get_user_id_key(request)`: User-based limiting with admin exemption via "admin:{user_id}" prefix
-    - `get_admin_key(request)`: Admin-specific high-limit key
-  - JWT token decoding to extract user_id and role for rate limiting (without full verification for performance)
-  - Robust fallback logic: IP-based limiting if JWT is missing, invalid, or expired
-  - Redis connection with graceful fallback to in-memory storage if Redis unavailable
-- **Recommendation**: This file is COMPLETE and production-ready. No changes needed.
-- **Status**: ✅ Fully implemented
+*   **File:** `README.md`
+    *   **Summary:** This is the main project README with comprehensive quick-start instructions, technology stack details, development workflow, troubleshooting, monitoring setup (Prometheus/Grafana), and E2E testing documentation.
+    *   **Recommendation:** You MUST update this file to add a new "Documentation" section that links to all the new runbooks and user guides you'll create. The file already has a partial documentation section at lines 678-684 that you should expand.
 
-#### File: `backend/app/main.py` (221 lines)
-- **Summary**: The main FastAPI application entry point with complete rate limiting integration:
-  - Line 32: Imports `limiter` from rate_limiting_middleware
-  - Line 49: Attaches limiter to app state (`app.state.limiter = limiter`)
-  - Lines 85-137: Custom `RateLimitExceeded` exception handler that:
-    - Returns HTTP 429 with standardized error response format
-    - Includes `Retry-After` header (60 seconds)
-    - Uses error code `RATE_001`
-    - Adds `retry_after` field to error JSON body
-    - Includes correlation_id from logging context
-    - Optionally adds X-RateLimit headers
-- **Recommendation**: Rate limiting is correctly integrated into the FastAPI app. No changes needed.
-- **Status**: ✅ Fully implemented
+*   **File:** `docker-compose.yml`
+    *   **Summary:** Complete Docker Compose configuration for local development with 6 services (db, redis, backend, frontend, prometheus, grafana). Includes detailed comments explaining each service's purpose, environment variables, health checks, and volume mounts.
+    *   **Recommendation:** Reference this file extensively in your `deployment.md` runbook when documenting local development deployment. The file is very well-commented and serves as the source of truth for local environment setup.
 
-#### File: `backend/app/api/v1/auth.py` (301 lines)
-- **Summary**: Authentication endpoints with rate limiting applied:
-  - Lines 17, 43: Login endpoint decorated with `@limiter.limit(RATE_LIMIT_AUTH, key_func=get_client_ip_key)`
-  - IP-based rate limiting ensures multiple failed login attempts from the same IP are rate limited
-  - Decorator correctly positioned before route handler
-- **Recommendation**: This demonstrates the correct pattern for applying rate limiting. The decorator MUST be placed immediately after the `@router.post()` decorator.
-- **Status**: ✅ Correctly implemented
+*   **File:** `backend/app/config.py`
+    *   **Summary:** Application configuration using pydantic-settings for environment variable management. Defines DATABASE_URL, REDIS_URL, JWT settings, and LOG_LEVEL.
+    *   **Recommendation:** Use this file as a reference when documenting required environment variables in the deployment and troubleshooting runbooks. All sensitive configuration must come from environment variables.
 
-#### File: `backend/app/api/v1/commands.py` (338 lines)
-- **Summary**: Command endpoints with rate limiting applied:
-  - Lines 13, 29: Command submission endpoint decorated with `@limiter.limit(RATE_LIMIT_COMMANDS, key_func=get_user_id_key)`
-  - User-based rate limiting ensures per-user limits for command execution
-  - Admin users automatically get higher limit due to "admin:{user_id}" key prefix
-- **Recommendation**: The `get_user_id_key` function automatically handles admin exemption by detecting the "admin" role in the JWT and using a different key prefix (admin:{user_id}). This causes slowapi to apply RATE_LIMIT_ADMIN (10000/minute) instead of RATE_LIMIT_COMMANDS (10/minute).
-- **Status**: ✅ Correctly implemented
+*   **File:** `backend/app/services/health_service.py`
+    *   **Summary:** Implements health check functions for database and Redis using `/health/live` (liveness) and `/health/ready` (readiness) patterns following Kubernetes best practices.
+    *   **Recommendation:** Reference these health check endpoints in your troubleshooting runbook for diagnosing backend health issues. The functions `check_database_health()` and `check_redis_health()` return boolean and status tuples.
 
-#### File: `backend/requirements.txt` (34 lines)
-- **Summary**: Production dependencies including:
-  - Line 15: `slowapi>=0.1.9` (rate limiting library)
-  - Line 14: `redis>=5.0.0` (Redis client for rate limit storage)
-- **Recommendation**: All required dependencies are present.
-- **Status**: ✅ Dependencies already present
+*   **File:** `backend/app/utils/metrics.py`
+    *   **Summary:** Defines custom Prometheus metrics including `commands_executed_total`, `command_execution_duration_seconds`, `websocket_connections_active`, and `vehicle_connections_active`. Includes helper functions for incrementing/observing metrics.
+    *   **Recommendation:** Document all these custom metrics in your `monitoring.md` runbook. Explain what each metric measures, how to query it in Prometheus, and what values indicate healthy vs unhealthy states.
 
-#### File: `backend/tests/integration/test_rate_limiting.py` (456 lines)
-- **Summary**: Comprehensive integration test suite with 17 test cases covering:
-  - ✅ Auth endpoint rate limiting (5/min): Tests 6th request returns 429
-  - ✅ Command endpoint rate limiting (10/min): Tests 11th request returns 429
-  - ✅ General endpoint rate limiting (100/min): Tests high limit
-  - ✅ Admin exemption: Verifies admin users have separate counters
-  - ✅ Rate limit reset: Tests limits reset after time window
-  - ✅ Error response format: Validates standardized error structure with RATE_001 code
-  - ✅ Retry-After header: Verifies header presence and reasonable value
-  - ✅ IP isolation: Tests different IPs have separate counters
-  - ✅ User isolation: Tests different users have separate counters
-  - ✅ IP-based vs user-based: Tests auth uses IP, protected endpoints use user ID
-  - ✅ Timestamp format: Validates ISO 8601 format
-  - Redis cleanup fixtures for test isolation
-  - Mocking strategies to avoid complex database setup
-- **Recommendation**: Test suite exceeds acceptance criteria. All scenarios are covered.
-- **Status**: ✅ Comprehensive test coverage
+*   **File:** `backend/app/middleware/error_handling_middleware.py`
+    *   **Summary:** Global error handling middleware that formats all exceptions into standardized error responses with error codes, correlation IDs, and structured logging. Includes handlers for HTTP exceptions, validation errors, and unexpected exceptions.
+    *   **Recommendation:** Reference the error response format (with `error.code`, `error.correlation_id`, etc.) in your troubleshooting guide. Explain how engineers can use the correlation_id from error responses to search logs for debugging.
 
-### Implementation Status Assessment
+*   **File:** `backend/app/middleware/rate_limiting_middleware.py`
+    *   **Summary:** Rate limiting implementation using slowapi with Redis backend. Different limits for auth (5/min), commands (10/min), general API (100/min), and admin users (10000/min).
+    *   **Recommendation:** Document rate limiting behavior in the troubleshooting runbook. If users see 429 errors, explain that rate limits exist and provide the current limits. Admins are effectively unlimited.
 
-Based on my detailed code review, **Task I4.T6 is 100% complete** and meets ALL acceptance criteria:
+*   **File:** `Makefile`
+    *   **Summary:** Contains all common development commands including `make up`, `make down`, `make test`, `make e2e`, `make lint`, and `make logs`. Well-documented with help text.
+    *   **Recommendation:** Reference all these Makefile targets in your deployment.md and troubleshooting.md runbooks. Engineers should use these commands rather than raw docker-compose commands.
 
-| Acceptance Criterion | Status | Evidence |
-|---------------------|--------|----------|
-| 6th login request returns 429 | ✅ PASS | Test: `test_auth_rate_limit_enforcement` (lines 86-116) |
-| Response includes Retry-After header | ✅ PASS | Exception handler (main.py:128), Test: `test_retry_after_header` |
-| 11th command returns 429 | ✅ PASS | Test: `test_command_rate_limit_enforcement` (lines 137-177) |
-| Admins exceed limits | ✅ PASS | Admin limit = 10000/min, Test: `test_admin_separate_limit_counter` |
-| Limits reset after window | ✅ PASS | Fixed-window strategy, Test: `test_rate_limit_reset_after_window` |
-| Tests verify enforcement | ✅ PASS | 17 comprehensive test cases |
-| Tests verify reset | ✅ PASS | Test: `test_rate_limit_reset_after_window` |
-| Tests verify exemption | ✅ PASS | Test: `test_admin_separate_limit_counter` |
-| Coverage ≥80% | ✅ PASS | All middleware paths covered |
-| No errors | ✅ PASS | Code follows best practices |
+*   **File:** `scripts/init_db.sh`
+    *   **Summary:** Database initialization script that creates tables, indexes, and inserts seed data (2 users: admin/admin123 and engineer/engineer123; 2 vehicles).
+    *   **Recommendation:** Document this script in deployment.md as a required step after first startup. Include the seed credentials prominently so engineers know how to log in initially.
 
 ### Implementation Tips & Notes
 
-**CRITICAL: Task is Already Complete**
+*   **Tip:** The README already has excellent sections on Quick Start, Monitoring (Prometheus/Grafana with detailed queries), E2E Testing, and Troubleshooting. Your runbooks should COMPLEMENT not DUPLICATE this content. Reference the README where appropriate and add operational depth that goes beyond developer quick-start.
 
-Since Task I4.T6 is already fully implemented, you should:
+*   **Note:** The project already has comprehensive monitoring set up with 3 Grafana dashboards (Operations, Commands, Vehicles) that are auto-provisioned. Your `monitoring.md` runbook should explain how to interpret these dashboards, what metrics to watch, and when to escalate issues.
 
-1. ✅ **Verify implementation** by running the existing tests:
-   ```bash
-   cd backend
-   pytest tests/integration/test_rate_limiting.py -v
-   ```
+*   **Tip:** The architecture documents in `.codemachine/artifacts/architecture/` contain extensive details about deployment strategy, CI/CD pipeline, scaling, and disaster recovery. Mine these documents for authoritative information when writing your runbooks.
 
-2. ✅ **Verify coverage** by running:
-   ```bash
-   cd backend
-   pytest tests/integration/test_rate_limiting.py --cov=app.middleware.rate_limiting_middleware --cov-report=term
-   ```
+*   **Note:** The acceptance criteria requires "≥5 issues" in troubleshooting.md. Good candidates based on the codebase:
+    1. Backend won't start (database not initialized)
+    2. Frontend 401 errors (JWT token expired/invalid)
+    3. WebSocket connections failing (Redis pub/sub issues)
+    4. Rate limiting 429 errors
+    5. Health check failures (database/Redis connectivity)
+    6. Port conflicts preventing startup
+    7. Volume permission issues
 
-3. ✅ **Mark task as complete** by updating the task status to `done: true`
+*   **Tip:** The disaster_recovery.md runbook should include a backup script. Based on the architecture, this should cover PostgreSQL backup (pg_dump), Redis backup (SAVE/BGSAVE), and audit log archival to S3. Provide concrete shell commands.
 
-4. ❌ **Do NOT modify any existing code** - the implementation is production-ready
+*   **Note:** The engineer_guide.md should be a step-by-step UI walkthrough showing: 1) Login with credentials, 2) Navigate to Vehicles page, 3) Select a vehicle, 4) Go to Commands page, 5) Submit a command (e.g., ReadDTC), 6) View real-time responses via WebSocket, 7) Check command history. Use the seed credentials (admin/admin123 or engineer/engineer123) in examples.
 
-5. ❌ **Do NOT add new files** - all required files already exist
+*   **Warning:** When updating README.md, preserve all existing content. Only add a new section or expand the existing "Documentation" section at line 678. Do NOT remove or modify the extensive monitoring, E2E testing, or troubleshooting content that already exists.
 
-### Technical Implementation Notes
+*   **Tip:** For deployment.md, structure it with clear sections for each environment:
+    - **Local Development**: Reference docker-compose.yml, Makefile commands, init_db.sh
+    - **Staging**: Kubernetes/Helm deployment (reference architecture docs)
+    - **Production**: AWS EKS deployment, secrets management, multi-AZ setup
+    Include prerequisites, step-by-step commands, verification steps, and rollback procedures for each.
 
-**Rate Limiting Strategy**: Fixed-window
-- Window size: 1 minute
-- Counter resets at end of window
-- Redis key format: `slowapi:{key_func_result}` (e.g., `slowapi:ip:192.168.1.1` or `slowapi:user:{uuid}`)
-- Expiration: Automatic via Redis EXPIRE
+*   **Note:** The monitoring.md guide should explain the Prometheus query language (PromQL) examples that are already in the README (lines 287-324) but add operational context: what values are normal, what indicates problems, how to correlate metrics with logs using correlation_id.
 
-**Admin Exemption Mechanism**:
-- Admin users get key prefix `admin:{user_id}` instead of `user:{user_id}`
-- This causes a DIFFERENT rate limit counter to be used
-- Admin limit is set to 10000/minute (RATE_LIMIT_ADMIN constant)
-- Effectively unlimited for normal usage while still protecting against abuse
+*   **Tip:** Reference the health check endpoints (`/health/live` and `/health/ready`) in troubleshooting as the first diagnostic step. The readiness endpoint specifically checks database and Redis connectivity, so if it returns 503, that's a dependency issue.
 
-**IP-based vs User-based Limiting**:
-- Authentication endpoints (login, refresh): IP-based (prevents brute force attacks)
-- Protected endpoints (commands, vehicles): User-based (prevents single user abuse)
-- Fallback: If JWT cannot be decoded, falls back to IP-based limiting
+### Critical Success Factors
 
-**Error Response Example**:
-```json
-{
-  "error": {
-    "code": "RATE_001",
-    "message": "Rate limit exceeded. Please try again later.",
-    "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "timestamp": "2025-10-30T12:34:56.789Z",
-    "path": "/api/v1/auth/login",
-    "retry_after": 60
-  }
-}
-```
-
-**HTTP Headers**:
-- `Retry-After: 60` (required by HTTP spec)
-- `X-RateLimit-Limit: 5` (optional)
-- `X-RateLimit-Remaining: 0` (optional)
-
-### Additional Quality Observations
-
-1. **Excellent Error Handling**: The implementation gracefully handles Redis connection failures by falling back to in-memory storage (rate_limiting_middleware.py:154-170)
-
-2. **Performance Optimization**: JWT decoding for rate limiting uses `verify_exp=False` to avoid rejecting expired tokens (line 93) - rate limiting should apply regardless of token expiration status
-
-3. **Security Best Practice**: Admin exemption is implemented via separate rate limit counter, not by bypassing rate limiting entirely
-
-4. **Comprehensive Logging**: All rate limiting operations log debug messages with structured data
-
-5. **Test Quality**: Tests use proper fixtures, mocking, and Redis cleanup
-
-### Files Already Implemented
-
-All target files from the task specification are already present and complete:
-
-- ✅ `backend/app/middleware/rate_limiting_middleware.py` (171 lines, production-ready)
-- ✅ `backend/app/main.py` (rate limiter integrated at lines 32, 49, 85-137)
-- ✅ `backend/requirements.txt` (slowapi>=0.1.9 at line 15)
-- ✅ `backend/tests/integration/test_rate_limiting.py` (456 lines, 17 test cases)
-
-Additionally, rate limiting is correctly applied in:
-- ✅ `backend/app/api/v1/auth.py` (login endpoint, line 43)
-- ✅ `backend/app/api/v1/commands.py` (command submission, line 29)
-
-### Conclusion
-
-**Task I4.T6 is COMPLETE**. The implementation is production-ready, fully tested, and exceeds the acceptance criteria. No code changes are required. The Coder Agent should verify the implementation by running tests, confirm coverage meets requirements, and mark the task as done.
+1. **Step-by-step clarity**: Each runbook must have numbered steps that an engineer can follow without guessing
+2. **Concrete examples**: Use actual URLs (http://localhost:8000/docs), actual credentials (admin/admin123), actual commands (make up, docker-compose logs backend)
+3. **Verification steps**: After each major step, tell the engineer how to verify it worked
+4. **Error handling**: For each procedure, document what to do if it fails
+5. **Cross-references**: Link between documents (deployment.md references troubleshooting.md, monitoring.md references health checks, etc.)
+6. **README integration**: Add prominent links to all new documentation in the README's Documentation section

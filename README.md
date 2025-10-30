@@ -677,11 +677,63 @@ sovd-command-webapp/
 
 ## Documentation
 
-Detailed documentation is available in the `docs/` directory:
-- Architecture: `docs/architecture/`
-- API Specifications: `docs/api/`
-- Operational Runbooks: `docs/runbooks/`
-- User Guides: `docs/user-guides/`
+Comprehensive documentation is available to help you deploy, operate, and use the SOVD Web Application.
+
+### Operational Runbooks
+
+Step-by-step procedures for deployment, troubleshooting, disaster recovery, and monitoring:
+
+- **[Deployment Guide](docs/runbooks/deployment.md)** - Complete deployment procedures for local, staging, and production environments
+  - Local development setup with Docker Compose
+  - Staging deployment with Kubernetes/Helm
+  - Production deployment on AWS EKS
+  - Rollback procedures and post-deployment verification
+
+- **[Troubleshooting Guide](docs/runbooks/troubleshooting.md)** - Diagnostic procedures for common issues
+  - Backend won't start (database initialization)
+  - Frontend 401 unauthorized errors (JWT token issues)
+  - WebSocket connection failures (Redis pub/sub)
+  - Rate limiting (429 errors)
+  - Health check failures
+  - Port conflicts and database connection errors
+  - Advanced diagnostics with correlation IDs and Prometheus metrics
+
+- **[Disaster Recovery Guide](docs/runbooks/disaster_recovery.md)** - Backup and restore procedures
+  - Automated daily backups (database, Redis, configuration)
+  - Database restore from local backups and AWS RDS snapshots
+  - Point-in-time recovery (7-day window)
+  - Full system restore procedures
+  - Disaster scenarios (data corruption, accidental deletion, region failure)
+  - Backup verification and retention policies
+
+- **[Monitoring Guide](docs/runbooks/monitoring.md)** - Metrics, dashboards, and alerting
+  - Application metrics (commands, WebSocket, vehicle connections)
+  - Infrastructure metrics (database, Redis, Kubernetes)
+  - Grafana dashboard explanations (Operations, Commands, Vehicles)
+  - Prometheus queries (PromQL examples)
+  - Alert rules (critical, warning, info levels)
+  - Log analysis with structured JSON logging
+  - Performance baselines and troubleshooting scenarios
+
+### User Guides
+
+End-user documentation for engineers and administrators:
+
+- **[Engineer User Guide](docs/user-guides/engineer_guide.md)** - Complete UI workflow and usage instructions
+  - Getting started and logging in (default credentials: admin/admin123, engineer/engineer123)
+  - Dashboard overview and navigation
+  - Managing vehicles (viewing, filtering, searching)
+  - Executing SOVD commands (ReadDTC, ClearDTC, ReadDataByIdentifier, etc.)
+  - Viewing command history and exporting data
+  - Real-time WebSocket updates and notifications
+  - Common use cases (diagnosing errors, clearing DTCs, reading vehicle data, fleet monitoring)
+  - Troubleshooting tips and FAQs
+
+### Additional Documentation
+
+- **Architecture**: `docs/architecture/` - System design, deployment strategy, and operational architecture
+- **API Specifications**: Backend API documentation available at http://localhost:8000/docs (OpenAPI/Swagger)
+- **Development**: See [Frontend Development](frontend/README.md) and [Backend Development](backend/README.md) for development setup
 
 ## Development
 
