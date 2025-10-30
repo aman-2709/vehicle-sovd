@@ -24,11 +24,14 @@ class MockCommand:
     """Mock command object for testing."""
 
     def __init__(self, command_id: uuid.UUID, user_id: uuid.UUID):
+        from datetime import datetime, timezone
+
         self.command_id = command_id
         self.user_id = user_id
         self.status = "pending"
         self.error_message = None
         self.completed_at = None
+        self.submitted_at = datetime.now(timezone.utc)
 
 
 @pytest_asyncio.fixture

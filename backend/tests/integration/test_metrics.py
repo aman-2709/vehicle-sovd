@@ -156,16 +156,19 @@ async def test_websocket_metrics_gauge(
     """
     Test that WebSocket connection gauge metric updates correctly.
 
-    This is a unit test that directly calls the WebSocket manager's connect/disconnect
-    methods to verify the metrics system is working correctly, without requiring database operations.
+    This is a unit test that directly calls the WebSocket manager's
+    connect/disconnect methods to verify the metrics system is working
+    correctly, without requiring database operations.
 
     Verifies:
     - websocket_connections_active increments when connection is established
     - websocket_connections_active decrements when connection is closed
     """
     from unittest.mock import AsyncMock, MagicMock
-    from app.services.websocket_manager import websocket_manager
+
     from fastapi import WebSocket
+
+    from app.services.websocket_manager import websocket_manager
 
     # Get initial metrics
     response = await async_client.get("/metrics")
