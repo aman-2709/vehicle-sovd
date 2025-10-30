@@ -137,6 +137,8 @@ async def get_command_history(filters: dict[str, Any], db_session: AsyncSession)
             - vehicle_id: Filter by vehicle UUID
             - user_id: Filter by user UUID
             - status: Filter by command status
+            - start_date: Filter by start date (submitted_at >= start_date)
+            - end_date: Filter by end date (submitted_at <= end_date)
             - limit: Maximum number of records (default 50)
             - offset: Number of records to skip (default 0)
         db_session: Database session
@@ -151,6 +153,8 @@ async def get_command_history(filters: dict[str, Any], db_session: AsyncSession)
         vehicle_id=filters.get("vehicle_id"),
         user_id=filters.get("user_id"),
         status=filters.get("status"),
+        start_date=filters.get("start_date"),
+        end_date=filters.get("end_date"),
         limit=filters.get("limit", 50),
         offset=filters.get("offset", 0),
     )

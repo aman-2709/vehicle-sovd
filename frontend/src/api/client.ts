@@ -14,7 +14,12 @@ import type {
   LogoutResponse,
 } from '../types/auth';
 import type { VehicleResponse, VehicleStatusResponse, VehicleListParams } from '../types/vehicle';
-import type { CommandSubmitRequest, CommandResponse } from '../types/command';
+import type {
+  CommandSubmitRequest,
+  CommandResponse,
+  CommandHistoryParams,
+  CommandListResponse,
+} from '../types/command';
 
 // Get API base URL from environment variable or default to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -232,6 +237,28 @@ export const commandAPI = {
    */
   submitCommand: async (request: CommandSubmitRequest): Promise<CommandResponse> => {
     const response = await apiClient.post<CommandResponse>('/api/v1/commands', request);
+    return response.data;
+  },
+
+  /**
+   * Get command history with optional filtering and pagination.
+   *
+   * @param params - Query parameters for filtering and pagination
+   * @returns Paginated list of commands
+   */
+  getCommandHistory: async (params?: CommandHistoryParams): Promise<CommandListResponse> => {
+    const response = await apiClient.get<CommandListResponse>('/api/v1/commands', { params });
+    return response.data;
+  },
+
+  /**
+   * Get a single command by ID.
+   *
+   * @param commandId - UUID of the command to retrieve
+   * @returns Command response object with full details
+   */
+  getCommand: async (commandId: string): Promise<CommandResponse> => {
+    const response = await apiClient.get<CommandResponse>(`/api/v1/commands/${commandId}`);
     return response.data;
   },
 };

@@ -255,6 +255,8 @@ class TestGetCommandHistory:
                 vehicle_id=None,
                 user_id=None,
                 status=None,
+                start_date=None,
+                end_date=None,
                 limit=50,
                 offset=0,
             )
@@ -290,6 +292,8 @@ class TestGetCommandHistory:
                 vehicle_id=vehicle_id,
                 user_id=None,
                 status=None,
+                start_date=None,
+                end_date=None,
                 limit=50,
                 offset=0,
             )
@@ -324,6 +328,8 @@ class TestGetCommandHistory:
                 vehicle_id=None,
                 user_id=None,
                 status="completed",
+                start_date=None,
+                end_date=None,
                 limit=50,
                 offset=0,
             )
@@ -386,6 +392,8 @@ class TestGetCommandHistory:
                 vehicle_id=None,
                 user_id=None,
                 status=None,
+                start_date=None,
+                end_date=None,
                 limit=10,
                 offset=5,
             )

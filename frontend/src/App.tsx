@@ -14,6 +14,7 @@ import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/VehiclesPage';
 import CommandPage from './pages/CommandPage';
 import HistoryPage from './pages/HistoryPage';
+import CommandDetailPage from './pages/CommandDetailPage';
 
 const App: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -73,6 +74,16 @@ const App: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <HistoryPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/commands/:commandId"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <CommandDetailPage />
             </Layout>
           </ProtectedRoute>
         }

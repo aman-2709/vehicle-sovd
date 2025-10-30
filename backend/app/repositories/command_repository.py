@@ -104,6 +104,8 @@ async def get_commands(
     vehicle_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     status: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Command]:
@@ -115,6 +117,8 @@ async def get_commands(
         vehicle_id: Filter by vehicle ID
         user_id: Filter by user ID
         status: Filter by status
+        start_date: Filter by start date (submitted_at >= start_date)
+        end_date: Filter by end date (submitted_at <= end_date)
         limit: Maximum number of records to return
         offset: Number of records to skip
 
@@ -129,6 +133,10 @@ async def get_commands(
         query = query.where(Command.user_id == user_id)
     if status is not None:
         query = query.where(Command.status == status)
+    if start_date is not None:
+        query = query.where(Command.submitted_at >= start_date)
+    if end_date is not None:
+        query = query.where(Command.submitted_at <= end_date)
 
     query = query.order_by(Command.submitted_at.desc()).limit(limit).offset(offset)
 

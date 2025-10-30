@@ -76,3 +76,26 @@ export interface CommandFormData {
   dtcCode?: string;
   dataId?: string;
 }
+
+/**
+ * Query parameters for command history filtering
+ */
+export interface CommandHistoryParams {
+  vehicle_id?: string;
+  status?: string;
+  user_id?: string;
+  start_date?: string; // ISO 8601 format
+  end_date?: string; // ISO 8601 format
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Response schema for paginated command list
+ * Matches backend CommandListResponse schema
+ */
+export interface CommandListResponse {
+  commands: CommandResponse[];
+  limit: number;
+  offset: number;
+}
