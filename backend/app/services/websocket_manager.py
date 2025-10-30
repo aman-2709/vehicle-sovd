@@ -8,6 +8,8 @@ to multiple clients subscribed to the same command ID.
 import structlog
 from fastapi import WebSocket
 
+from app.utils.metrics import decrement_websocket_connections, increment_websocket_connections
+
 logger = structlog.get_logger(__name__)
 
 
@@ -37,6 +39,9 @@ class WebSocketManager:
 
         self.active_connections[command_id].append(websocket)
 
+        # Update Prometheus metrics
+        increment_websocket_connections()
+
         logger.info(
             "websocket_connection_registered",
             command_id=command_id,
@@ -54,6 +59,9 @@ class WebSocketManager:
         if command_id in self.active_connections:
             try:
                 self.active_connections[command_id].remove(websocket)
+
+                # Update Prometheus metrics
+                decrement_websocket_connections()
 
                 # Clean up empty command entries
                 if not self.active_connections[command_id]:

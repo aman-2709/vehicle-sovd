@@ -189,7 +189,7 @@ async def test_command_metrics_update(
         json={
             "vehicle_id": test_vehicle_id,
             "command_name": "ReadDTC",
-            "command_params": {},
+            "command_params": {"ecuAddress": "0x10"},
         },
     )
 
@@ -268,9 +268,10 @@ async def test_websocket_metrics_gauge(
         json={
             "vehicle_id": test_vehicle_id,
             "command_name": "ReadDTC",
-            "command_params": {},
+            "command_params": {"ecuAddress": "0x10"},
         },
     )
+    assert command_response.status_code == 201, f"Command creation failed: {command_response.json()}"
     command_id = command_response.json()["command_id"]
 
     # Connect to WebSocket
