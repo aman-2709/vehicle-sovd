@@ -5,9 +5,7 @@ Tests the global error handling middleware, error response format,
 correlation ID propagation, and logging functionality.
 """
 
-import json
 from datetime import datetime, timezone
-from io import StringIO
 from unittest.mock import patch
 
 import pytest

@@ -22,7 +22,6 @@ from app.api import health
 from app.api.v1 import auth, commands, vehicles, websocket
 from app.config import settings
 from app.middleware.error_handling_middleware import (
-    format_error_response,
     handle_http_exception,
     handle_unexpected_exception,
     handle_validation_error,
