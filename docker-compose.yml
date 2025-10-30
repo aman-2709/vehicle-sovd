@@ -76,6 +76,8 @@ services:
     volumes:
       # Mount source code for hot reload (uvicorn --reload watches this directory)
       - ./backend:/app
+      # Mount docs directory for SOVD schema access
+      - ./docs:/docs:ro
     depends_on:
       # Wait for database and Redis to be healthy before starting
       db:
