@@ -79,12 +79,13 @@ The application will be available at:
 - API Documentation: http://localhost:8000/docs
 - Prometheus Metrics: http://localhost:8000/metrics
 - Prometheus UI: http://localhost:9090
+- Grafana Dashboards: http://localhost:3001 (credentials: admin/admin)
 - PostgreSQL: localhost:5432 (credentials: sovd_user/sovd_pass)
 - Redis: localhost:6379
 
 ### Docker Services
 
-The development environment includes five services:
+The development environment includes six services:
 
 1. **PostgreSQL Database (`db`)**
    - Image: `postgres:15`
@@ -116,6 +117,13 @@ The development environment includes five services:
    - Port: 9090
    - Scrapes backend metrics every 10 seconds
    - Persistent volume: `prometheus-data`
+
+6. **Grafana Dashboards (`grafana`)**
+   - Image: `grafana/grafana:10.2.0`
+   - Port: 3001
+   - Auto-configured with Prometheus datasource
+   - Pre-loaded with 3 dashboards (Operations, Commands, Vehicles)
+   - Persistent volume: `grafana-data`
 
 ### Database Initialization
 
@@ -252,12 +260,14 @@ docker-compose exec frontend sh
 
 ## Monitoring
 
-The application includes Prometheus metrics for monitoring system health and performance.
+The application includes comprehensive monitoring with Prometheus metrics and Grafana dashboards for real-time visualization of system health and performance.
 
-### Accessing Metrics
+### Accessing Metrics and Dashboards
 
 - **Metrics Endpoint**: http://localhost:8000/metrics (Prometheus exposition format)
 - **Prometheus UI**: http://localhost:9090 (query and visualize metrics)
+- **Grafana Dashboards**: http://localhost:3001 (pre-configured dashboards)
+  - **Login Credentials**: username: `admin`, password: `admin` (you'll be prompted to change on first login)
 
 ### Available Metrics
 
@@ -335,6 +345,96 @@ To verify that Prometheus is successfully scraping the backend:
 3. Verify the `sovd-backend` target shows as **UP** (green)
 4. Check **Last Scrape** timestamp is recent (within 10-15 seconds)
 
+### Grafana Dashboards
+
+Three pre-configured dashboards are automatically loaded on startup for comprehensive monitoring:
+
+#### 1. Operations Dashboard
+Monitors overall system health and API performance.
+
+**Key Panels:**
+- **HTTP Request Rate**: Real-time request rate by method and endpoint
+- **Error Rate**: 4xx and 5xx errors per second
+- **95th Percentile Latency**: HTTP request latency (p95 and p50)
+- **Active WebSocket Connections**: Current WebSocket connection count
+- **Request Success Rate**: Percentage of successful (2xx) requests
+- **Request Count by Endpoint**: Breakdown of traffic by endpoint
+- **Average Response Time by Endpoint**: Mean latency per endpoint
+
+**Use Cases:**
+- Monitor API health and response times
+- Detect error spikes or performance degradation
+- Track WebSocket connection stability
+- Identify high-traffic endpoints
+
+#### 2. Command Dashboard
+Focuses on SOVD command execution metrics.
+
+**Key Panels:**
+- **Commands per Minute**: Command execution rate by status (completed, failed, timeout)
+- **Command Success Rate**: Percentage gauge showing successful commands
+- **Average Command Execution Time**: Mean round-trip time for commands
+- **Total Commands Executed**: Cumulative count of all commands
+- **Command Timeout Count**: Number of commands that timed out
+- **Command Execution Time - 95th Percentile**: Latency histogram (p95, p50, average)
+- **Command Status Distribution**: Pie chart showing command outcomes
+
+**Use Cases:**
+- Monitor command processing performance
+- Track command success vs failure rates
+- Identify command timeout issues
+- Analyze command execution latency trends
+
+#### 3. Vehicle Dashboard
+Visualizes vehicle connectivity and system load distribution.
+
+**Key Panels:**
+- **Active Vehicle Connections**: Gauge showing currently connected vehicles
+- **Vehicle Connections Over Time**: Historical trend of vehicle connections
+- **Commands Executed - Status Distribution**: Donut chart of command outcomes
+- **Command Rate by Status**: Stacked time series of command rates
+- **Total Vehicles Processed**: Current connected vehicle count
+- **Command Success Rate**: Overall success percentage
+- **WebSocket Connections**: Active WebSocket connection count
+
+**Use Cases:**
+- Monitor vehicle connectivity status
+- Track system load distribution across vehicles
+- Correlate vehicle connections with command activity
+- Identify connectivity stability issues
+
+### Using Grafana
+
+**First Login:**
+1. Navigate to http://localhost:3001
+2. Login with username `admin` and password `admin`
+3. You'll be prompted to change the password (optional for local development)
+
+**Viewing Dashboards:**
+1. Click the **Dashboards** icon in the left sidebar (four squares icon)
+2. Select one of the three pre-configured dashboards:
+   - SOVD Operations Dashboard
+   - SOVD Command Dashboard
+   - SOVD Vehicle Dashboard
+
+**Dashboard Features:**
+- **Auto-refresh**: Dashboards refresh every 10 seconds automatically
+- **Time Range**: Default view shows the last 15 minutes (customizable via top-right time picker)
+- **Panel Zoom**: Click and drag on any time series panel to zoom into a specific time range
+- **Legend Interaction**: Click legend items to toggle series visibility
+- **Panel Details**: Click panel title → **Edit** to see query details and configuration
+
+**Customizing Dashboards:**
+- Dashboards can be edited in the Grafana UI
+- Changes are persisted in the `grafana-data` Docker volume
+- To restore original dashboards, remove the volume: `docker-compose down -v && make up`
+
+**Querying Data:**
+1. Navigate to **Explore** (compass icon in left sidebar)
+2. Select **Prometheus** datasource
+3. Enter PromQL queries (see "Example Queries" section above)
+4. Visualize results in table or graph format
+
 ### Troubleshooting Metrics
 
 **Metrics endpoint returns 404:**
@@ -357,6 +457,30 @@ To verify that Prometheus is successfully scraping the backend:
 - Wait 10-15 seconds for next scrape
 - Refresh the /metrics endpoint
 - Verify metrics are initialized in backend startup logs
+
+**Grafana UI not accessible:**
+- Verify Grafana container is running: `docker-compose ps grafana`
+- Check Grafana logs: `docker-compose logs grafana`
+- Ensure port 3001 is not in use: `sudo lsof -ti:3001`
+- Verify Grafana started successfully (look for "HTTP Server Listen" in logs)
+
+**Grafana shows "Data source is working" but dashboards are empty:**
+- Generate backend activity (submit commands, make API requests)
+- Wait 10-15 seconds for Prometheus to scrape metrics
+- Refresh the dashboard
+- Verify Prometheus has data: visit http://localhost:9090 and query `up`
+
+**Dashboards not appearing in Grafana:**
+- Check provisioning logs: `docker-compose logs grafana | grep provisioning`
+- Verify dashboard files exist: `ls -la infrastructure/docker/grafana/dashboards/`
+- Restart Grafana: `docker-compose restart grafana`
+- Check for JSON syntax errors in dashboard files
+
+**Datasource shows as "Error" in Grafana:**
+- Verify Prometheus is running: `docker-compose ps prometheus`
+- Test Prometheus from Grafana container: `docker-compose exec grafana wget -O- http://prometheus:9090/api/v1/status/config`
+- Check datasource URL in Grafana UI: Configuration → Data Sources → Prometheus (should be `http://prometheus:9090`)
+- Restart both services: `docker-compose restart prometheus grafana`
 
 ## End-to-End Testing
 

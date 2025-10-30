@@ -132,6 +132,37 @@ services:
     networks:
       - sovd-network
 
+  # Grafana Dashboards Service
+  # Metrics visualization and monitoring dashboards for SOVD Command WebApp
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: sovd-grafana
+    restart: unless-stopped
+    environment:
+      # Admin credentials for Grafana UI
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Disable anonymous access for security
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Allow embedding Grafana panels in iframes (optional)
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    ports:
+      - "3001:3000"  # Expose Grafana on localhost:3001 (internal port 3000)
+    volumes:
+      # Mount datasource configuration for auto-provisioning Prometheus
+      - ./infrastructure/docker/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      # Mount dashboard provisioning configuration
+      - ./infrastructure/docker/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      # Mount dashboard JSON files
+      - ./infrastructure/docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Persist Grafana data (user preferences, custom dashboards, etc.)
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      # Ensure Prometheus is available before Grafana starts
+      - prometheus
+    networks:
+      - sovd-network
+
 # Network Configuration
 # Bridge network allows services to communicate using service names as hostnames
 networks:
@@ -151,4 +182,8 @@ volumes:
 
   # Prometheus metrics data persistence
   prometheus-data:
+    driver: local
+
+  # Grafana data persistence (dashboards, settings, user preferences)
+  grafana-data:
     driver: local

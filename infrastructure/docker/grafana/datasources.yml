@@ -1,0 +1,16 @@
+# Grafana datasource provisioning configuration
+# This file automatically configures Prometheus as a datasource on Grafana startup
+# Provisioning eliminates the need for manual datasource configuration in the UI
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy  # Grafana backend proxies requests (required for Docker networking)
+    url: http://prometheus:9090  # Use Docker service name, not localhost
+    isDefault: true  # Set as the default datasource for all dashboards
+    editable: false  # Prevent UI modifications to ensure consistency
+    jsonData:
+      httpMethod: POST  # Use POST for larger queries
+      timeInterval: 15s  # Match Prometheus scrape interval

@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning configuration
+# This file tells Grafana where to find dashboard JSON files and how to handle them
+
+apiVersion: 1
+
+providers:
+  - name: 'SOVD Dashboards'
+    orgId: 1  # Default organization ID
+    folder: ''  # Root folder (no subfolder)
+    type: file  # Load dashboards from filesystem
+    disableDeletion: false  # Allow dashboard deletion in UI
+    updateIntervalSeconds: 10  # Check for dashboard updates every 10 seconds
+    allowUiUpdates: true  # Allow modifications in UI (changes are temporary, file is source of truth)
+    options:
+      path: /var/lib/grafana/dashboards  # Directory where dashboard JSON files are stored
