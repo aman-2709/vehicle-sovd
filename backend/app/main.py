@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import health
@@ -137,7 +138,8 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded)
     return response
 
 # Register middleware (order matters - LIFO execution)
-# Execution order: LoggingMiddleware → CORSMiddleware → Endpoints
+# Execution order: LoggingMiddleware → CORSMiddleware → SlowAPIMiddleware → Endpoints
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(LoggingMiddleware)
 
 # Configure CORS for frontend communication
