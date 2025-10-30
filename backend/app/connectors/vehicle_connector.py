@@ -20,7 +20,11 @@ from app.config import settings
 from app.database import async_session_maker
 from app.repositories import command_repository, response_repository
 from app.services import audit_service
-from app.utils.metrics import increment_command_counter, observe_command_duration
+from app.utils.metrics import (
+    increment_command_counter,
+    increment_timeout_counter,
+    observe_command_duration,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -552,6 +556,10 @@ async def execute_command(
 
                 # Determine failure status (timeout vs failed)
                 failure_status = "timeout" if isinstance(e, TimeoutError) else "failed"
+
+                # Increment the timeout counter specifically for timeout errors
+                if isinstance(e, TimeoutError):
+                    increment_timeout_counter()
 
                 await command_repository.update_command_status(
                     db=db_session,

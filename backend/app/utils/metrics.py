@@ -36,6 +36,12 @@ vehicle_connections_active = Gauge(
     'Number of vehicles currently connected to the system'
 )
 
+# Command timeout metric
+sovd_command_timeout_total = Counter(
+    'sovd_command_timeout_total',
+    'Total number of SOVD command timeouts (vehicle did not respond)'
+)
+
 
 def increment_command_counter(status: str) -> None:
     """
@@ -75,3 +81,8 @@ def set_vehicle_connections(count: int) -> None:
         count: Number of connected vehicles
     """
     vehicle_connections_active.set(count)
+
+
+def increment_timeout_counter() -> None:
+    """Increment the command timeout counter."""
+    sovd_command_timeout_total.inc()
