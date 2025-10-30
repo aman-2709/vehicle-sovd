@@ -77,12 +77,14 @@ The application will be available at:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
 - API Documentation: http://localhost:8000/docs
+- Prometheus Metrics: http://localhost:8000/metrics
+- Prometheus UI: http://localhost:9090
 - PostgreSQL: localhost:5432 (credentials: sovd_user/sovd_pass)
 - Redis: localhost:6379
 
 ### Docker Services
 
-The development environment includes four services:
+The development environment includes five services:
 
 1. **PostgreSQL Database (`db`)**
    - Image: `postgres:15`
@@ -108,6 +110,12 @@ The development environment includes four services:
    - Vite HMR enabled
    - Depends on: backend
    - Environment variables configured in `docker-compose.yml`
+
+5. **Prometheus Monitoring (`prometheus`)**
+   - Image: `prom/prometheus:latest`
+   - Port: 9090
+   - Scrapes backend metrics every 10 seconds
+   - Persistent volume: `prometheus-data`
 
 ### Database Initialization
 
@@ -241,6 +249,114 @@ docker-compose ps
 docker-compose exec backend bash
 docker-compose exec frontend sh
 ```
+
+## Monitoring
+
+The application includes Prometheus metrics for monitoring system health and performance.
+
+### Accessing Metrics
+
+- **Metrics Endpoint**: http://localhost:8000/metrics (Prometheus exposition format)
+- **Prometheus UI**: http://localhost:9090 (query and visualize metrics)
+
+### Available Metrics
+
+**HTTP Metrics** (automatic via prometheus-fastapi-instrumentator):
+- `http_requests_total`: Total HTTP request count by method, endpoint, and status
+- `http_request_duration_seconds`: Request latency histogram
+- `http_requests_in_progress`: Number of HTTP requests currently being processed
+
+**Custom Application Metrics**:
+- `commands_executed_total`: Total SOVD commands executed (labeled by status: completed, failed, timeout)
+- `command_execution_duration_seconds`: Command round-trip time histogram from submission to completion
+- `websocket_connections_active`: Current number of active WebSocket connections for real-time updates
+- `vehicle_connections_active`: Number of vehicles currently connected to the system
+
+### Example Queries
+
+In the Prometheus UI (http://localhost:9090), navigate to **Graph** and try these queries:
+
+**Request Rate:**
+```promql
+# Total requests per second in the last 5 minutes
+rate(http_requests_total[5m])
+
+# Requests per second by endpoint
+sum by (handler) (rate(http_requests_total[5m]))
+```
+
+**Command Success Rate:**
+```promql
+# Command success rate over 5 minutes
+rate(commands_executed_total{status="completed"}[5m]) / rate(commands_executed_total[5m])
+
+# Total completed vs failed commands
+sum(commands_executed_total{status="completed"})
+sum(commands_executed_total{status="failed"})
+```
+
+**Latency Metrics:**
+```promql
+# 95th percentile command execution time
+histogram_quantile(0.95, rate(command_execution_duration_seconds_bucket[5m]))
+
+# 50th percentile (median) HTTP request duration
+histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))
+```
+
+**Connection Metrics:**
+```promql
+# Current active WebSocket connections
+websocket_connections_active
+
+# Current connected vehicles
+vehicle_connections_active
+```
+
+### Viewing Metrics in Terminal
+
+You can also view raw metrics in Prometheus exposition format using curl:
+
+```bash
+# View all metrics
+curl http://localhost:8000/metrics
+
+# Filter for specific metrics
+curl http://localhost:8000/metrics | grep commands_executed
+curl http://localhost:8000/metrics | grep websocket_connections
+```
+
+### Prometheus Targets Health
+
+To verify that Prometheus is successfully scraping the backend:
+
+1. Open Prometheus UI: http://localhost:9090
+2. Navigate to **Status** → **Targets**
+3. Verify the `sovd-backend` target shows as **UP** (green)
+4. Check **Last Scrape** timestamp is recent (within 10-15 seconds)
+
+### Troubleshooting Metrics
+
+**Metrics endpoint returns 404:**
+- Verify backend is running: `docker-compose ps backend`
+- Check backend logs: `docker-compose logs backend`
+- Ensure prometheus-fastapi-instrumentator is installed
+
+**Prometheus UI not accessible:**
+- Verify Prometheus container is running: `docker-compose ps prometheus`
+- Check Prometheus logs: `docker-compose logs prometheus`
+- Ensure port 9090 is not in use: `sudo lsof -ti:9090`
+
+**Prometheus shows backend target as DOWN:**
+- Verify backend is healthy: `curl http://localhost:8000/health`
+- Check Prometheus configuration: `cat infrastructure/docker/prometheus.yml`
+- Review Prometheus logs for scrape errors: `docker-compose logs prometheus | grep error`
+
+**Custom metrics not appearing:**
+- Submit a command to generate metric data
+- Wait 10-15 seconds for next scrape
+- Refresh the /metrics endpoint
+- Verify metrics are initialized in backend startup logs
 
 ## End-to-End Testing
 

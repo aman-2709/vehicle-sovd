@@ -20,6 +20,7 @@ from app.models.user import User
 from app.repositories.user_repository import get_user_by_id
 from app.services.auth_service import verify_access_token
 from app.services.websocket_manager import websocket_manager
+from app.utils.metrics import decrement_websocket_connections, increment_websocket_connections
 
 logger = structlog.get_logger(__name__)
 
@@ -298,6 +299,10 @@ async def websocket_endpoint(
     # Register connection with manager
     await websocket_manager.connect(command_id_str, websocket)
 
+    # Increment WebSocket connections metric
+    increment_websocket_connections()
+    logger.debug("websocket_metric_incremented", command_id=command_id_str)
+
     # Create Redis client
     redis_client: redis.Redis = redis.from_url(  # type: ignore[no-untyped-call]
         settings.REDIS_URL, decode_responses=True
@@ -340,6 +345,10 @@ async def websocket_endpoint(
     finally:
         # Cleanup: unregister connection and close Redis
         await websocket_manager.disconnect(command_id_str, websocket)
+
+        # Decrement WebSocket connections metric
+        decrement_websocket_connections()
+        logger.debug("websocket_metric_decremented", command_id=command_id_str)
 
         try:
             await redis_client.aclose()

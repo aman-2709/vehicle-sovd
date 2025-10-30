@@ -20,6 +20,7 @@ from app.config import settings
 from app.database import async_session_maker
 from app.repositories import command_repository, response_repository
 from app.services import audit_service
+from app.utils.metrics import increment_command_counter, observe_command_duration
 
 logger = structlog.get_logger(__name__)
 
@@ -466,6 +467,18 @@ async def execute_command(
                 completed_at=completed_at,
             )
 
+            # Update Prometheus metrics
+            if command:
+                increment_command_counter("completed")
+                duration = (completed_at - command.submitted_at).total_seconds()
+                observe_command_duration(duration)
+                logger.debug(
+                    "command_metrics_recorded",
+                    command_id=str(command_id),
+                    status="completed",
+                    duration_seconds=duration,
+                )
+
         # Publish status event to Redis Pub/Sub
         redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]
         try:
@@ -537,6 +550,9 @@ async def execute_command(
                 # Get command to extract user_id for audit logging
                 command = await command_repository.get_command_by_id(db_session, command_id)
 
+                # Determine failure status (timeout vs failed)
+                failure_status = "timeout" if isinstance(e, TimeoutError) else "failed"
+
                 await command_repository.update_command_status(
                     db=db_session,
                     command_id=command_id,
@@ -544,6 +560,18 @@ async def execute_command(
                     error_message=str(e),
                     completed_at=failed_at,
                 )
+
+                # Update Prometheus metrics
+                if command:
+                    increment_command_counter(failure_status)
+                    duration = (failed_at - command.submitted_at).total_seconds()
+                    observe_command_duration(duration)
+                    logger.debug(
+                        "command_metrics_recorded",
+                        command_id=str(command_id),
+                        status=failure_status,
+                        duration_seconds=duration,
+                    )
 
             # Publish error event to Redis Pub/Sub
             redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)  # type: ignore[no-untyped-call]

@@ -107,6 +107,31 @@ services:
     networks:
       - sovd-network
 
+  # Prometheus Monitoring Service
+  # Time-series database for collecting and storing metrics from backend
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sovd-prometheus
+    restart: unless-stopped
+    command:
+      # Enable web console and use mounted configuration file
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"  # Expose Prometheus UI on localhost:9090
+    volumes:
+      # Mount Prometheus configuration from infrastructure/docker
+      - ./infrastructure/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Persist metrics data across container restarts
+      - prometheus-data:/prometheus
+    depends_on:
+      # Ensure backend is running before Prometheus starts scraping
+      - backend
+    networks:
+      - sovd-network
+
 # Network Configuration
 # Bridge network allows services to communicate using service names as hostnames
 networks:
@@ -122,4 +147,8 @@ volumes:
 
   # Redis data persistence (AOF logs)
   sovd-redis-data:
+    driver: local
+
+  # Prometheus metrics data persistence
+  prometheus-data:
     driver: local

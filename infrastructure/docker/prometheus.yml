@@ -1,0 +1,19 @@
+# Prometheus configuration for SOVD Command WebApp
+# This file configures Prometheus to scrape metrics from the backend service
+
+global:
+  scrape_interval: 15s      # Scrape metrics every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+  external_labels:
+    monitor: 'sovd-monitor'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # SOVD Backend API metrics
+  - job_name: 'sovd-backend'
+    static_configs:
+      - targets: ['backend:8000']  # Use Docker service name, not localhost
+    metrics_path: '/metrics'
+    scrape_interval: 10s           # More frequent scraping for development
+    scrape_timeout: 5s

@@ -13,6 +13,7 @@ Provides:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.v1 import auth, commands, vehicles, websocket
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -47,6 +48,10 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(vehicles.router, prefix="/api/v1", tags=["vehicles"])
 app.include_router(commands.router, prefix="/api/v1", tags=["commands"])
 app.include_router(websocket.router, tags=["websocket"])
+
+# Setup Prometheus instrumentation
+# This automatically creates metrics for HTTP requests and exposes /metrics endpoint
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")
@@ -92,6 +97,7 @@ async def startup_event() -> None:
     print("SOVD Backend starting up...")
     print("Environment: development")
     print("Listening on: 0.0.0.0:8000")
+    print("Prometheus metrics available at: /metrics")
 
 
 # Application shutdown event
