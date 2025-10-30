@@ -45,62 +45,121 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Note: Architecture Documents Not Found
+### Context: command-endpoints (from 04_Behavior_and_Communication.md)
 
-The architecture documents referenced in the task inputs (Architecture Blueprint Section 3.7, 02_Architecture_Overview.md, 04_Behavior_and_Communication.md) could not be located in the expected paths. However, based on the codebase analysis and the OpenAPI specification found at `docs/api/openapi.yaml`, I can provide the following context:
+```markdown
+**Command Endpoints**
 
-### API Endpoints Context (from existing implementation)
+POST   /api/v1/commands
+Headers:  Authorization: Bearer {token}
+Request:  {
+  "vehicle_id": "uuid",
+  "command_name": "ReadDTC",
+  "command_params": { "ecuAddress": "0x10", "format": "UDS" }
+}
+Response: {
+  "command_id": "uuid",
+  "status": "pending",
+  "submitted_at": "2025-10-28T10:00:00Z",
+  "stream_url": "wss://api.sovd.example.com/ws/responses/{command_id}"
+}
 
-The existing command API implementation (`backend/app/api/v1/commands.py`) provides:
+GET    /api/v1/commands/{command_id}
+Headers:  Authorization: Bearer {token}
+Response: {
+  "command_id": "uuid",
+  "vehicle_id": "uuid",
+  "command_name": "ReadDTC",
+  "command_params": { ... },
+  "status": "completed",
+  "submitted_at": "2025-10-28T10:00:00Z",
+  "completed_at": "2025-10-28T10:00:01.5Z"
+}
 
-1. **POST /api/v1/commands** - Submit command (requires engineer/admin role)
-2. **GET /api/v1/commands/{command_id}** - Get single command details
-3. **GET /api/v1/commands/{command_id}/responses** - Get command responses
-4. **GET /api/v1/commands** - List commands with filters (already supports: vehicle_id, status, limit, offset)
+GET    /api/v1/commands/{command_id}/responses
+Headers:  Authorization: Bearer {token}
+Response: [
+  {
+    "response_id": "uuid",
+    "response_payload": { "dtcCode": "P0420", "description": "Catalyst System Efficiency Below Threshold" },
+    "sequence_number": 1,
+    "is_final": false,
+    "received_at": "2025-10-28T10:00:01Z"
+  },
+  {
+    "response_id": "uuid",
+    "response_payload": { "status": "complete" },
+    "sequence_number": 2,
+    "is_final": true,
+    "received_at": "2025-10-28T10:00:01.5Z"
+  }
+]
 
-The list endpoint (GET /api/v1/commands) ALREADY has most of the required functionality:
-- Pagination via `limit` and `offset` query parameters
-- Filtering by `vehicle_id` and `status`
-- Authentication required via `get_current_user` dependency
+GET    /api/v1/commands
+Headers:  Authorization: Bearer {token}
+Query:    ?vehicle_id=uuid&status=completed&limit=20&offset=0
+Response: [
+  { "command_id": "uuid", "command_name": "ReadDTC", "status": "completed", ... }
+]
+```
 
-**What's Missing for I4.T1:**
-1. **RBAC Enforcement**: Currently NO role-based filtering (engineers see all commands, not just their own)
-2. **User Filter**: No `user_id` filter in the API endpoint (though backend service supports it)
-3. **Date Range Filter**: No date filtering capability
-4. **Frontend**: No History page or CommandHistory component exists yet
-5. **Command Detail Page**: No dedicated detail page for viewing single command
+### Context: rbac (from 05_Operational_Architecture.md)
 
-### Command Data Model Context
+```markdown
+**Authorization Strategy: Role-Based Access Control (RBAC)**
 
-From `backend/app/models/command.py`:
-- `command_id`: UUID (primary key)
-- `user_id`: UUID (foreign key to users)
-- `vehicle_id`: UUID (foreign key to vehicles)
-- `command_name`: String (SOVD command identifier)
-- `command_params`: JSONB (command parameters)
-- `status`: String ('pending', 'in_progress', 'completed', 'failed')
-- `error_message`: Text (optional)
-- `submitted_at`: DateTime with timezone
-- `completed_at`: DateTime with timezone (nullable)
-- Relationships: `user`, `vehicle`, `responses`, `audit_logs`
+**Roles:**
+- **Engineer**: Can view vehicles, execute commands, view command history (own commands)
+- **Admin**: Full access (user management, system configuration, all command history)
 
-### Authentication & Authorization Context
+**Implementation:**
+- Role stored in `users.role` field
+- Access token JWT includes `role` claim
+- FastAPI dependencies enforce authorization:
+  ```python
+  @router.post("/commands")
+  async def execute_command(
+      user: User = Depends(require_role(["engineer", "admin"])),
+      ...
+  ):
+  ```
+- Unauthorized access returns HTTP 403 Forbidden
 
-From `backend/app/dependencies.py`:
-- `get_current_user()`: Extracts user from JWT token, returns User object
-- `require_role(allowed_roles)`: Factory function for role-based access control
-- User roles: "engineer", "admin", "viewer"
-- User object has: `user_id`, `username`, `email`, `role`, `is_active`
+**Future Enhancement: Fine-Grained Permissions**
+- Transition to permission-based model (e.g., `execute_command`, `view_all_commands`)
+- Implement using Casbin or custom RBAC engine
+```
 
-### RBAC Requirements for This Task
+### Context: communication-security (from 04_Behavior_and_Communication.md)
 
-**Engineers (role="engineer")**:
-- Should see ONLY commands they submitted (filter by `user_id == current_user.user_id`)
-- Can filter by vehicle, status, date range
+```markdown
+**Communication Security**
 
-**Admins (role="admin")**:
-- Should see ALL commands from all users
-- Can filter by vehicle, status, date range, AND user
+**TLS Everywhere:**
+- Client ↔ API Gateway: TLS 1.3 (HTTPS, WSS)
+- API Gateway ↔ Backend Services: TLS (internal certificates)
+- Backend ↔ Vehicle: TLS (mutual TLS for production)
+
+**Authentication:**
+- JWT tokens in Authorization header for REST APIs
+- JWT token in query parameter for WebSocket (upgraded after validation)
+- Token expiration: 15 minutes (access), 7 days (refresh)
+
+**Authorization:**
+- RBAC middleware validates user role for every endpoint
+- Command execution requires `engineer` or `admin` role
+- Admin-only endpoints (user management) enforce `admin` role
+
+**Input Validation:**
+- Pydantic models validate all request payloads
+- SOVD Protocol Handler validates command structure against SOVD 2.0 spec
+- SQL injection prevention via parameterized queries (SQLAlchemy ORM)
+- XSS prevention via React's automatic escaping
+
+**Rate Limiting:**
+- API Gateway (Nginx) enforces rate limits: 100 req/min per user
+- Prevents abuse and DoS attacks
+```
 
 ---
 
@@ -110,315 +169,86 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-#### Backend Files
+*   **File:** `backend/app/api/v1/commands.py`
+    *   **Summary:** This file contains the FastAPI router for command management endpoints. **CRITICAL:** It already implements a fully functional `GET /api/v1/commands` endpoint (lines 205-335) with comprehensive RBAC enforcement, pagination, and filtering support including vehicle_id, status, user_id (admin only), start_date, and end_date filters.
+    *   **Recommendation:** You MUST examine this existing implementation carefully. The backend API endpoint is **ALREADY COMPLETE** and passes all tests in `test_command_history.py`. Your task is primarily to build the **FRONTEND** components that consume this API. Do NOT modify the backend unless you find a specific bug or need to add missing functionality that is not already there.
+    *   **Key Implementation Details:**
+        - Lines 266-297: RBAC enforcement - Engineers are automatically filtered to see only their own commands (effective_user_id = current_user.user_id), while admins can optionally filter by user_id or see all commands
+        - Lines 242-264: Date parsing with proper error handling (ISO 8601 format with Z suffix replacement)
+        - Lines 311-319: Filters dictionary construction passed to service layer
+        - Lines 331-335: Response using CommandListResponse schema with commands list, limit, and offset
 
-**File:** `backend/app/api/v1/commands.py`
-- **Summary**: FastAPI router with command endpoints. The `list_commands` endpoint (line 205-263) already implements pagination and filtering.
-- **Recommendation**: You MUST modify the `list_commands` endpoint to:
-  1. Add RBAC enforcement: if `current_user.role == "engineer"`, force `filters["user_id"] = current_user.user_id`
-  2. Add optional `user_id` query parameter (only usable by admins)
-  3. Add optional date range query parameters: `start_date`, `end_date`
-  4. The endpoint currently uses `get_current_user` dependency - this is CORRECT, keep it
-- **Current Implementation**: Already has vehicle_id and status filters, limit/offset pagination
+*   **File:** `backend/app/services/command_service.py`
+    *   **Summary:** This file contains the business logic for command operations. It already includes `get_command_history()` function (lines 131-164) that delegates to the repository layer with all filter parameters.
+    *   **Recommendation:** This service function is complete and functional. Do NOT modify unless there is a specific missing feature.
 
-**File:** `backend/app/services/command_service.py`
-- **Summary**: Business logic for command operations. The `get_command_history` function (line 131-160) supports user_id filtering.
-- **Recommendation**: You SHOULD enhance `get_command_history` to:
-  1. Accept `start_date` and `end_date` parameters for date range filtering
-  2. The function ALREADY supports `user_id` filtering - you can use this!
-- **Note**: Service layer correctly delegates to repository layer
+*   **File:** `backend/app/repositories/command_repository.py`
+    *   **Summary:** This file contains the data access layer for commands. The `get_commands()` function (lines 102-144) implements comprehensive filtering with SQLAlchemy queries including vehicle_id, user_id, status, start_date, end_date filters, plus pagination with limit/offset, and ordering by submitted_at DESC (newest first).
+    *   **Recommendation:** The repository layer is complete. It properly handles all filters and pagination. Do NOT modify.
 
-**File:** `backend/app/repositories/command_repository.py`
-- **Summary**: Data access layer for commands. The `get_commands` function (line 102-136) builds queries with filters.
-- **Recommendation**: You MUST modify `get_commands` to:
-  1. Add `start_date` and `end_date` parameters
-  2. Add date range filtering using SQLAlchemy's `Command.submitted_at >= start_date` and `Command.submitted_at <= end_date`
-  3. Use `.where()` clauses like the existing vehicle_id and status filters (see lines 126-131)
+*   **File:** `backend/app/dependencies.py`
+    *   **Summary:** This file contains authentication and authorization dependency injection functions. It includes `get_current_user()` for JWT validation and `require_role()` factory function for role-based authorization.
+    *   **Recommendation:** You MUST use `get_current_user()` in your frontend API calls to include the JWT token in the Authorization header. The user's role is embedded in the JWT and enforced by the backend.
 
-**File:** `backend/app/models/command.py`
-- **Summary**: SQLAlchemy ORM model for Command entity with all required fields
-- **Recommendation**: You SHOULD use the existing relationships:
-  - `command.user` to access user information (for displaying username)
-  - `command.vehicle` to access vehicle information (for displaying VIN)
-  - These relationships are already defined with proper foreign keys
+*   **File:** `backend/app/schemas/command.py`
+    *   **Summary:** This file defines Pydantic schemas for command-related API requests and responses. Key schemas:
+        - `CommandResponse`: Complete command details with all fields (command_id, user_id, vehicle_id, command_name, command_params, status, error_message, submitted_at, completed_at)
+        - `CommandListResponse`: Paginated response with commands list, limit, and offset
+    *   **Recommendation:** Use these exact schemas for TypeScript type definitions in the frontend. The API returns data matching these schemas.
 
-**File:** `backend/app/schemas/command.py`
-- **Summary**: Pydantic schemas for command API. Has `CommandResponse` and `CommandListResponse`.
-- **Recommendation**: You MAY want to create an enhanced response schema that includes user and vehicle details (username, VIN) to avoid N+1 queries. Consider using SQLAlchemy's `joinedload` or create a new schema with nested user/vehicle objects.
+*   **File:** `backend/app/models/command.py` and `backend/app/models/user.py`
+    *   **Summary:** SQLAlchemy ORM models defining the database schema. Command model has all necessary fields and relationships. User model includes role field for RBAC.
+    *   **Recommendation:** These define the data structure you'll be displaying. Note that the Command model includes relationships to User and Vehicle, which means you can display user information if needed (though the current API doesn't return joined data).
 
-**File:** `backend/app/dependencies.py`
-- **Summary**: Authentication and authorization dependencies
-- **Recommendation**: You MUST use `get_current_user` to access the authenticated user and check `current_user.role` for RBAC enforcement. The `require_role` factory is already available but NOT needed for this endpoint since both engineers and admins can access it (with different filtering).
-
-#### Frontend Files
-
-**File:** `frontend/src/pages/CommandPage.tsx`
-- **Summary**: Existing page for command submission with vehicle selector and form
-- **Recommendation**: You SHOULD follow the same component structure pattern:
-  - Use MUI components (Container, Paper, Typography, Grid, Box)
-  - Use React Query (`useQuery`, `useMutation`) for data fetching
-  - Implement loading, error, and empty states
-  - This is the BEST reference for styling and layout consistency
-
-**File:** `frontend/src/components/vehicles/VehicleList.tsx`
-- **Summary**: Table component displaying vehicles with status chips
-- **Recommendation**: You SHOULD use this as a template for CommandHistory component:
-  - Uses MUI Table with TableContainer, TableHead, TableBody, TableRow, TableCell
-  - Implements loading state with CircularProgress
-  - Implements error state with Alert
-  - Implements empty state with Typography
-  - Uses formatRelativeTime utility for timestamps (see line 126)
-  - Uses Chip component for status display with color coding (see lines 117-122)
-
-**File:** `frontend/src/context/AuthContext.tsx`
-- **Summary**: Authentication context providing user profile and role
-- **Recommendation**: You MUST use the `useAuth()` hook to:
-  1. Get the current user's role: `const { user } = useAuth()`
-  2. Check if `user?.role === "admin"` to show/hide the user filter
-  3. The user profile includes: username, role, user_id
-
-**File:** `frontend/src/api/client.ts`
-- **Summary**: Axios client with JWT injection and token refresh
-- **Recommendation**: You MUST extend this file to add a `commandAPI.getCommandHistory()` function with query parameters for filters. Follow the pattern used for other API calls (see the existing commandAPI structure starting around line 150+).
+*   **File:** `backend/tests/integration/test_command_history.py`
+    *   **Summary:** **THIS IS CRITICAL** - This is a comprehensive test suite (714 lines) that verifies ALL the functionality you need to implement in the frontend. It contains:
+        - TestCommandHistoryRBAC: Tests for engineers seeing only own commands, admins seeing all commands, admin filtering by user
+        - TestCommandHistoryFiltering: Tests for filtering by vehicle, status, date range (start_date, end_date)
+        - TestCommandHistoryPagination: Tests for pagination with limit/offset, combined with filters
+        - TestCommandHistoryEdgeCases: Tests for no results, unauthorized access
+    *   **Recommendation:** **READ THIS FILE CAREFULLY**. It documents exactly how the backend API behaves. Use this as a specification for what your frontend must support. All these tests already PASS, meaning the backend functionality is complete and working.
 
 ### Implementation Tips & Notes
 
-#### Backend Tips
+*   **Tip 1 - Backend is Complete:** The backend API at `GET /api/v1/commands` is fully implemented with all required features (pagination, filtering, RBAC). All integration tests pass. Your primary task is to build the **FRONTEND** components.
 
-**Tip 1: RBAC Enforcement Pattern**
-```python
-# In backend/app/api/v1/commands.py, modify list_commands endpoint:
-async def list_commands(
-    vehicle_id: uuid.UUID | None = Query(None, description="Filter by vehicle ID"),
-    status: str | None = Query(None, description="Filter by command status"),
-    user_id: uuid.UUID | None = Query(None, description="Filter by user ID (admin only)"),
-    start_date: datetime | None = Query(None, description="Filter by start date"),
-    end_date: datetime | None = Query(None, description="Filter by end date"),
-    limit: int = Query(50, ge=1, le=100, description="Maximum number of records"),
-    offset: int = Query(0, ge=0, description="Number of records to skip"),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> CommandListResponse:
-    # RBAC enforcement
-    if current_user.role == "engineer":
-        # Engineers can only see their own commands
-        filters["user_id"] = current_user.user_id
-    elif current_user.role == "admin":
-        # Admins can optionally filter by user_id or see all
-        if user_id is not None:
-            filters["user_id"] = user_id
-    # Otherwise (viewers, etc.) might have different logic
-```
+*   **Tip 2 - RBAC is Automatic:** The backend automatically enforces RBAC. Engineers are filtered to see only their own commands - this happens on the backend (lines 266-270 of commands.py), so your frontend does NOT need to filter results. Simply display what the API returns. Admins can optionally use the `user_id` query parameter to filter by specific users.
 
-**Tip 2: Date Range Filtering in Repository**
-```python
-# In backend/app/repositories/command_repository.py, add to get_commands:
-if start_date is not None:
-    query = query.where(Command.submitted_at >= start_date)
-if end_date is not None:
-    query = query.where(Command.submitted_at <= end_date)
-```
+*   **Tip 3 - Date Format:** The API accepts ISO 8601 date format for start_date and end_date query parameters (e.g., "2025-10-29T00:00:00Z"). The backend handles parsing and converts the 'Z' suffix to '+00:00' timezone format. Make sure your frontend date pickers generate this format.
 
-**Tip 3: Eager Loading to Avoid N+1 Queries**
-You SHOULD use SQLAlchemy's `selectinload` or `joinedload` to load user and vehicle relationships:
-```python
-from sqlalchemy.orm import selectinload
+*   **Tip 4 - Pagination:** The API supports standard limit/offset pagination. Default limit is 50, max is 100 (enforced by Query validator on line 212). Your frontend should implement "Load More" or page-based navigation.
 
-query = select(Command).options(
-    selectinload(Command.user),
-    selectinload(Command.vehicle)
-)
-```
-This allows you to access `command.user.username` and `command.vehicle.vin` without additional database queries.
+*   **Tip 5 - Existing Frontend Patterns:** You already have working frontend pages:
+    - `frontend/src/pages/VehiclesPage.tsx` - Shows list with React Query, filtering, and loading states
+    - `frontend/src/pages/CommandPage.tsx` - Shows form submission with validation
+    - `frontend/src/components/commands/ResponseViewer.tsx` - Shows detail view with data fetching
+    - You SHOULD follow the same patterns (React Query for data fetching, MUI components, TypeScript strict typing)
 
-**Tip 4: Testing Pattern**
-Based on `backend/tests/integration/test_command_api.py`, you SHOULD:
-- Create test fixtures for engineer and admin users
-- Use `create_access_token()` to generate test JWT tokens
-- Test both engineer (filtered) and admin (unfiltered) access
-- Verify that engineers CANNOT see other users' commands
-- Verify pagination works correctly (test with offset > 0)
+*   **Tip 6 - API Client:** You have an existing API client at `frontend/src/api/client.ts` that automatically injects JWT tokens and handles token refresh. You SHOULD use this client for all API calls.
 
-#### Frontend Tips
+*   **Tip 7 - Authentication Context:** The `frontend/src/context/AuthContext.tsx` provides access to the current user's information including their role. You SHOULD use this to conditionally show/hide UI elements (e.g., user filter dropdown only for admins).
 
-**Tip 5: Date Filtering UI**
-You SHOULD use MUI's DatePicker component (from `@mui/x-date-pickers`) for date range filters. However, I did NOT find this dependency in the codebase. You MAY need to:
-1. Add the dependency: `npm install @mui/x-date-pickers`
-2. OR use simple text inputs with type="date" for MVP
-3. OR create a simple TextField with date format validation
+*   **Tip 8 - Status Values:** Based on the Command model, valid status values are: 'pending', 'in_progress', 'completed', 'failed'. Your status filter dropdown should include these options.
 
-**Tip 6: Table Columns for CommandHistory**
-Based on the task description, your table MUST have these columns:
-1. **Command Name**: `command.command_name`
-2. **Vehicle (VIN)**: You'll need to fetch this from the vehicle relationship or join
-3. **Status**: Use Chip component with color coding (success=completed, error=failed, default=pending/in_progress)
-4. **Submitted At**: Use `formatRelativeTime(command.submitted_at)` utility
-5. **User**: Display username (only for admins, or always?)
-6. **Actions**: Button or link to "View Details" → navigate to CommandDetailPage
+*   **Tip 9 - MUI Table Component:** For the history list, consider using MUI's `<Table>` component with `<TablePagination>` for a professional look that matches the existing UI theme. Alternatively, use `<DataGrid>` from `@mui/x-data-grid` for advanced features (sorting, filtering), but note this may require additional npm packages.
 
-**Tip 7: Conditional Filter Display**
-```typescript
-const { user } = useAuth();
-const isAdmin = user?.role === 'admin';
+*   **Tip 10 - Navigation to Detail Page:** Your CommandHistory component should include an "Actions" column with a "View Details" button that navigates to a detail page showing the full command info and responses. You can create a new route like `/commands/:commandId` that uses the existing `ResponseViewer` component.
 
-// In your render:
-{isAdmin && (
-  <TextField
-    label="Filter by User"
-    value={userFilter}
-    onChange={(e) => setUserFilter(e.target.value)}
-  />
-)}
-```
+*   **Tip 11 - Vehicle VIN Display:** The current API returns vehicle_id (UUID), not the VIN string. You have two options:
+    1. Make a separate API call to `GET /api/v1/vehicles/{vehicle_id}` to fetch VIN (recommended for accuracy)
+    2. Accept that the table will show vehicle_id instead of VIN (simpler, but less user-friendly)
+    The task description requests "Vehicle (VIN)", so option 1 is preferred, but may require caching or pre-fetching vehicle data.
 
-**Tip 8: React Query for History Fetching**
-```typescript
-const { data, isLoading, error } = useQuery({
-  queryKey: ['commandHistory', { vehicleId, status, userId, startDate, endDate, limit, offset }],
-  queryFn: () => commandAPI.getCommandHistory({
-    vehicle_id: vehicleId,
-    status,
-    user_id: userId,
-    start_date: startDate,
-    end_date: endDate,
-    limit,
-    offset
-  }),
-  // Auto-refresh every 30 seconds (optional)
-  refetchInterval: 30000,
-});
-```
+*   **Tip 12 - User Display:** Similarly, the API returns user_id, not username. If the task requires showing usernames, you may need to fetch user data or extend the backend API to join user information (but read the acceptance criteria carefully - it may only require user_id).
 
-**Tip 9: Navigation to Detail Page**
-Use React Router's `useNavigate()`:
-```typescript
-import { useNavigate } from 'react-router-dom';
+*   **Note:** The backend test file (`test_command_history.py`) uses mocks because it's testing the API endpoint logic, not end-to-end database queries. When you manually test your frontend, ensure your local backend is running with the actual database so you see real data.
 
-const navigate = useNavigate();
+*   **Warning:** Do NOT create a new `GET /api/v1/commands` endpoint or modify the existing one unless you find a specific bug. The endpoint is already feature-complete. Focus your backend work on writing additional tests if coverage is below 80% or fixing any bugs you discover during frontend testing.
 
-const handleViewDetails = (commandId: string) => {
-  navigate(`/commands/${commandId}`);
-};
-```
-Don't forget to add the route in `App.tsx`!
-
-**Tip 10: Pagination Controls**
-You SHOULD implement pagination using MUI's Pagination component or TablePagination. Example:
-```typescript
-<TablePagination
-  component="div"
-  count={-1}  // Unknown total (server doesn't return it)
-  page={currentPage}
-  onPageChange={handlePageChange}
-  rowsPerPage={limit}
-  onRowsPerPageChange={handleLimitChange}
-  rowsPerPageOptions={[10, 25, 50, 100]}
-/>
-```
-
-### Implementation Warnings & Gotchas
-
-**Warning 1: Backend Already Has Most Functionality**
-The backend `GET /api/v1/commands` endpoint ALREADY supports vehicle_id, status, limit, and offset. You ONLY need to add:
-- RBAC enforcement (engineer vs admin filtering)
-- user_id query parameter (admin only)
-- Date range parameters (start_date, end_date)
-- DO NOT rewrite the entire endpoint!
-
-**Warning 2: Ensure Type Consistency**
-The backend uses UUID types, but frontend/API uses string UUIDs. Ensure your frontend code:
-- Passes vehicle_id, user_id as strings (they'll be converted on backend)
-- Receives command_id, user_id, vehicle_id as strings in responses (Pydantic serializers handle this)
-
-**Warning 3: Date Format**
-PostgreSQL stores timestamps with timezone. When sending dates from frontend:
-- Use ISO 8601 format: `2025-10-29T00:00:00Z`
-- Consider timezone conversion for user-friendly date pickers
-- The `submitted_at` field in responses will be in ISO format
-
-**Warning 4: Test Coverage Requirement**
-The acceptance criteria requires ≥80% coverage. You MUST write tests for:
-- Backend: RBAC enforcement (engineer sees only own, admin sees all)
-- Backend: Date range filtering works correctly
-- Backend: Pagination works with new filters
-- Frontend: CommandHistory component renders correctly
-- Frontend: Filters work and trigger API calls
-- Frontend: Admin sees user filter, engineer does not
-
-**Warning 5: CommandDetailPage Scope**
-The task mentions creating `CommandDetailPage.tsx`, but the acceptance criteria focuses on the history list. For the detail page:
-- Create a SIMPLE page that displays a single command's details
-- Reuse the existing `CommandResponse` type
-- Include the ResponseViewer component (already exists from I3.T7)
-- Add a "Back to History" button
-
-### File Dependencies and Import Paths
-
-**Backend Imports You MUST Use:**
-```python
-from app.dependencies import get_current_user
-from app.models.user import User
-from app.models.command import Command
-from app.repositories.command_repository import get_commands
-from sqlalchemy.orm import selectinload  # For eager loading
-from datetime import datetime  # For date filtering
-```
-
-**Frontend Imports You SHOULD Use:**
-```typescript
-import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { formatRelativeTime } from '../utils/dateUtils';
-import {
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, Box, Typography, TextField, MenuItem, Button,
-  TablePagination, CircularProgress, Alert
-} from '@mui/material';
-```
-
-### Existing Utilities You SHOULD Reuse
-
-1. **formatRelativeTime** (frontend/src/utils/dateUtils.ts): Already used in VehicleList for "Last Seen" column - use for "Submitted At" column
-2. **get_current_user** (backend/app/dependencies.py): Already used in all command endpoints - use in enhanced list_commands
-3. **structlog logger** (backend): Already used throughout backend for structured logging - add logs for RBAC decisions
-4. **CommandResponse schema** (backend/app/schemas/command.py): Already defined - consider extending or enriching
-
----
-
-## Summary Checklist for Coder Agent
-
-### Backend Tasks (Priority Order):
-1. ✅ Modify `backend/app/repositories/command_repository.py::get_commands()` to add start_date and end_date filtering
-2. ✅ Modify `backend/app/services/command_service.py::get_command_history()` to pass date parameters
-3. ✅ Modify `backend/app/api/v1/commands.py::list_commands()` to:
-   - Add user_id, start_date, end_date query parameters
-   - Implement RBAC enforcement (engineer sees only own commands)
-   - Log RBAC filtering decisions
-4. ✅ Write integration tests in `backend/tests/integration/test_command_history.py`:
-   - Test engineer sees only own commands
-   - Test admin sees all commands
-   - Test date range filtering
-   - Test pagination with filters
-   - Verify ≥80% coverage
-
-### Frontend Tasks (Priority Order):
-1. ✅ Extend `frontend/src/api/client.ts` to add `commandAPI.getCommandHistory()` function
-2. ✅ Create `frontend/src/pages/HistoryPage.tsx`:
-   - Container with Paper layout
-   - Filter controls (vehicle, status, date range, user [admin only])
-   - Pagination controls
-   - Integrate CommandHistory component
-3. ✅ Create `frontend/src/components/commands/CommandHistory.tsx`:
-   - MUI Table with columns: Command Name, Vehicle (VIN), Status, Submitted At, User, Actions
-   - Use Chip for status (color coded)
-   - Use formatRelativeTime for timestamps
-   - "View Details" button → navigate to /commands/:id
-4. ✅ Create `frontend/src/pages/CommandDetailPage.tsx`:
-   - Display single command details
-   - Include ResponseViewer component
-   - "Back to History" button
-5. ✅ Update `frontend/src/App.tsx` to add routes:
-   - `/history` → HistoryPage
-   - `/commands/:commandId` → CommandDetailPage
-6. ✅ Write component tests for HistoryPage and CommandHistory
+*   **Testing Strategy:** The acceptance criteria requires ≥80% test coverage. The backend integration tests already exist and pass. You MUST write frontend component tests for:
+    - HistoryPage rendering and loading states
+    - CommandHistory component with mock data
+    - Filter interactions (vehicle dropdown, status dropdown, date pickers)
+    - Pagination controls (Next, Previous, page size)
+    - RBAC behavior (engineers vs admins)
+    - Navigation to CommandDetailPage

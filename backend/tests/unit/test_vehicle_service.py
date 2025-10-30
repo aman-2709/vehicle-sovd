@@ -7,7 +7,7 @@ Tests vehicle retrieval, filtering, pagination, and Redis caching behavior.
 import json
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import redis.asyncio as aioredis

@@ -5,8 +5,7 @@ Tests audit log creation for various event types with different data combination
 """
 
 import uuid
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

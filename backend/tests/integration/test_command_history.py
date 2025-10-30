@@ -321,8 +321,9 @@ class TestCommandHistoryFiltering:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
 
-        # Should see 2 commands for vehicle1
-        assert len(data["commands"]) == 2
+        # Should see 3 commands for vehicle1
+        # (engineer1's lockDoors, engineer1's getStatus, engineer2's startEngine)
+        assert len(data["commands"]) == 3
 
         for cmd in data["commands"]:
             assert cmd["vehicle_id"] == str(mock_vehicle_ids["vehicle1"])
@@ -393,8 +394,12 @@ class TestCommandHistoryFiltering:
 
         mock_get_history.return_value = filtered_commands
 
+        # Format dates for URL - replace +00:00 with Z for ISO 8601
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
         response = await async_client.get(
-            f"/api/v1/commands?start_date={start_date.isoformat()}&end_date={end_date.isoformat()}",
+            f"/api/v1/commands?start_date={start_str}&end_date={end_str}",
             headers=admin_auth_headers,
         )
 
@@ -434,8 +439,11 @@ class TestCommandHistoryFiltering:
 
         mock_get_history.return_value = filtered_commands
 
+        # Format date for URL - replace +00:00 with Z for ISO 8601
+        start_str = start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
         response = await async_client.get(
-            f"/api/v1/commands?start_date={start_date.isoformat()}",
+            f"/api/v1/commands?start_date={start_str}",
             headers=admin_auth_headers,
         )
 
@@ -469,8 +477,11 @@ class TestCommandHistoryFiltering:
 
         mock_get_history.return_value = filtered_commands
 
+        # Format date for URL - replace +00:00 with Z for ISO 8601
+        end_str = end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
         response = await async_client.get(
-            f"/api/v1/commands?end_date={end_date.isoformat()}",
+            f"/api/v1/commands?end_date={end_str}",
             headers=admin_auth_headers,
         )
 
@@ -548,7 +559,7 @@ class TestCommandHistoryPagination:
         """Test getting first page of results."""
         all_commands = create_mock_commands()
         # Return only first 2 commands
-        mock_get_history.return_value = (all_commands[:2], len(all_commands))
+        mock_get_history.return_value = all_commands[:2]
 
         response = await async_client.get(
             "/api/v1/commands?limit=2&offset=0",
@@ -580,7 +591,7 @@ class TestCommandHistoryPagination:
         """Test getting second page of results."""
         all_commands = create_mock_commands()
         # Return commands 3-4 (offset=2, limit=2)
-        mock_get_history.return_value = (all_commands[2:4], len(all_commands))
+        mock_get_history.return_value = all_commands[2:4]
 
         response = await async_client.get(
             "/api/v1/commands?limit=2&offset=2",
@@ -606,7 +617,7 @@ class TestCommandHistoryPagination:
         """Test getting last page with fewer results."""
         all_commands = create_mock_commands()
         # Return last 2 commands (offset=3 means start from 4th item)
-        mock_get_history.return_value = (all_commands[3:], len(all_commands))
+        mock_get_history.return_value = all_commands[3:]
 
         response = await async_client.get(
             "/api/v1/commands?limit=3&offset=3",
@@ -690,7 +701,7 @@ class TestCommandHistoryEdgeCases:
         admin_auth_headers: dict[str, str],
     ):
         """Test response when no commands match filters."""
-        mock_get_history.return_value = ([], 0)
+        mock_get_history.return_value = []
 
         response = await async_client.get(
             "/api/v1/commands?status=nonexistent",

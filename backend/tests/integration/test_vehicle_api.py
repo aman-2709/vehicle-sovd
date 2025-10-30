@@ -6,7 +6,7 @@ Tests all vehicle endpoints with various query parameters, authentication, and e
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -14,11 +14,10 @@ from fastapi import status
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.vehicle import Vehicle
 from app.models.user import User
 from app.services.auth_service import (
-    hash_password,
     create_access_token,
+    hash_password,
 )
 
 
