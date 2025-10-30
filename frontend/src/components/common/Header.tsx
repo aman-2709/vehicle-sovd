@@ -20,12 +20,14 @@ import {
 } from '@mui/material';
 import { AccountCircle } from '@mui/icons-material';
 import { useAuth } from '../../context/AuthContext';
+import ConfirmDialog from './ConfirmDialog';
 
 const Header: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -35,12 +37,21 @@ const Header: React.FC = () => {
     setAnchorEl(null);
   };
 
-  const handleLogout = () => {
+  const handleLogoutClick = () => {
     handleMenuClose();
+    setShowLogoutConfirm(true);
+  };
+
+  const handleLogoutConfirm = () => {
+    setShowLogoutConfirm(false);
     void (async () => {
       await logout();
       navigate('/login', { replace: true });
     })();
+  };
+
+  const handleLogoutCancel = () => {
+    setShowLogoutConfirm(false);
   };
 
   const navigationLinks = [
@@ -117,12 +128,24 @@ const Header: React.FC = () => {
               </Typography>
             </MenuItem>
             <Divider />
-            <MenuItem onClick={handleLogout} data-testid="logout-button">
+            <MenuItem onClick={handleLogoutClick} data-testid="logout-button">
               Logout
             </MenuItem>
           </Menu>
         </Box>
       </Toolbar>
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmDialog
+        open={showLogoutConfirm}
+        title="Confirm Logout"
+        message="Are you sure you want to log out? You will need to sign in again to access the application."
+        confirmText="Log Out"
+        cancelText="Cancel"
+        confirmColor="primary"
+        onConfirm={handleLogoutConfirm}
+        onCancel={handleLogoutCancel}
+      />
     </AppBar>
   );
 };

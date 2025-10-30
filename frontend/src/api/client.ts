@@ -20,6 +20,7 @@ import type {
   CommandHistoryParams,
   CommandListResponse,
 } from '../types/command';
+import { shouldRetryError } from '../utils/errorMessages';
 
 // Get API base URL from environment variable or default to localhost
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -75,6 +76,52 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+/**
+ * Helper function to wait for a specified time (for retry backoff).
+ *
+ * @param ms - Milliseconds to wait
+ * @returns Promise that resolves after the specified time
+ */
+const wait = (ms: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+// Response interceptor: Handle retry logic for network errors and 503/504
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const originalRequest = error.config;
+
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
+
+    const requestWithRetryCount = originalRequest as InternalAxiosRequestConfig & {
+      _retryCount?: number;
+    };
+
+    // Check if error should be retried (network errors, 503, 504)
+    if (shouldRetryError(error)) {
+      const retryCount = requestWithRetryCount._retryCount || 0;
+
+      // Retry up to 3 times
+      if (retryCount < 3) {
+        requestWithRetryCount._retryCount = retryCount + 1;
+
+        // Exponential backoff: 1s, 2s, 4s
+        const backoffDelay = Math.pow(2, retryCount) * 1000;
+        await wait(backoffDelay);
+
+        // Retry the request
+        return apiClient(requestWithRetryCount);
+      }
+    }
+
+    // If not retryable or max retries reached, pass to next interceptor
     return Promise.reject(error);
   }
 );

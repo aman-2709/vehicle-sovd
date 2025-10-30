@@ -12,6 +12,9 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { ErrorProvider } from './context/ErrorContext';
+import ErrorToast from './components/common/ErrorToast';
+import OfflineBanner from './components/common/OfflineBanner';
 import theme from './styles/theme';
 
 // Create React Query client with default options
@@ -34,9 +37,13 @@ root.render(
       <BrowserRouter>
         <ThemeProvider theme={theme}>
           <CssBaseline />
-          <AuthProvider>
-            <App />
-          </AuthProvider>
+          <ErrorProvider>
+            <AuthProvider>
+              <OfflineBanner />
+              <App />
+              <ErrorToast />
+            </AuthProvider>
+          </ErrorProvider>
         </ThemeProvider>
       </BrowserRouter>
     </QueryClientProvider>

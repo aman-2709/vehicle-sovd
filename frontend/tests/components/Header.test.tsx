@@ -127,6 +127,15 @@ describe('Header Component', () => {
     const logoutButton = screen.getByTestId('logout-button');
     fireEvent.click(logoutButton);
 
+    // Confirm dialog should appear
+    await waitFor(() => {
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
+    });
+
+    // Click confirm button in dialog
+    const confirmButton = screen.getByTestId('confirm-dialog-confirm');
+    fireEvent.click(confirmButton);
+
     // Wait for async logout to complete
     await waitFor(() => {
       expect(mockLogout).toHaveBeenCalledTimes(1);
