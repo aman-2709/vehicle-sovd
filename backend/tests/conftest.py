@@ -6,7 +6,7 @@ Provides database session and async client fixtures for integration tests.
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -14,10 +14,20 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.database import get_db
-from app.main import app
-from app.models.session import Session
-from app.models.user import User
+# Disable rate limiting BEFORE importing the app
+# This must happen before app.main is imported to ensure the decorators
+# get the mocked limiter
+from app.middleware.rate_limiting_middleware import limiter  # noqa: E402
+
+# Mock both test() and hit() methods to completely bypass rate limiting
+# test() returns False (not exceeded), hit() does nothing (no counter increment)
+limiter._limiter.test = MagicMock(return_value=False)
+limiter._limiter.hit = MagicMock(return_value=True)
+
+from app.database import get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models.session import Session  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 # Test database URL (using file-based SQLite for testing)
 # File-based ensures tables persist across multiple connections in the same test

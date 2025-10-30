@@ -10,25 +10,26 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T6",
+  "task_id": "I4.T5",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Implement rate limiting using slowapi with Redis backend. Configure different limits: auth (5/min), commands (10/min), general (100/min). Return 429 with Retry-After. Add admin exemptions. Write integration tests.",
+  "description": "Enhance error handling with global exception handler middleware. Define error codes. Update responses to use standardized format. Enhance structlog with exception logging, context processors. Add request/response logging middleware. Configure log level from env.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.8 (Security - Rate Limiting).",
+  "inputs": "Architecture Blueprint Section 3.8 (Logging).",
   "target_files": [
-    "backend/app/middleware/rate_limiting_middleware.py",
+    "backend/app/middleware/error_handling_middleware.py",
+    "backend/app/utils/error_codes.py",
+    "backend/app/utils/logging.py",
     "backend/app/main.py",
-    "backend/requirements.txt",
-    "backend/tests/integration/test_rate_limiting.py"
+    "backend/tests/integration/test_error_handling.py"
   ],
   "input_files": [
-    "backend/app/main.py"
+    "backend/app/middleware/logging_middleware.py"
   ],
-  "deliverables": "Rate limiting middleware; Redis-backed storage; admin exemptions; tests.",
-  "acceptance_criteria": "6th login request in 1min returns 429; Response includes Retry-After; 11th command returns 429; Admins exceed limits; Limits reset after window; Tests verify enforcement, reset, exemption; Coverage ≥80%; No errors",
+  "deliverables": "Global error handler; error codes; enhanced logging; request/response logging; tests.",
+  "acceptance_criteria": "Unhandled exceptions return 500 with correlation_id; Errors include error codes; Logs are structured JSON; Request logs include all fields; Log level configurable; Tests verify format; No errors",
   "dependencies": [
-    "I2.T1"
+    "I2.T7"
   ],
   "parallelizable": true,
   "done": false
@@ -41,113 +42,17 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Rate Limiting Strategy (Architecture Blueprint Section 3.8)
+### Note: Architecture Documentation Not Found
 
-**Security Requirements - Rate Limiting:**
+The architecture blueprint files referenced in the manifests (`01_Context_and_Drivers.md`, `05_Operational_Architecture.md`) were not found in the `docs/architecture/` directory. However, the task description references "Architecture Blueprint Section 3.8 (Logging)" which should cover:
+- Structured logging requirements
+- JSON log format specifications
+- Correlation ID tracking
+- Context processors for enriching logs
+- Exception logging with stack traces
+- Request/response logging patterns
 
-The system must implement rate limiting to protect against abuse and ensure fair resource usage:
-
-1. **Purpose:**
-   - Prevent brute force attacks on authentication endpoints
-   - Protect against API abuse and DoS attacks
-   - Ensure fair resource allocation across users
-   - Maintain system stability under load
-
-2. **Rate Limit Tiers:**
-   - **Authentication endpoints (`/api/v1/auth/*`):** 5 requests/minute per IP
-     - Protects against credential stuffing and brute force attacks
-     - Login, refresh token, password reset endpoints
-
-   - **Command execution (`/api/v1/commands`):** 10 requests/minute per user
-     - Prevents excessive vehicle command spam
-     - Protects vehicle communication infrastructure
-     - Per-user tracking (not per-IP) for authenticated endpoints
-
-   - **General API endpoints:** 100 requests/minute per user
-     - Vehicle listing, status checks, history queries
-     - Reasonable limit for normal usage patterns
-
-3. **Storage Backend:**
-   - Use Redis for distributed rate limit counters
-   - Enables scaling across multiple backend instances
-   - Fast in-memory operations for minimal latency impact
-   - Automatic expiration of counters using Redis TTL
-
-4. **Response Format:**
-   - HTTP Status: 429 Too Many Requests
-   - Headers:
-     - `Retry-After`: Seconds until limit resets
-     - `X-RateLimit-Limit`: Maximum requests allowed
-     - `X-RateLimit-Remaining`: Requests remaining in current window
-     - `X-RateLimit-Reset`: Unix timestamp when limit resets
-   - Body: JSON error response with error code "RATE_001"
-
-5. **Admin Exemptions:**
-   - Admin role users should bypass rate limits
-   - Enables operational troubleshooting without restrictions
-   - Identified via JWT token role claim
-
-6. **Implementation Approach:**
-   - Use slowapi library (FastAPI-compatible rate limiting)
-   - Middleware-based approach for centralized enforcement
-   - Per-route rate limit decorators for granular control
-   - Graceful degradation if Redis unavailable (log warning, allow request)
-
-### Context: Redis Integration
-
-**Current Redis Usage:**
-- WebSocket pub/sub for real-time response streaming
-- Vehicle status caching (30-second TTL)
-- Session storage (refresh tokens)
-
-**Rate Limiting Requirements:**
-- Reuse existing Redis connection from `app.config.REDIS_URL`
-- Use separate key namespace: `ratelimit:{identifier}:{endpoint}`
-- Key format examples:
-  - `ratelimit:ip:192.168.1.100:/api/v1/auth/login`
-  - `ratelimit:user:uuid-here:/api/v1/commands`
-
-### Context: Middleware Architecture
-
-**Current Middleware Stack (LIFO execution order):**
-1. `LoggingMiddleware` (outermost - generates correlation_id)
-2. `ErrorHandlingMiddleware` (catches exceptions, formats errors)
-3. `CORSMiddleware` (handles cross-origin requests)
-4. Route handlers (innermost)
-
-**Rate Limiting Middleware Position:**
-- Should be added AFTER LoggingMiddleware (so correlation_id available)
-- Should be BEFORE ErrorHandlingMiddleware (so rate limit errors are caught and formatted)
-- Registration order in main.py:
-  ```python
-  app.add_middleware(LoggingMiddleware)        # First (outermost)
-  app.add_middleware(RateLimitingMiddleware)   # Second
-  app.add_middleware(CORSMiddleware)           # Last (innermost)
-  ```
-
-### Context: Error Response Standards
-
-**Rate Limit Error Response Format:**
-Following the standardized error response pattern from I4.T5:
-
-```json
-{
-  "error": {
-    "code": "RATE_001",
-    "message": "Rate limit exceeded. Please try again later.",
-    "correlation_id": "uuid-here",
-    "timestamp": "2025-10-30T15:00:00Z",
-    "path": "/api/v1/auth/login",
-    "retry_after": 45
-  }
-}
-```
-
-**Headers to Include:**
-- `Retry-After: 45` (seconds)
-- `X-RateLimit-Limit: 5`
-- `X-RateLimit-Remaining: 0`
-- `X-RateLimit-Reset: 1730300100` (Unix timestamp)
+Based on the existing implementation patterns in the codebase, these requirements are already partially met and need enhancement.
 
 ---
 
@@ -157,332 +62,266 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-#### File: `backend/app/main.py`
-- **Summary:** Main FastAPI application entry point. Currently registers LoggingMiddleware (line 80), ErrorHandlingMiddleware (implicit via exception handlers), and CORSMiddleware (lines 83-89). Includes Prometheus instrumentation (lines 99-100).
-- **Recommendation:** You MUST add rate limiting middleware registration at line 81 (after LoggingMiddleware, before CORSMiddleware). Import the new middleware at the top with other middleware imports.
-- **Middleware Order Pattern:** The current order is LoggingMiddleware → CORSMiddleware. Insert RateLimitingMiddleware between them.
-- **Startup Hook:** Lines 134-146 define startup event. You MAY want to add Redis connection verification here for rate limiter initialization.
+#### File: `backend/app/middleware/error_handling_middleware.py`
+**Summary:** This file already contains a comprehensive global error handling implementation with:
+- `format_error_response()` - Creates standardized error responses
+- `handle_http_exception()` - Handles FastAPI HTTPException with error code mapping
+- `handle_validation_error()` - Handles Pydantic validation errors (422)
+- `handle_unexpected_exception()` - Handles unexpected exceptions with 500 response
+- `filter_sensitive_data()` - Filters sensitive fields from logs
+- Integration with correlation IDs from context
+- Logging with structlog for all error types
 
-#### File: `backend/app/config.py`
-- **Summary:** Configuration using pydantic-settings. Currently loads DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_MINUTES, LOG_LEVEL (lines 19-30).
-- **Recommendation:** REDIS_URL is already available at `settings.REDIS_URL`. You SHOULD reuse this connection for rate limiting. No changes needed to this file.
-- **Important:** Settings is a singleton instance (line 42), loaded once and reused throughout the application.
+**Status:** This module is **ALREADY COMPLETE** and meets most acceptance criteria. The task may be requesting additional enhancements or verification.
 
-#### File: `backend/app/dependencies.py`
-- **Summary:** Authentication and authorization dependencies. `get_current_user()` (lines 27-105) extracts and validates JWT tokens. `require_role()` factory (lines 108-158) creates role-based authorization checkers.
-- **Recommendation:** You MUST use these dependencies to extract user information for rate limiting. For authenticated endpoints, use `current_user.user_id` as the rate limit key. For admin exemptions, check `current_user.role == "admin"`.
-- **Key Pattern:** Dependencies return User object with fields: `user_id`, `username`, `role`, `is_active`.
-
-#### File: `backend/app/api/v1/auth.py`
-- **Summary:** Authentication endpoints including `/login`, `/refresh`, `/logout`, `/me`. Login endpoint (lines 41-46) is the primary target for rate limiting (5 req/min).
-- **Recommendation:** Apply IP-based rate limiting to authentication endpoints (since users aren't authenticated yet). Extract client IP using `app.utils.request_utils.get_client_ip(request)`.
-- **Pattern:** Authentication endpoints raise `HTTPException(status_code=401, detail="...")` on auth failure.
-
-#### File: `backend/app/api/v1/websocket.py` (lines 148-150)
-- **Summary:** WebSocket endpoint demonstrating Redis client creation: `redis.from_url(settings.REDIS_URL, decode_responses=True)`.
-- **Recommendation:** You SHOULD use the same pattern to create Redis client in rate limiting middleware. Note the `decode_responses=True` parameter for string handling.
-- **Redis Usage Pattern:** Already imports `redis.asyncio as redis`. WebSocket uses pub/sub; rate limiter will use GET/SET/EXPIRE commands.
-
-#### File: `backend/requirements.txt`
-- **Summary:** Production dependencies. Currently includes redis>=5.0.0 (line 14) for WebSocket and caching.
-- **Recommendation:** You MUST add slowapi dependency. Add line after redis: `slowapi>=0.1.9`. Slowapi is a FastAPI-compatible port of Flask-Limiter.
-- **Note:** Do NOT add flask-limiter as it's Flask-specific. Slowapi is the correct library for FastAPI.
-
-#### File: `backend/tests/conftest.py` (lines 81-100)
-- **Summary:** Test fixtures for database sessions and async HTTP client. Uses `app.dependency_overrides` pattern to inject test dependencies (line 97).
-- **Recommendation:** You SHOULD create a similar override for Redis in rate limiting tests. Mock Redis client to avoid requiring Redis server during tests.
-- **Testing Pattern:** Tests use `AsyncClient` fixture with base URL. Demonstrates how to override dependencies for testing.
-
-#### File: `backend/app/middleware/logging_middleware.py`
-- **Summary:** LoggingMiddleware generates correlation IDs, binds to structlog context, logs requests/responses. Uses middleware pattern with `__call__` method accepting `request: Request` and `call_next: RequestResponseEndpoint`.
-- **Recommendation:** You MUST follow the same middleware class pattern. Your RateLimitingMiddleware should have `__init__(self, app: ASGIApp)` and `async def __call__(self, request: Request, call_next: RequestResponseEndpoint) -> Response`.
-- **Key Pattern:** Uses try/finally to ensure cleanup. Accesses correlation_id from structlog contextvars for including in logs.
+**Recommendation:** Review the existing implementation against the acceptance criteria. You may need to:
+1. Verify all exception handlers are properly registered in `main.py`
+2. Ensure exception logging includes full stack traces (already has `exc_info=True`)
+3. Validate that correlation IDs are properly propagated in error responses
+4. Confirm that sensitive data filtering is working correctly
 
 #### File: `backend/app/utils/error_codes.py`
-- **Summary:** Error code definitions using Enum pattern. Defines error codes for AUTH, VAL, DB, VEH, SYS categories.
-- **Recommendation:** You MUST add a new error code for rate limiting. Add to the ErrorCode enum: `RATE_LIMIT_EXCEEDED = "RATE_001"`. Add corresponding message to ERROR_MESSAGES dict.
-- **Convention:** Error codes use category prefix (RATE) + 3-digit number (001).
+**Summary:** Contains comprehensive error code definitions:
+- `ErrorCode` enum with hierarchical error codes (AUTH_xxx, VAL_xxx, DB_xxx, VEH_xxx, SYS_xxx, RATE_xxx)
+- `ERROR_MESSAGES` dictionary mapping error codes to human-readable messages
+- `ERROR_STATUS_CODES` dictionary mapping error codes to HTTP status codes
+- Helper functions: `get_error_message()`, `get_status_code()`, `http_exception_to_error_code()`
+
+**Status:** This module is **ALREADY COMPLETE** with 30+ error codes defined covering all system domains.
+
+**Recommendation:** This file appears complete. You should verify that all error codes are being used correctly throughout the application and that the mapping logic in `http_exception_to_error_code()` covers all necessary cases.
+
+#### File: `backend/app/utils/logging.py`
+**Summary:** Configures structured logging using structlog with:
+- JSON rendering for all logs
+- ISO 8601 timestamps (UTC)
+- Context variable support (correlation_id, user_id)
+- Integration with standard Python logging
+- Processors: `merge_contextvars`, `add_log_level`, `add_logger_name`, `TimeStamper`, `StackInfoRenderer`, `format_exc_info`, `JSONRenderer`
+
+**Status:** Core logging configuration is **ALREADY COMPLETE**.
+
+**Recommendation:** The task requests "enhance structlog with exception logging, context processors" but the implementation already includes:
+- Exception logging with `format_exc_info` processor
+- Stack info with `StackInfoRenderer`
+- Context variable merging with `merge_contextvars`
+
+You may need to add additional context processors if specific requirements exist, such as:
+- Request ID processor
+- User context processor
+- Performance timing processor
+
+#### File: `backend/app/middleware/logging_middleware.py`
+**Summary:** Implements correlation ID tracking:
+- Generates or extracts correlation IDs (X-Request-ID header)
+- Binds correlation ID to structlog context using `bind_contextvars()`
+- Logs request start and completion
+- Logs request failures with exceptions
+- Cleans up context after request completion
+- Adds correlation ID to response headers
+
+**Status:** Basic request/response logging is **ALREADY COMPLETE**.
+
+**Recommendation:** The task requests "Add request/response logging middleware" but this already exists. You may need to enhance it with:
+- More detailed request logging (query params, request body size, headers)
+- Response logging (response size, duration)
+- Performance metrics (request duration)
+- User identification (if authenticated)
+
+The current implementation logs:
+- Request: method, path, client_host
+- Response: method, path, status_code
+- Errors: method, path, error message, stack trace
+
+Consider adding:
+- Request/response body logging (with size limits and sensitive data filtering)
+- Request duration/latency tracking
+- User ID binding to context when authenticated
+
+#### File: `backend/app/main.py`
+**Summary:** Main FastAPI application entry point with:
+- All exception handlers already registered:
+  - `http_exception_handler` for HTTPException
+  - `starlette_http_exception_handler` for StarletteHTTPException
+  - `validation_exception_handler` for RequestValidationError
+  - `general_exception_handler` for unexpected Exception
+  - `rate_limit_exception_handler` for RateLimitExceeded
+- Middleware stack configured (LoggingMiddleware, CORSMiddleware)
+- Structured logging initialization via `configure_logging(log_level=settings.LOG_LEVEL)`
+- All exception handlers use the error handling middleware functions
+
+**Status:** Global exception handlers are **ALREADY REGISTERED** and functional.
+
+**Recommendation:** The implementation is complete. Verify that:
+1. The middleware execution order is correct (LoggingMiddleware runs first to set correlation ID)
+2. All exception types are caught (HTTPException, StarletteHTTPException, RequestValidationError, Exception, RateLimitExceeded)
+3. Log level is configurable from environment via `settings.LOG_LEVEL`
+
+#### File: `backend/app/config.py`
+**Summary:** Pydantic settings configuration with:
+- `LOG_LEVEL` setting (default: "INFO")
+- Loads from environment variables or `.env` file
+
+**Status:** Log level configuration is **ALREADY IMPLEMENTED**.
+
+**Recommendation:** The acceptance criterion "Log level configurable" is already met. The `LOG_LEVEL` environment variable controls logging verbosity.
+
+#### File: `backend/tests/integration/test_error_handling.py`
+**Summary:** Comprehensive integration tests for error handling with 10+ test classes:
+- `TestErrorResponseFormat` - Validates standardized error response structure
+- `TestCorrelationIdPropagation` - Tests correlation ID in errors
+- `TestErrorCodeMapping` - Validates error code mappings
+- `TestUnhandledException` - Tests 500 error handling (partially implemented)
+- `TestLogging` - Tests error logging
+- `TestSensitiveDataFiltering` - Ensures passwords/tokens not in responses
+- `TestCustomHeaders` - Tests WWW-Authenticate header preservation
+- `TestErrorResponseConsistency` - Tests consistent error format across endpoints
+- `TestTimestampFormat` - Validates ISO 8601 timestamp format
+
+**Status:** Most test coverage exists, but some tests are placeholders (TestUnhandledException, TestLogging).
+
+**Recommendation:** Complete the placeholder tests:
+1. `test_unhandled_exception_returns_500` - Needs implementation to trigger real exception
+2. `test_unhandled_exception_uses_sys_error_code` - Verify SYS_501 code
+3. `test_unhandled_exception_hides_internal_details` - Verify no stack trace in response
+4. `test_http_exception_logged_with_context` - Verify log content (may need log capturing)
+5. `test_unhandled_exception_logged_with_stack_trace` - Verify `exc_info=True` in logs
+
+#### File: `backend/app/utils/request_utils.py`
+**Summary:** Helper functions for extracting request information:
+- `get_client_ip()` - Extracts IP from X-Forwarded-For or direct client
+- `get_user_agent()` - Extracts User-Agent header
+
+**Status:** Basic request utilities exist.
+
+**Recommendation:** These utilities are used in audit logging and API endpoints. If you enhance request/response logging, you should use these utilities consistently.
 
 ### Implementation Tips & Notes
 
-**Tip 1 - Slowapi Integration:**
-Slowapi provides two integration approaches:
-1. **Limiter instance with decorators:** Apply per-route with `@limiter.limit("5/minute")`
-2. **Middleware approach:** Global rate limiting for all endpoints
+**Tip #1: The Task May Already Be Complete**
+Based on my analysis, **most of the acceptance criteria are already met**:
+- ✅ Unhandled exceptions return 500 with correlation_id (via `handle_unexpected_exception`)
+- ✅ Errors include error codes (via ErrorCode enum and `format_error_response`)
+- ✅ Logs are structured JSON (via structlog JSONRenderer)
+- ✅ Request logs include fields: method, path, client_host, status_code, correlation_id
+- ✅ Log level configurable (via `LOG_LEVEL` env var)
+- ⚠️ Tests need completion (some are placeholders)
 
-For this task, use a HYBRID approach:
-- Create Limiter instance in middleware file
-- Apply default limit via middleware (`100/minute`)
-- Override specific routes with decorators (`5/minute` for auth, `10/minute` for commands)
+**Your primary task is to:**
+1. Review the existing implementation to confirm it meets requirements
+2. Complete the placeholder tests in `test_error_handling.py`
+3. Potentially enhance request/response logging with additional fields (optional)
+4. Verify all integration points are working correctly
 
-Example initialization:
+**Tip #2: Test Implementation Guidance**
+For the placeholder tests in `test_error_handling.py`:
+
+- **Testing unhandled exceptions:** You need to create a temporary test endpoint that raises an exception, or use mocking to force an exception in an existing endpoint. Example pattern:
 ```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+# Create a test route that raises an exception
+from fastapi import APIRouter
+test_router = APIRouter()
 
-limiter = Limiter(
-    key_func=get_remote_address,  # Default to IP-based
-    storage_uri=settings.REDIS_URL,
-    strategy="fixed-window"
+@test_router.get("/test/exception")
+async def trigger_exception():
+    raise ValueError("Test unhandled exception")
+
+# In test setup, include this router
+# Then test the endpoint
+response = await async_client.get("/test/exception")
+assert response.status_code == 500
+assert response.json()["error"]["code"] == "SYS_501"
+```
+
+- **Testing log output:** The tests note that "structlog JSON logs may not appear in caplog in test environment". You may need to:
+  - Use a custom log handler to capture structured logs
+  - Mock the logger and verify calls
+  - Or document this limitation and test only that logging functions are called
+
+**Tip #3: Request/Response Logging Enhancement**
+The current `LoggingMiddleware` logs basic information. If "Add request/response logging middleware" means you should enhance it, consider adding:
+
+```python
+# In LoggingMiddleware.dispatch():
+import time
+
+start_time = time.time()
+
+# After getting response:
+duration = time.time() - start_time
+
+logger.info(
+    "request_completed",
+    method=request.method,
+    path=request.url.path,
+    status_code=response.status_code,
+    duration_ms=round(duration * 1000, 2),  # Add duration
+    query_params=str(request.query_params) if request.query_params else None,  # Add query params
+    response_size=len(response.body) if hasattr(response, 'body') else None,  # Add response size
 )
 ```
 
-**Tip 2 - Custom Key Functions:**
-Slowapi's `get_remote_address` only provides IP-based limiting. You MUST create custom key functions for user-based limiting:
+However, be cautious about logging request/response bodies - use size limits and sensitive data filtering.
+
+**Tip #4: Context Processor Enhancement**
+If you need to add more context processors to structlog, you can extend the processor list in `logging.py`:
 
 ```python
-def get_user_id_or_ip(request: Request) -> str:
-    """Extract user_id from JWT if authenticated, otherwise use IP."""
-    # Try to extract token from Authorization header
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        payload = verify_access_token(token)
-        if payload and "user_id" in payload:
-            user_id = payload["user_id"]
-            # Check if admin (exempt from rate limits)
-            if payload.get("role") == "admin":
-                return f"admin:{user_id}"  # Special key for admins
-            return f"user:{user_id}"
+def add_request_context(logger, method_name, event_dict):
+    """Add request-specific context to logs."""
+    # This would extract additional context from contextvars
+    # and add it to every log entry
+    return event_dict
 
-    # Fall back to IP address
-    return f"ip:{get_client_ip(request)}"
+# In configure_logging():
+structlog.configure(
+    processors=[
+        merge_contextvars,
+        add_request_context,  # Add custom processor
+        add_log_level,
+        # ... rest of processors
+    ]
+)
 ```
 
-**Tip 3 - Admin Exemption Strategy:**
-Two approaches for admin exemptions:
-1. **Key-based:** Return special key for admins (e.g., `admin:{user_id}`) and set very high limit
-2. **Pre-check:** In middleware, check role before rate limiting and skip if admin
+**Tip #5: Error Code Usage Verification**
+Verify that the error codes are being used correctly throughout the application by checking:
+- All `HTTPException` instances should be mapped to appropriate error codes by `http_exception_to_error_code()`
+- Error responses should always include the `code` field
+- Error messages should match the `ERROR_MESSAGES` mapping
 
-Recommended: Use **key-based approach** (approach 1) for consistency. Set admin limit to 10,000/minute (effectively unlimited but still tracked).
+**Warning: Avoid Breaking Changes**
+The error handling infrastructure is already in production use across the application. Any modifications should be:
+- Backward compatible
+- Thoroughly tested
+- Non-breaking to existing API contracts
 
-**Tip 4 - Rate Limit Response Headers:**
-Slowapi automatically adds `X-RateLimit-*` headers, but you need to add `Retry-After` manually. Modify the rate limit exception handler:
+**Note: Structlog Output in Tests**
+The existing tests note that "structlog JSON logs may not appear in caplog in test environment". This is a known limitation because structlog writes to stdout by default, not to the Python logging system that pytest's `caplog` captures. If you need to test log content, consider:
+- Using `capsys` fixture to capture stdout
+- Mocking the logger
+- Or accepting that you can only test that logging methods are called, not the exact output
 
-```python
-from slowapi.errors import RateLimitExceeded
+### Summary of Current State
 
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    # Extract time until reset
-    retry_after = exc.retry_after  # Seconds until limit resets
+**What's Complete:**
+- ✅ Global error handling middleware with all exception handlers
+- ✅ Comprehensive error code system (30+ error codes)
+- ✅ Structured JSON logging with correlation IDs
+- ✅ Request/response logging with basic fields
+- ✅ Log level configuration from environment
+- ✅ Error response standardization
+- ✅ Exception logging with stack traces
+- ✅ Sensitive data filtering
 
-    # Format standardized error response
-    response = format_error_response(
-        error_code=ErrorCode.RATE_LIMIT_EXCEEDED,
-        status_code=429,
-        request=request,
-        additional_data={"retry_after": retry_after}
-    )
+**What Needs Work:**
+- ⚠️ Complete placeholder tests in `test_error_handling.py`
+- ⚠️ Optionally enhance request/response logging with more fields (duration, size, etc.)
+- ⚠️ Verify all acceptance criteria are met with real tests
 
-    # Add Retry-After header
-    response.headers["Retry-After"] = str(int(retry_after))
-
-    return response
-```
-
-**Tip 5 - Per-Endpoint Rate Limits:**
-Apply decorators to specific endpoints using FastAPI's dependency injection:
-
-```python
-# In auth.py
-from app.middleware.rate_limiting_middleware import limiter
-
-@router.post("/login")
-@limiter.limit("5/minute", key_func=get_client_ip)  # IP-based for auth
-async def login(...):
-    ...
-
-# In commands.py
-@router.post("/commands")
-@limiter.limit("10/minute", key_func=get_user_id_or_ip)  # User-based
-async def submit_command(...):
-    ...
-```
-
-**Warning - Redis Connection Handling:**
-Rate limiting middleware will be called on EVERY request. Creating a new Redis connection per request is inefficient. You MUST:
-1. Create Redis client once (module-level or in middleware __init__)
-2. Reuse connection across all requests
-3. Handle Redis connection errors gracefully (log error, allow request through)
-
-Example pattern:
-```python
-# Module-level Redis client
-try:
-    redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
-except Exception as e:
-    logger.error("rate_limiter_redis_init_failed", error=str(e))
-    redis_client = None  # Graceful degradation
-
-# In middleware
-if redis_client is None:
-    logger.warning("rate_limiter_disabled_no_redis")
-    return await call_next(request)
-```
-
-**Warning - Slowapi Middleware Registration:**
-Slowapi requires special integration with FastAPI. You CANNOT use standard middleware registration (`app.add_middleware`). Instead:
-1. Create Limiter instance
-2. Register exception handler for RateLimitExceeded
-3. Apply limits via decorators on routes
-4. Optionally: Use `limiter.enabled = True/False` for testing
-
-**Note - Testing Strategy:**
-Rate limiting tests require mocking Redis or using fakeredis. Recommended approach:
-
-```python
-import pytest
-from fakeredis import aioredis as fakeredis
-
-@pytest.fixture
-def mock_redis():
-    """Provide fake Redis for testing."""
-    return fakeredis.FakeRedis(decode_responses=True)
-
-async def test_auth_rate_limit(async_client, mock_redis):
-    """Test that 6th login attempt returns 429."""
-    # Override Redis in limiter
-    limiter.storage._storage = mock_redis
-
-    # Make 5 successful attempts
-    for i in range(5):
-        response = await async_client.post("/api/v1/auth/login", json={...})
-        assert response.status_code in [200, 401]  # Auth may fail, but not rate limited
-
-    # 6th attempt should be rate limited
-    response = await async_client.post("/api/v1/auth/login", json={...})
-    assert response.status_code == 429
-    assert "Retry-After" in response.headers
-    assert response.json()["error"]["code"] == "RATE_001"
-```
-
-**Note - Fixed Window vs Sliding Window:**
-Slowapi supports two strategies:
-- `fixed-window`: Simple counter that resets at interval boundary (e.g., every 60 seconds)
-- `sliding-window`: More accurate, counts requests in sliding time window
-
-Use `fixed-window` for simplicity. It's sufficient for the MVP and has lower Redis overhead.
-
-**Best Practice - Correlation ID in Rate Limit Logs:**
-Slowapi doesn't automatically include correlation IDs in logs. You SHOULD add custom logging when rate limits are hit:
-
-```python
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    logger.warning(
-        "rate_limit_exceeded",
-        path=request.url.path,
-        method=request.method,
-        limit=exc.limit,
-        retry_after=exc.retry_after
-    )
-    # ... rest of handler
-```
-
-**Best Practice - Rate Limit Configuration:**
-Make rate limits configurable via environment variables (future enhancement). For now, hardcode in middleware but use constants:
-
-```python
-# At top of middleware file
-RATE_LIMIT_AUTH = "5/minute"
-RATE_LIMIT_COMMANDS = "10/minute"
-RATE_LIMIT_GENERAL = "100/minute"
-RATE_LIMIT_ADMIN = "10000/minute"  # Effectively unlimited
-```
-
-**Convention - Import Structure:**
-Add rate limiting imports to relevant files:
-
-```python
-# In backend/app/middleware/rate_limiting_middleware.py
-from slowapi import Limiter
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
-import redis.asyncio as redis
-from app.config import settings
-from app.utils.error_codes import ErrorCode
-from app.utils.request_utils import get_client_ip
-```
-
-**Testing Edge Cases:**
-Your integration tests MUST cover:
-1. **Auth rate limit:** 5 login attempts → 6th returns 429
-2. **Command rate limit:** 10 command submissions → 11th returns 429
-3. **General rate limit:** 100 general requests → 101st returns 429
-4. **Admin exemption:** Admin user makes 20 requests → all succeed
-5. **Limit reset:** Wait for window to expire → requests allowed again
-6. **Retry-After header:** Verify header present and value reasonable (≤60 seconds)
-7. **Error response format:** Verify JSON structure matches standardized format
-8. **Multiple users:** User A hits limit → User B unaffected
-9. **Unauthenticated vs authenticated:** IP-based limiting for auth endpoints, user-based for protected endpoints
-
-**Environment Variable Documentation:**
-Add to `.env.example`:
-```
-REDIS_URL=redis://localhost:6379/0  # Already exists, used for rate limiting
-```
-
-Update README to document rate limiting:
-- Rate limit values (5/min auth, 10/min commands, 100/min general)
-- Admin exemption behavior
-- How to temporarily disable (set `limiter.enabled = False`)
-- Redis requirement for rate limiting
-
-**Integration with Error Handling Middleware:**
-The RateLimitExceeded exception should be caught by the exception handler you register in main.py. The error response will automatically follow the standardized format from I4.T5 if you use `format_error_response()` helper.
-
-**Code Quality Checklist:**
-- [ ] Async/await used throughout (Redis operations are async)
-- [ ] Type hints on all functions (`Request`, `Response`, `str`, etc.)
-- [ ] Comprehensive docstrings (module, classes, functions)
-- [ ] No linter errors (`ruff check`, `mypy`)
-- [ ] Test coverage ≥80% (`pytest --cov`)
-- [ ] Structured logging for rate limit events
-- [ ] Graceful degradation if Redis unavailable
-
----
-
-## 4. Additional Context from Codebase Survey
-
-**Project Structure Observations:**
-- Backend uses async/await throughout (AsyncSession, async Redis)
-- Middleware pattern established (LoggingMiddleware as reference)
-- Error handling centralized with standardized responses
-- Testing comprehensive (95+ tests, high coverage)
-- Redis already integrated for WebSocket pub/sub and caching
-
-**Dependency Analysis:**
-- redis>=5.0.0: Already available
-- slowapi: **NOT YET INSTALLED** - must add to requirements.txt
-- fakeredis: Recommend adding to requirements-dev.txt for testing
-
-**Current Middleware Flow:**
-```
-Request → LoggingMiddleware (correlation_id, logging)
-        → [Your RateLimitingMiddleware HERE]
-        → CORSMiddleware
-        → Route Handler
-        → Response
-```
-
-**Redis Key Namespace Recommendation:**
-Use consistent key naming:
-- `ratelimit:ip:{ip_address}:{endpoint}` - For unauthenticated endpoints
-- `ratelimit:user:{user_id}:{endpoint}` - For authenticated endpoints
-- `ratelimit:admin:{user_id}:{endpoint}` - For admin users (high limits)
-
-Example: `ratelimit:ip:192.168.1.100:/api/v1/auth/login`
-
-**Existing Request Utilities:**
-From `backend/app/utils/request_utils.py`:
-- `get_client_ip(request: Request) -> str` - Extracts client IP with X-Forwarded-For support
-- `get_user_agent(request: Request) -> str` - Extracts User-Agent header
-
-You SHOULD reuse `get_client_ip()` for IP-based rate limiting.
-
----
-
-## Summary
-
-You are implementing a production-grade rate limiting system to protect the SOVD WebApp from abuse and ensure fair resource usage. Use slowapi (FastAPI-compatible rate limiting) with Redis backend for distributed rate limit counters. Configure three rate limit tiers: 5 req/min for authentication endpoints (IP-based), 10 req/min for command execution (user-based), and 100 req/min for general API endpoints. Implement admin exemptions by checking user role from JWT tokens. Return 429 status with Retry-After header and standardized error response format. Create comprehensive integration tests covering limit enforcement, reset behavior, admin exemptions, and multi-user scenarios. Follow the project's async patterns, middleware conventions, error handling standards, and maintain ≥80% test coverage.
+**Recommended Approach:**
+1. Run existing tests to verify current functionality
+2. Complete the placeholder tests (TestUnhandledException, TestLogging)
+3. Add tests for any enhanced functionality
+4. Document any enhancements made to logging
+5. Verify acceptance criteria are all met
