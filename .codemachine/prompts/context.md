@@ -10,31 +10,29 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T1",
+  "task_id": "I4.T2",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Create Command History page with paginated list. Implement history list component with columns: Command Name, Vehicle (VIN), Status, Submitted At, User, Actions. Add filters: vehicle, status, date range, user (admin sees all, engineers see own). Enhance backend GET /api/v1/commands for pagination and filtering with RBAC enforcement.",
-  "agent_type_hint": "FrontendAgent",
-  "inputs": "Architecture Blueprint Section 3.7; Requirements (command history).",
+  "description": "Integrate Prometheus metrics into backend using prometheus-fastapi-instrumentator. Add custom metrics: commands_executed_total, command_execution_duration_seconds, websocket_connections_active, vehicle_connections_active. Expose /metrics endpoint. Add Prometheus to docker-compose.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Architecture Blueprint Section 3.8 (Monitoring - Metrics).",
   "target_files": [
-    "frontend/src/pages/HistoryPage.tsx",
-    "frontend/src/components/commands/CommandHistory.tsx",
-    "frontend/src/pages/CommandDetailPage.tsx",
-    "backend/app/api/v1/commands.py",
+    "backend/app/utils/metrics.py",
+    "backend/app/main.py",
     "backend/app/services/command_service.py",
-    "backend/tests/integration/test_command_history.py"
+    "infrastructure/docker/prometheus.yml",
+    "docker-compose.yml",
+    "README.md"
   ],
   "input_files": [
-    "backend/app/api/v1/commands.py",
-    "backend/app/services/command_service.py"
+    "backend/app/main.py",
+    "backend/app/services/command_service.py",
+    "backend/app/services/websocket_manager.py"
   ],
-  "deliverables": "Functional command history page with pagination/filtering; backend API enhancements; RBAC enforcement; tests.",
-  "acceptance_criteria": "History page displays commands with pagination; Filtering by vehicle, status works; Engineers see only own commands; Admins see all; View Details navigates to detail page; Backend supports limit, offset, filters; Tests verify pagination, filtering, RBAC; Coverage ≥80%; No linter errors",
-  "dependencies": [
-    "I2.T3",
-    "I3.T4"
-  ],
-  "parallelizable": false,
+  "deliverables": "Prometheus metrics exporter with custom SOVD metrics; Prometheus server in docker-compose; documentation.",
+  "acceptance_criteria": "GET /metrics returns Prometheus metrics; HTTP and custom metrics present; Metrics update correctly; Prometheus accessible at :9090; Successfully scrapes backend; README documents access; No errors",
+  "dependencies": ["I2.T1"],
+  "parallelizable": true,
   "done": false
 }
 ```
@@ -45,121 +43,135 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: command-endpoints (from 04_Behavior_and_Communication.md)
+### Context: Logging & Monitoring (from 05_Operational_Architecture.md)
 
-```markdown
-**Command Endpoints**
+<!-- anchor: logging-monitoring -->
+#### Logging & Monitoring
 
-POST   /api/v1/commands
-Headers:  Authorization: Bearer {token}
-Request:  {
+<!-- anchor: logging-strategy -->
+**Logging Strategy: Structured Logging with Correlation**
+
+**Framework:** `structlog` (Python) for structured, JSON-formatted logs
+
+**Log Levels:**
+- **DEBUG**: Detailed diagnostic info (disabled in production)
+- **INFO**: General informational messages (command execution, API calls)
+- **WARNING**: Unexpected but handled situations (vehicle timeout, retry attempts)
+- **ERROR**: Errors requiring attention (failed commands, database errors)
+- **CRITICAL**: System-level failures (database connection lost, service crash)
+
+**Structured Log Format:**
+```json
+{
+  "timestamp": "2025-10-28T10:00:01.234Z",
+  "level": "INFO",
+  "logger": "sovd.command_service",
+  "event": "command_executed",
+  "correlation_id": "uuid",
+  "user_id": "uuid",
   "vehicle_id": "uuid",
-  "command_name": "ReadDTC",
-  "command_params": { "ecuAddress": "0x10", "format": "UDS" }
-}
-Response: {
   "command_id": "uuid",
-  "status": "pending",
-  "submitted_at": "2025-10-28T10:00:00Z",
-  "stream_url": "wss://api.sovd.example.com/ws/responses/{command_id}"
-}
-
-GET    /api/v1/commands/{command_id}
-Headers:  Authorization: Bearer {token}
-Response: {
-  "command_id": "uuid",
-  "vehicle_id": "uuid",
   "command_name": "ReadDTC",
-  "command_params": { ... },
-  "status": "completed",
-  "submitted_at": "2025-10-28T10:00:00Z",
-  "completed_at": "2025-10-28T10:00:01.5Z"
+  "duration_ms": 1234,
+  "status": "completed"
 }
-
-GET    /api/v1/commands/{command_id}/responses
-Headers:  Authorization: Bearer {token}
-Response: [
-  {
-    "response_id": "uuid",
-    "response_payload": { "dtcCode": "P0420", "description": "Catalyst System Efficiency Below Threshold" },
-    "sequence_number": 1,
-    "is_final": false,
-    "received_at": "2025-10-28T10:00:01Z"
-  },
-  {
-    "response_id": "uuid",
-    "response_payload": { "status": "complete" },
-    "sequence_number": 2,
-    "is_final": true,
-    "received_at": "2025-10-28T10:00:01.5Z"
-  }
-]
-
-GET    /api/v1/commands
-Headers:  Authorization: Bearer {token}
-Query:    ?vehicle_id=uuid&status=completed&limit=20&offset=0
-Response: [
-  { "command_id": "uuid", "command_name": "ReadDTC", "status": "completed", ... }
-]
 ```
 
-### Context: rbac (from 05_Operational_Architecture.md)
+**Correlation IDs:**
+- Generated for each API request (X-Request-ID header)
+- Propagated through all services (database queries, vehicle communication)
+- Enables end-to-end request tracing in logs
 
-```markdown
-**Authorization Strategy: Role-Based Access Control (RBAC)**
+**Log Destinations:**
+- **Development**: Console output (pretty-printed for readability)
+- **Production**:
+  - AWS CloudWatch Logs (primary, searchable, alerting)
+  - ELK Stack (Elasticsearch, Logstash, Kibana) for advanced analytics (optional)
 
-**Roles:**
-- **Engineer**: Can view vehicles, execute commands, view command history (own commands)
-- **Admin**: Full access (user management, system configuration, all command history)
+**Log Retention:**
+- Application logs: 30 days
+- Audit logs: 7 years (compliance requirement for automotive industry)
 
-**Implementation:**
-- Role stored in `users.role` field
-- Access token JWT includes `role` claim
-- FastAPI dependencies enforce authorization:
-  ```python
-  @router.post("/commands")
-  async def execute_command(
-      user: User = Depends(require_role(["engineer", "admin"])),
-      ...
-  ):
-  ```
-- Unauthorized access returns HTTP 403 Forbidden
+<!-- anchor: monitoring-strategy -->
+**Monitoring Strategy: Metrics & Alerting**
 
-**Future Enhancement: Fine-Grained Permissions**
-- Transition to permission-based model (e.g., `execute_command`, `view_all_commands`)
-- Implement using Casbin or custom RBAC engine
-```
+**Metrics Framework:** Prometheus (time-series database)
 
-### Context: communication-security (from 04_Behavior_and_Communication.md)
+**Key Metrics Collected:**
 
-```markdown
-**Communication Security**
+**Application Metrics:**
+- `http_requests_total{method, endpoint, status}`: Counter of HTTP requests
+- `http_request_duration_seconds{method, endpoint}`: Histogram of request latency
+- `websocket_connections_active`: Gauge of active WebSocket connections
+- `commands_executed_total{status}`: Counter of commands (completed, failed)
+- `command_execution_duration_seconds`: Histogram of command round-trip time
+- `vehicle_connections_active`: Gauge of connected vehicles
+- `response_size_bytes`: Histogram of response payload sizes
 
-**TLS Everywhere:**
-- Client ↔ API Gateway: TLS 1.3 (HTTPS, WSS)
-- API Gateway ↔ Backend Services: TLS (internal certificates)
-- Backend ↔ Vehicle: TLS (mutual TLS for production)
+**System Metrics:**
+- CPU utilization, memory usage (via node-exporter)
+- Database connections (active, idle, max)
+- Redis connections and memory usage
 
-**Authentication:**
-- JWT tokens in Authorization header for REST APIs
-- JWT token in query parameter for WebSocket (upgraded after validation)
-- Token expiration: 15 minutes (access), 7 days (refresh)
+**Custom Metrics:**
+- `sovd_command_timeout_total`: Counter of vehicle timeouts
+- `sovd_response_chunks_total`: Counter of streaming response chunks
+- `sovd_authentication_failures_total`: Counter of failed logins
 
-**Authorization:**
-- RBAC middleware validates user role for every endpoint
-- Command execution requires `engineer` or `admin` role
-- Admin-only endpoints (user management) enforce `admin` role
+**Alerting Rules (Prometheus Alertmanager):**
+- Command success rate < 90% over 5 minutes → Page on-call engineer
+- 95th percentile response time > 3 seconds → Slack notification
+- Database connection pool exhaustion → Page on-call
+- Vehicle connection drop > 20% in 5 minutes → Email alert
 
-**Input Validation:**
-- Pydantic models validate all request payloads
-- SOVD Protocol Handler validates command structure against SOVD 2.0 spec
-- SQL injection prevention via parameterized queries (SQLAlchemy ORM)
-- XSS prevention via React's automatic escaping
+**Dashboards (Grafana):**
+- **Operations Dashboard**: Request rate, error rate, latency (RED metrics)
+- **Command Dashboard**: Commands/minute, success rate, avg execution time
+- **Vehicle Dashboard**: Active connections, connection stability, command distribution
+- **System Health Dashboard**: CPU, memory, disk, network
 
-**Rate Limiting:**
-- API Gateway (Nginx) enforces rate limits: 100 req/min per user
-- Prevents abuse and DoS attacks
-```
+### Context: NFR Maintainability (from 01_Context_and_Drivers.md)
+
+<!-- anchor: nfr-maintainability -->
+#### Maintainability
+- **Code Quality**: 80%+ test coverage, automated linting and formatting
+- **Documentation**: OpenAPI/Swagger for APIs, inline code documentation
+- **Modularity**: Clear separation of concerns, loosely coupled components
+- **Observability**: Structured logging, distributed tracing, metrics collection
+
+**Architectural Impact**: Layered architecture, dependency injection, standardized logging framework, observability stack (e.g., ELK or equivalent).
+
+### Context: Task I4.T2 Specification (from 02_Iteration_I4.md)
+
+<!-- anchor: task-i4-t2 -->
+**Task 4.2: Implement Prometheus Metrics Exporter**
+
+**Task ID:** `I4.T2`
+
+**Description:** Integrate Prometheus metrics into backend application. Use `prometheus-fastapi-instrumentator` library to automatically instrument FastAPI app with HTTP metrics (request count, duration, status codes). Add custom metrics in `backend/app/utils/metrics.py`:
+1. `commands_executed_total{status}` (Counter for commands by status)
+2. `command_execution_duration_seconds` (Histogram for command round-trip time)
+3. `websocket_connections_active` (Gauge for active WebSocket connections)
+4. `vehicle_connections_active` (Gauge for connected vehicles)
+5. `sovd_command_timeout_total` (Counter for vehicle timeouts)
+
+Increment counters and update gauges in appropriate services (command_service, websocket_manager, vehicle_service). Expose metrics at `/metrics` endpoint (Prometheus scrape target). Configure Prometheus server in `infrastructure/docker/prometheus.yml` (scrape config for backend:8000/metrics). Add Prometheus to docker-compose.yml (service: `prometheus`, image: `prom/prometheus`, port 9090, volume mount for prometheus.yml). Write README documentation for accessing metrics.
+
+**Acceptance Criteria:**
+- `GET http://localhost:8000/metrics` returns Prometheus-formatted metrics
+- HTTP metrics present: `http_requests_total`, `http_request_duration_seconds`
+- Custom metrics present: `commands_executed_total`, `command_execution_duration_seconds`, `websocket_connections_active`
+- Metrics update correctly: submitting command increments `commands_executed_total{status="completed"}`
+- Prometheus server accessible at `http://localhost:9090`
+- Prometheus successfully scrapes backend metrics (verify in Prometheus UI: Status → Targets)
+- Metrics queryable in Prometheus UI (e.g., query `commands_executed_total`)
+- README includes instructions for accessing Prometheus and example queries
+- No errors in Prometheus logs
+- No linter errors
+
+**Dependencies:** `I2` (backend services to instrument)
+
+**Parallelizable:** Yes (monitoring infrastructure independent of features)
 
 ---
 
@@ -169,86 +181,243 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `backend/app/api/v1/commands.py`
-    *   **Summary:** This file contains the FastAPI router for command management endpoints. **CRITICAL:** It already implements a fully functional `GET /api/v1/commands` endpoint (lines 205-335) with comprehensive RBAC enforcement, pagination, and filtering support including vehicle_id, status, user_id (admin only), start_date, and end_date filters.
-    *   **Recommendation:** You MUST examine this existing implementation carefully. The backend API endpoint is **ALREADY COMPLETE** and passes all tests in `test_command_history.py`. Your task is primarily to build the **FRONTEND** components that consume this API. Do NOT modify the backend unless you find a specific bug or need to add missing functionality that is not already there.
-    *   **Key Implementation Details:**
-        - Lines 266-297: RBAC enforcement - Engineers are automatically filtered to see only their own commands (effective_user_id = current_user.user_id), while admins can optionally filter by user_id or see all commands
-        - Lines 242-264: Date parsing with proper error handling (ISO 8601 format with Z suffix replacement)
-        - Lines 311-319: Filters dictionary construction passed to service layer
-        - Lines 331-335: Response using CommandListResponse schema with commands list, limit, and offset
+#### File: `backend/app/utils/metrics.py`
+**Summary:** This file already exists and contains the complete implementation of custom Prometheus metrics! It defines all required metrics using `prometheus_client`:
+- `commands_executed_total` - Counter with status label
+- `command_execution_duration_seconds` - Histogram with pre-configured buckets
+- `websocket_connections_active` - Gauge for WebSocket connections
+- `vehicle_connections_active` - Gauge for vehicle connections
 
-*   **File:** `backend/app/services/command_service.py`
-    *   **Summary:** This file contains the business logic for command operations. It already includes `get_command_history()` function (lines 131-164) that delegates to the repository layer with all filter parameters.
-    *   **Recommendation:** This service function is complete and functional. Do NOT modify unless there is a specific missing feature.
+**Recommendation:** You DO NOT need to create this file or add metrics definitions. The metrics are already defined and ready to use. Helper functions are also implemented: `increment_command_counter()`, `observe_command_duration()`, `increment_websocket_connections()`, `decrement_websocket_connections()`, `set_vehicle_connections()`.
 
-*   **File:** `backend/app/repositories/command_repository.py`
-    *   **Summary:** This file contains the data access layer for commands. The `get_commands()` function (lines 102-144) implements comprehensive filtering with SQLAlchemy queries including vehicle_id, user_id, status, start_date, end_date filters, plus pagination with limit/offset, and ordering by submitted_at DESC (newest first).
-    *   **Recommendation:** The repository layer is complete. It properly handles all filters and pagination. Do NOT modify.
+**WARNING:** The task description mentions adding `sovd_command_timeout_total` but this metric is NOT currently defined in the file. You SHOULD add this counter metric following the same pattern as the existing metrics.
 
-*   **File:** `backend/app/dependencies.py`
-    *   **Summary:** This file contains authentication and authorization dependency injection functions. It includes `get_current_user()` for JWT validation and `require_role()` factory function for role-based authorization.
-    *   **Recommendation:** You MUST use `get_current_user()` in your frontend API calls to include the JWT token in the Authorization header. The user's role is embedded in the JWT and enforced by the backend.
+#### File: `backend/app/main.py`
+**Summary:** The main FastAPI application entry point. It already includes Prometheus instrumentation setup on lines 52-54:
+```python
+# Setup Prometheus instrumentation
+# This automatically creates metrics for HTTP requests and exposes /metrics endpoint
+Instrumentator().instrument(app).expose(app)
+```
 
-*   **File:** `backend/app/schemas/command.py`
-    *   **Summary:** This file defines Pydantic schemas for command-related API requests and responses. Key schemas:
-        - `CommandResponse`: Complete command details with all fields (command_id, user_id, vehicle_id, command_name, command_params, status, error_message, submitted_at, completed_at)
-        - `CommandListResponse`: Paginated response with commands list, limit, and offset
-    *   **Recommendation:** Use these exact schemas for TypeScript type definitions in the frontend. The API returns data matching these schemas.
+**Recommendation:** The Prometheus FastAPI instrumentator is already configured and the `/metrics` endpoint is already exposed! You DO NOT need to add this code again. The HTTP metrics (`http_requests_total`, `http_request_duration_seconds`) are automatically generated by this library.
 
-*   **File:** `backend/app/models/command.py` and `backend/app/models/user.py`
-    *   **Summary:** SQLAlchemy ORM models defining the database schema. Command model has all necessary fields and relationships. User model includes role field for RBAC.
-    *   **Recommendation:** These define the data structure you'll be displaying. Note that the Command model includes relationships to User and Vehicle, which means you can display user information if needed (though the current API doesn't return joined data).
+**Status:** Lines 16 imports `prometheus_fastapi_instrumentator`, line 54 instruments the app, and line 100 documents the metrics endpoint. This task requirement is ALREADY COMPLETE.
 
-*   **File:** `backend/tests/integration/test_command_history.py`
-    *   **Summary:** **THIS IS CRITICAL** - This is a comprehensive test suite (714 lines) that verifies ALL the functionality you need to implement in the frontend. It contains:
-        - TestCommandHistoryRBAC: Tests for engineers seeing only own commands, admins seeing all commands, admin filtering by user
-        - TestCommandHistoryFiltering: Tests for filtering by vehicle, status, date range (start_date, end_date)
-        - TestCommandHistoryPagination: Tests for pagination with limit/offset, combined with filters
-        - TestCommandHistoryEdgeCases: Tests for no results, unauthorized access
-    *   **Recommendation:** **READ THIS FILE CAREFULLY**. It documents exactly how the backend API behaves. Use this as a specification for what your frontend must support. All these tests already PASS, meaning the backend functionality is complete and working.
+#### File: `backend/requirements.txt`
+**Summary:** Python dependencies file. Line 32 shows:
+```
+prometheus-fastapi-instrumentator>=6.1.0
+```
+
+**Recommendation:** The required dependency is already installed. You DO NOT need to add it to requirements.txt.
+
+#### File: `backend/app/services/websocket_manager.py`
+**Summary:** WebSocket connection manager that handles real-time response streaming. Lines 11 and 43-44 show it's already integrated with metrics:
+```python
+from app.utils.metrics import decrement_websocket_connections, increment_websocket_connections
+# ... in connect() method:
+increment_websocket_connections()
+# ... in disconnect() method:
+decrement_websocket_connections()
+```
+
+**Recommendation:** WebSocket metrics are ALREADY INSTRUMENTED. The gauge is incremented on connection and decremented on disconnection. No changes needed here.
+
+#### File: `backend/app/connectors/vehicle_connector.py`
+**Summary:** Mock vehicle connector that simulates command execution. Line 23 shows it already imports and uses metrics:
+```python
+from app.utils.metrics import increment_command_counter, observe_command_duration
+```
+
+**Recommendation:** The vehicle connector is already instrumented to track command execution metrics. The `increment_command_counter()` and `observe_command_duration()` functions are called during command execution. You SHOULD review the actual usage locations in this file to ensure they're called correctly.
+
+**Note:** Error simulation probabilities are defined at the top (lines 29-32) including `ERROR_PROBABILITY_TIMEOUT = 0.10`. This is where timeout scenarios are simulated.
+
+#### File: `infrastructure/docker/prometheus.yml`
+**Summary:** Prometheus configuration file that is already complete and correctly configured. It includes:
+- Global scrape interval of 15s
+- Scrape job named 'sovd-backend' targeting 'backend:8000'
+- Metrics path '/metrics'
+- 10s scrape interval for development
+
+**Recommendation:** This file is ALREADY COMPLETE and correct. No changes needed.
+
+#### File: `docker-compose.yml`
+**Summary:** Docker Compose orchestration file. Lines 110-133 define the Prometheus service:
+- Image: `prom/prometheus:latest`
+- Container name: `sovd-prometheus`
+- Port mapping: 9090:9090
+- Volume mount for prometheus.yml configuration
+- Persistent volume: `prometheus-data`
+- Depends on backend service
+
+Lines 136-164 also define a Grafana service (bonus - already done for future task I4.T3!).
+
+**Recommendation:** Prometheus service is ALREADY ADDED to docker-compose.yml. No changes needed. The configuration is complete and ready to use.
+
+#### File: `README.md`
+**Summary:** Project documentation. Lines 80-82 already document:
+```
+- Prometheus Metrics: http://localhost:8000/metrics
+- Prometheus UI: http://localhost:9090
+- Grafana Dashboards: http://localhost:3001 (credentials: admin/admin)
+```
+
+Line 45 also lists Prometheus + Grafana in the Infrastructure section.
+
+**Recommendation:** Basic Prometheus documentation already exists. You SHOULD enhance it with more detailed instructions on:
+1. How to access and use Prometheus UI
+2. Example Prometheus queries for SOVD-specific metrics
+3. How to verify metrics are being scraped correctly
+4. Troubleshooting tips
 
 ### Implementation Tips & Notes
 
-*   **Tip 1 - Backend is Complete:** The backend API at `GET /api/v1/commands` is fully implemented with all required features (pagination, filtering, RBAC). All integration tests pass. Your primary task is to build the **FRONTEND** components.
+#### Tip 1: Task is 90% Complete
+**Analysis:** Based on my codebase review, this task is approximately 90% complete! The core infrastructure is all in place:
+- ✅ Prometheus instrumentator installed and configured
+- ✅ /metrics endpoint exposed
+- ✅ Custom metrics defined in utils/metrics.py
+- ✅ WebSocket metrics instrumented
+- ✅ Command metrics instrumented (in vehicle_connector)
+- ✅ Prometheus service in docker-compose.yml
+- ✅ Prometheus configuration file created
+- ✅ Basic README documentation
 
-*   **Tip 2 - RBAC is Automatic:** The backend automatically enforces RBAC. Engineers are filtered to see only their own commands - this happens on the backend (lines 266-270 of commands.py), so your frontend does NOT need to filter results. Simply display what the API returns. Admins can optionally use the `user_id` query parameter to filter by specific users.
+**What's Missing:**
+1. ❌ `sovd_command_timeout_total` metric not defined
+2. ❌ Enhanced README documentation with examples
+3. ❌ Verification that metrics are actually being updated correctly
 
-*   **Tip 3 - Date Format:** The API accepts ISO 8601 date format for start_date and end_date query parameters (e.g., "2025-10-29T00:00:00Z"). The backend handles parsing and converts the 'Z' suffix to '+00:00' timezone format. Make sure your frontend date pickers generate this format.
+**Recommendation:** Focus your implementation on:
+1. Adding the missing `sovd_command_timeout_total` counter to metrics.py
+2. Instrumenting the timeout scenario in vehicle_connector.py to increment this counter
+3. Writing comprehensive README documentation for Prometheus
+4. Testing the entire metrics pipeline end-to-end
 
-*   **Tip 4 - Pagination:** The API supports standard limit/offset pagination. Default limit is 50, max is 100 (enforced by Query validator on line 212). Your frontend should implement "Load More" or page-based navigation.
+#### Tip 2: The `sovd_command_timeout_total` Metric
+**Location:** This metric should be added to `backend/app/utils/metrics.py` following the pattern of `commands_executed_total`.
 
-*   **Tip 5 - Existing Frontend Patterns:** You already have working frontend pages:
-    - `frontend/src/pages/VehiclesPage.tsx` - Shows list with React Query, filtering, and loading states
-    - `frontend/src/pages/CommandPage.tsx` - Shows form submission with validation
-    - `frontend/src/components/commands/ResponseViewer.tsx` - Shows detail view with data fetching
-    - You SHOULD follow the same patterns (React Query for data fetching, MUI components, TypeScript strict typing)
+**Usage:** In `backend/app/connectors/vehicle_connector.py`, look for the timeout simulation logic (around line 29: `ERROR_PROBABILITY_TIMEOUT = 0.10`). You need to find where timeout errors are actually triggered and increment this counter there.
 
-*   **Tip 6 - API Client:** You have an existing API client at `frontend/src/api/client.ts` that automatically injects JWT tokens and handles token refresh. You SHOULD use this client for all API calls.
+**Pattern:**
+```python
+# In metrics.py
+sovd_command_timeout_total = Counter(
+    'sovd_command_timeout_total',
+    'Total number of SOVD command timeouts (vehicle did not respond)'
+)
 
-*   **Tip 7 - Authentication Context:** The `frontend/src/context/AuthContext.tsx` provides access to the current user's information including their role. You SHOULD use this to conditionally show/hide UI elements (e.g., user filter dropdown only for admins).
+# Helper function
+def increment_timeout_counter() -> None:
+    """Increment the command timeout counter."""
+    sovd_command_timeout_total.inc()
+```
 
-*   **Tip 8 - Status Values:** Based on the Command model, valid status values are: 'pending', 'in_progress', 'completed', 'failed'. Your status filter dropdown should include these options.
+#### Tip 3: README Enhancement Structure
+**Recommendation:** Add a new section to README.md titled "## Monitoring and Observability" with subsections:
 
-*   **Tip 9 - MUI Table Component:** For the history list, consider using MUI's `<Table>` component with `<TablePagination>` for a professional look that matches the existing UI theme. Alternatively, use `<DataGrid>` from `@mui/x-data-grid` for advanced features (sorting, filtering), but note this may require additional npm packages.
+1. **Accessing Prometheus**
+   - URL and basic navigation
+   - How to check target status
+   - How to verify metrics are being scraped
 
-*   **Tip 10 - Navigation to Detail Page:** Your CommandHistory component should include an "Actions" column with a "View Details" button that navigates to a detail page showing the full command info and responses. You can create a new route like `/commands/:commandId` that uses the existing `ResponseViewer` component.
+2. **Available Metrics**
+   - List all custom SOVD metrics with descriptions
+   - Explain what each metric tracks
+   - Include expected values/ranges
 
-*   **Tip 11 - Vehicle VIN Display:** The current API returns vehicle_id (UUID), not the VIN string. You have two options:
-    1. Make a separate API call to `GET /api/v1/vehicles/{vehicle_id}` to fetch VIN (recommended for accuracy)
-    2. Accept that the table will show vehicle_id instead of VIN (simpler, but less user-friendly)
-    The task description requests "Vehicle (VIN)", so option 1 is preferred, but may require caching or pre-fetching vehicle data.
+3. **Example Prometheus Queries**
+   - Commands executed in last 5 minutes: `rate(commands_executed_total[5m])`
+   - Command success rate: `rate(commands_executed_total{status="completed"}[5m])`
+   - Average command execution time: `rate(command_execution_duration_seconds_sum[5m]) / rate(command_execution_duration_seconds_count[5m])`
+   - Active WebSocket connections: `websocket_connections_active`
+   - Timeout rate: `rate(sovd_command_timeout_total[5m])`
 
-*   **Tip 12 - User Display:** Similarly, the API returns user_id, not username. If the task requires showing usernames, you may need to fetch user data or extend the backend API to join user information (but read the acceptance criteria carefully - it may only require user_id).
+4. **Troubleshooting**
+   - What to do if metrics endpoint returns 404
+   - How to check if Prometheus is scraping successfully
+   - Common configuration errors
 
-*   **Note:** The backend test file (`test_command_history.py`) uses mocks because it's testing the API endpoint logic, not end-to-end database queries. When you manually test your frontend, ensure your local backend is running with the actual database so you see real data.
+#### Tip 4: Testing the Metrics Pipeline
+**Important:** To fully satisfy the acceptance criteria, you MUST verify:
 
-*   **Warning:** Do NOT create a new `GET /api/v1/commands` endpoint or modify the existing one unless you find a specific bug. The endpoint is already feature-complete. Focus your backend work on writing additional tests if coverage is below 80% or fixing any bugs you discover during frontend testing.
+1. **Metrics Endpoint Works:**
+   ```bash
+   curl http://localhost:8000/metrics | grep commands_executed_total
+   ```
 
-*   **Testing Strategy:** The acceptance criteria requires ≥80% test coverage. The backend integration tests already exist and pass. You MUST write frontend component tests for:
-    - HistoryPage rendering and loading states
-    - CommandHistory component with mock data
-    - Filter interactions (vehicle dropdown, status dropdown, date pickers)
-    - Pagination controls (Next, Previous, page size)
-    - RBAC behavior (engineers vs admins)
-    - Navigation to CommandDetailPage
+2. **Prometheus Scrapes Successfully:**
+   - Start services: `docker-compose up -d`
+   - Access Prometheus UI: http://localhost:9090
+   - Navigate to Status → Targets
+   - Verify 'sovd-backend' target shows as UP
+   - Check Last Scrape time is recent
+
+3. **Metrics Update Correctly:**
+   - Submit a test command via API
+   - Query Prometheus: `commands_executed_total`
+   - Verify the counter increased
+   - Check WebSocket connections gauge by opening WebSocket connection
+
+4. **No Errors in Logs:**
+   ```bash
+   docker-compose logs prometheus | grep -i error
+   ```
+
+#### Warning 1: Prometheus Client Library
+**Note:** The metrics are defined using `prometheus_client` library (imported in metrics.py line 12), NOT `prometheus-fastapi-instrumentator`.
+
+- `prometheus-fastapi-instrumentator` is used ONLY in main.py to auto-instrument HTTP metrics and expose the endpoint
+- `prometheus_client` is used to define custom application metrics
+
+These are two different libraries that work together. Make sure you understand the distinction.
+
+#### Warning 2: Metric Naming Convention
+**Important:** Prometheus metric names should follow these conventions:
+- Use snake_case (not camelCase)
+- Include units in the name (e.g., `_seconds`, `_total`, `_bytes`)
+- Counters should end with `_total`
+- Don't repeat the namespace (already using `sovd_` prefix for custom metrics)
+
+The existing metrics follow these conventions correctly. Maintain consistency when adding the timeout metric.
+
+#### Warning 3: Docker Service Names
+**Critical:** In Prometheus configuration, the backend service MUST be referenced as `backend:8000`, NOT `localhost:8000`. This is because Prometheus runs inside Docker and needs to use Docker's internal networking (service name resolution).
+
+The current configuration already does this correctly. Do not change it to localhost.
+
+#### Note: Grafana is a Bonus
+**Context:** The docker-compose.yml file already includes a Grafana service (task I4.T3). While this isn't required for I4.T2, it means:
+- Grafana will start automatically with `docker-compose up`
+- You can optionally verify metrics in Grafana UI as an extra validation step
+- If you encounter any Grafana-related errors during testing, you can ignore them for this task (they'll be addressed in I4.T3)
+
+### Summary of Work Needed
+
+Based on my analysis, here's what you need to do to complete this task:
+
+1. **Add Missing Metric (10% of work):**
+   - Add `sovd_command_timeout_total` Counter to `backend/app/utils/metrics.py`
+   - Add helper function `increment_timeout_counter()`
+   - Import and use this function in `vehicle_connector.py` where timeouts occur
+
+2. **Enhance Documentation (60% of work):**
+   - Add comprehensive "Monitoring and Observability" section to README.md
+   - Include Prometheus access instructions
+   - List and explain all custom metrics
+   - Provide example Prometheus queries
+   - Add troubleshooting guide
+
+3. **Testing and Verification (30% of work):**
+   - Start docker-compose services
+   - Verify /metrics endpoint returns all expected metrics
+   - Check Prometheus UI shows backend target as UP
+   - Submit test commands and verify metrics update
+   - Test WebSocket connections and verify gauge changes
+   - Trigger timeout scenario and verify timeout counter increments
+   - Check for errors in Prometheus logs
+   - Run linters and fix any issues
+
+This should result in 100% task completion and satisfy all acceptance criteria.
