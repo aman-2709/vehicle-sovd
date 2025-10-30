@@ -34,7 +34,7 @@ test:
 # Run frontend tests
 frontend-test:
 	@echo "Running frontend tests..."
-	@cd frontend && npm test run
+	@cd frontend && npm run test
 
 # Run frontend tests with coverage
 frontend-coverage:

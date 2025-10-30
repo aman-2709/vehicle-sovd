@@ -32,13 +32,7 @@ This is the full specification of the task you must complete.
   ],
   "deliverables": "Comprehensive frontend test suite with 80%+ coverage; all tests passing; linting and formatting configured; CI integration.",
   "acceptance_criteria": "`make frontend:test` runs all frontend tests successfully (0 failures); Coverage report shows ≥80% line coverage for `frontend/src/` directory; `npm run lint` (or `make frontend:lint`) passes with no errors; `npm run format` (or `make frontend:format`) formats all files consistently; Coverage HTML report generated in `frontend/coverage/` directory; GitHub Actions workflow runs frontend tests and linting on push (verify workflow syntax is valid); Component tests cover: all pages, key components (VehicleList, CommandForm, ResponseViewer), common components (Header, ErrorBoundary); Tests verify: rendering, user interactions, API integration (with mocked API), error handling; No console errors or warnings in tests; All frontend code follows ESLint and Prettier rules",
-  "dependencies": [
-    "I3.T4",
-    "I3.T5",
-    "I3.T6",
-    "I3.T7",
-    "I3.T8"
-  ],
+  "dependencies": ["I3.T4", "I3.T5", "I3.T6", "I3.T7", "I3.T8"],
   "parallelizable": false,
   "done": false
 }
@@ -48,59 +42,107 @@ This is the full specification of the task you must complete.
 
 ## 2. Architectural & Planning Context
 
-The following are the relevant sections from the architecture and plan documents.
+The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Unit Testing Requirements
+### Context: unit-testing (from 03_Verification_and_Glossary.md)
+
+```markdown
+#### Unit Testing
 
 **Backend (Python/pytest)**
-- Scope: Individual functions and classes in services, repositories, utilities
-- Framework: pytest with pytest-asyncio for async code
-- Coverage Target: ≥80% line coverage for all modules
-- Mocking: Use pytest fixtures and unittest.mock for database, Redis, external dependencies
+*   **Scope**: Individual functions and classes in services, repositories, utilities, and protocol handlers
+*   **Framework**: pytest with pytest-asyncio for async code
+*   **Coverage Target**: ≥80% line coverage for all modules
+*   **Key Areas**:
+    *   Auth service: JWT generation/validation, password hashing, RBAC logic
+    *   Vehicle service: Filtering, caching logic
+    *   Command service: Status transitions, validation
+    *   SOVD protocol handler: Command validation, encoding/decoding
+    *   Audit service: Log record creation
+    *   Mock vehicle connector: Response generation
+*   **Mocking**: Use pytest fixtures and `unittest.mock` for database, Redis, external dependencies
+*   **Execution**: `pytest backend/tests/unit/` or `make test`
 
 **Frontend (TypeScript/Vitest)**
-- Scope: Individual React components, hooks, utility functions
-- Framework: Vitest with React Testing Library
-- Coverage Target: ≥80% line coverage for all components
-- Key Areas: Authentication components, Vehicle components, Command components, Common components, API client
-- Mocking: Mock API calls using Vitest's vi.mock(), mock WebSocket connections
-- Execution: `npm run test` or `make frontend:test`
+*   **Scope**: Individual React components, hooks, utility functions
+*   **Framework**: Vitest with React Testing Library
+*   **Coverage Target**: ≥80% line coverage for all components
+*   **Key Areas**:
+    *   Authentication components: LoginForm, ProtectedRoute
+    *   Vehicle components: VehicleList, VehicleSelector
+    *   Command components: CommandForm, ResponseViewer
+    *   Common components: Header, ErrorBoundary, LoadingSpinner
+    *   API client: Token management, retry logic
+*   **Mocking**: Mock API calls using Vitest's `vi.mock()`, mock WebSocket connections
+*   **Execution**: `npm run test` or `make frontend:test`
+```
 
-### Context: Code Quality Gates
+### Context: code-quality-gates (from 03_Verification_and_Glossary.md)
+
+```markdown
+### 5.3. Code Quality Gates
+
+#### Quality Metrics & Enforcement
 
 **Code Coverage**
-- Requirement: ≥80% line coverage for both backend and frontend
-- Enforcement: CI pipeline fails if coverage drops below threshold
-- Reporting: HTML coverage reports generated and uploaded as artifacts
-- Tool: pytest-cov (backend), Vitest coverage (frontend)
+*   **Requirement**: ≥80% line coverage for both backend and frontend
+*   **Enforcement**: CI pipeline fails if coverage drops below threshold
+*   **Reporting**: HTML coverage reports generated and uploaded as artifacts
+*   **Tool**: pytest-cov (backend), Vitest coverage (frontend)
 
 **Linting & Formatting**
-- Frontend Standards:
-  - ESLint: React rules, security rules, TypeScript rules
-  - Prettier: Consistent formatting (trailing commas, semicolons)
-- Enforcement: CI pipeline fails on any linting errors
-- Pre-commit Hooks: Optional (can use husky to run linters before commit)
+*   **Backend Standards**:
+    *   Ruff: Select rules E (errors), F (pyflakes), I (import order)
+    *   Black: Line length 100, enforced formatting
+    *   mypy: Strict mode (type checking)
+*   **Frontend Standards**:
+    *   ESLint: React rules, security rules, TypeScript rules
+    *   Prettier: Consistent formatting (trailing commas, semicolons)
+*   **Enforcement**: CI pipeline fails on any linting errors
+*   **Pre-commit Hooks**: Optional (can use husky to run linters before commit)
 
 **Type Safety**
-- Frontend: TypeScript strict mode (`"strict": true` in tsconfig.json)
-- Enforcement: CI pipeline runs type checkers
+*   **Backend**: mypy strict mode ensures all functions have type hints
+*   **Frontend**: TypeScript strict mode (`"strict": true` in tsconfig.json)
+*   **Enforcement**: CI pipeline runs type checkers
+```
 
-### Context: CI/CD Pipeline Requirements
+### Context: ci-cd-pipeline (from 03_Verification_and_Glossary.md)
 
-**GitHub Actions Workflow Stages**
+```markdown
+### 5.2. CI/CD Pipeline Integration
 
-1. **Lint (Parallel)**
-   - Backend linting: `ruff check`, `black --check`, `mypy`
-   - Frontend linting: `eslint`, `prettier --check`
-   - Duration: ~2 minutes
-   - Failure Action: Fail build, block merge
+#### Pipeline Overview (GitHub Actions)
 
-2. **Unit Tests (Parallel)**
-   - Backend unit tests: `pytest backend/tests/unit/ --cov`
-   - Frontend unit tests: `vitest run --coverage`
-   - Coverage Threshold: ≥80%
-   - Duration: ~3 minutes
-   - Failure Action: Fail build if tests fail or coverage < 80%
+The CI/CD pipeline (`github/workflows/ci-cd.yml`) orchestrates all verification activities automatically:
+
+**Stage 1: Lint & Format Check (Parallel)**
+*   Backend: ruff, black --check, mypy
+*   Frontend: eslint, prettier --check
+*   **Failure Condition**: Any linting errors
+*   **Duration**: ~2 minutes
+
+**Stage 2: Unit Tests (Parallel)**
+*   Backend: pytest unit tests with coverage report
+*   Frontend: npm test (Vitest) with coverage report
+*   **Failure Condition**: Test failure or coverage <80%
+*   **Duration**: ~3 minutes
+```
+
+### Context: technology-stack (from 02_Architecture_Overview.md)
+
+```markdown
+#### Technology Selection Matrix
+
+| **Layer/Concern** | **Technology** | **Justification** |
+|-------------------|----------------|-------------------|
+| **Frontend Framework** | React 18 + TypeScript | Industry-standard component model; TypeScript provides type safety; extensive ecosystem; strong community support; meets requirement. |
+| **Frontend State Management** | React Context + React Query | React Query for server state (caching, sync); Context for auth/global UI state; avoids Redux complexity for this scale. |
+| **Frontend Build** | Vite | Fast dev server and build times; superior to CRA; excellent TypeScript support; optimized production bundles. |
+| **Frontend UI Library** | Material-UI (MUI) | Comprehensive component library; automotive industry precedent; accessibility built-in; professional appearance. |
+| **Testing - Frontend** | Vitest + React Testing Library | Vite-native; fast; compatible with Jest patterns; RTL for component testing. |
+| **Code Quality - Frontend** | ESLint + Prettier + TypeScript | Requirements specified; catches errors; consistent formatting; type safety. |
+```
 
 ---
 
@@ -108,165 +150,245 @@ The following are the relevant sections from the architecture and plan documents
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### Relevant Existing Code
+### Current Test Coverage Status
 
-*   **File:** `frontend/vite.config.ts`
-    *   **Summary:** This file contains the Vite configuration with test coverage settings **already configured** for Vitest. Coverage is set to use v8 provider, generate multiple report formats (text, html, json, lcov), and has thresholds set to 80% lines, 75% branches, 75% functions, 80% statements.
-    *   **Recommendation:** You SHOULD use the existing test configuration as-is. The coverage thresholds are already properly configured. The `test.coverage.exclude` array excludes pages, App.tsx, and main.tsx from coverage (as they are integration-level).
+**Overall Coverage: 90.19%** (Already exceeds 80% target!)
 
-*   **File:** `frontend/package.json`
-    *   **Summary:** This file contains npm scripts including `test` (runs vitest), `test:coverage` (runs vitest with coverage), `lint` (ESLint), and `format` (Prettier). All scripts are **already properly configured**.
-    *   **Recommendation:** You MUST use these existing scripts. The scripts are already properly configured and match the task requirements.
+**Coverage by Module:**
+- **api/client.ts**: 44.35% - **NEEDS SIGNIFICANT IMPROVEMENT**
+- **api/websocket.ts**: 89% - Good coverage
+- **components/auth**: 100% - Excellent
+- **components/commands**: 99.05% - Excellent
+- **components/common**: 95.53% - Excellent
+- **components/vehicles**: 96.49% - Excellent (VehicleSelector has some gaps)
+- **context/AuthContext.tsx**: 95% - Very good
+- **utils/dateUtils.ts**: 94.59% - Very good
 
-*   **File:** `Makefile`
-    *   **Summary:** This file contains multiple targets including `frontend-test`, `frontend-coverage`, `frontend-lint`, and `frontend-format` that wrap the npm scripts. **These targets already exist!**
-    *   **Recommendation:** The Makefile **already has** `frontend-test` and `frontend-coverage` targets implemented correctly. You DO NOT need to add these - they already exist! However, note that `frontend-test` currently uses `npm test run` which may need to be `npm run test` for consistency.
+### Critical Files Requiring Attention
 
-*   **File:** `.github/workflows/ci-cd.yml`
-    *   **Summary:** This file contains a **comprehensive CI/CD pipeline** with separate jobs for frontend-lint, frontend-test, backend-lint, and backend-test. The frontend-test job already runs `npm run test:coverage` and checks coverage thresholds.
-    *   **Recommendation:** The GitHub Actions workflow is **ALREADY COMPLETE** for this task. Frontend tests and linting are already integrated in the CI pipeline. You DO NOT need to modify this file.
+#### 1. API Client (`frontend/src/api/client.ts`)
+**Current Coverage: 44.35%** - This is the PRIMARY area needing work.
 
-*   **File:** `frontend/.prettierrc`
-    *   **Summary:** This file contains Prettier configuration with standard settings (printWidth: 100, singleQuote: true, etc.).
-    *   **Recommendation:** Prettier is already configured. You SHOULD use the existing configuration without modifications.
+**Summary:** This file contains the core axios instance with JWT token management, automatic token refresh logic, and all API method definitions (auth, vehicle, command APIs). It has extensive interceptor logic for handling 401 responses and token refresh queuing.
 
-*   **File:** `frontend/.eslintrc.json`
-    *   **Summary:** This file contains comprehensive ESLint configuration with TypeScript support, React hooks, and type-checking rules. It includes specific overrides for test files to relax some strict rules.
-    *   **Recommendation:** ESLint is already properly configured with strict type-checking (`@typescript-eslint/recommended-requiring-type-checking`). The configuration is excellent and you SHOULD NOT modify it.
+**Uncovered Lines:** 118-222, 234-236 (based on coverage report)
 
-*   **File:** `frontend/tests/components/VehicleList.test.tsx`
-    *   **Summary:** This is an exemplary test file showing the project's testing patterns. It uses Vitest, React Testing Library, includes comprehensive test coverage for loading states, error states, empty states, data display, and filtering. It demonstrates proper test organization with describe blocks and clear test descriptions.
-    *   **Recommendation:** You MUST follow this exact testing pattern for all new tests. Use describe blocks for grouping related tests, test loading/error/empty/success states, mock data with proper TypeScript types, and use React Testing Library queries (getByText, getByRole, queryByText, etc.).
+**CRITICAL IMPLEMENTATION NOTES:**
+- Lines 118-222 contain the **token refresh logic** - this is complex and needs thorough testing
+- The file uses a queue system (`failedQueue`) to handle concurrent requests during token refresh
+- Interceptors modify request/response flows - you MUST test these in isolation
+- The `processQueue` function handles resolution/rejection of queued requests
+- Token refresh involves `localStorage.getItem('refresh_token')` and `window.location.href` redirects
 
-*   **File:** `frontend/src/api/client.ts`
-    *   **Summary:** This file contains the axios API client with JWT token management, automatic token refresh on 401, and request/response interceptors. It exports `authAPI`, `vehicleAPI`, and `commandAPI` with typed methods. Contains complex token refresh logic with request queuing.
-    *   **Recommendation:** When writing tests for components that use API calls, you MUST mock these API methods. The API client has complex token refresh logic that should be tested separately in API client unit tests. This is a HIGH PRIORITY target for achieving 80% coverage as the `api` directory currently has only 64.69% coverage.
+**Testing Strategy YOU MUST Follow:**
+1. **Mock axios and test the interceptors directly** - Don't try to test through the exported API methods alone
+2. **Test token refresh scenarios:**
+   - 401 response triggers refresh
+   - Multiple concurrent 401s queue properly
+   - Failed refresh clears tokens and redirects
+   - Successful refresh retries original request
+3. **Test the exported API methods** (authAPI, vehicleAPI, commandAPI)
+4. **Mock localStorage** and **window.location** for testing
+5. **Test edge cases:**
+   - No refresh token available
+   - Refresh endpoint returns 401
+   - Token refresh in progress when new 401 arrives
 
-*   **File:** `frontend/src/api/websocket.ts`
-    *   **Summary:** This file contains WebSocket connection logic with a `WebSocketReconnectionManager` class for automatic reconnection with exponential backoff. It includes connection status tracking and error handling.
-    *   **Recommendation:** When testing components that use WebSocket (like ResponseViewer), you MUST mock the WebSocket connection. The reconnection logic is complex and should be tested in WebSocket client unit tests. This is a HIGH PRIORITY target for achieving 80% coverage.
+**Required Tools:**
+```typescript
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import axios from 'axios';
+import MockAdapter from 'axios-mock-adapter'; // You'll need to install this: npm install --save-dev axios-mock-adapter
+```
+
+#### 2. VehicleSelector Component (`frontend/src/components/vehicles/VehicleSelector.tsx`)
+**Current Coverage: 91.2%** (Lines 55-56, 73-75, 78-80 uncovered)
+
+**Summary:** Dropdown component for selecting vehicles, filters to show only connected vehicles, integrates with React Query for data fetching.
+
+**CRITICAL IMPLEMENTATION NOTES:**
+- Uncovered lines are likely error handling or edge cases
+- You SHOULD add tests for:
+  - Empty vehicle list
+  - Loading state
+  - Error state when API fails
+  - Filtering logic (only connected vehicles)
+
+#### 3. WebSocket Client (`frontend/src/api/websocket.ts`)
+**Current Coverage: 89%** (Lines 55-156, 167-169 uncovered)
+
+**Summary:** WebSocket connection management for real-time response streaming.
+
+**Recommendation:** While coverage is good (89%), the uncovered lines likely represent error handling. Consider adding tests for connection failures and message parsing errors.
+
+### Existing Test Patterns to Follow
+
+**Pattern from VehicleList.test.tsx:**
+```typescript
+describe('Component Name', () => {
+  describe('Feature Group (e.g., Loading State)', () => {
+    it('should do specific thing', () => {
+      render(<Component {...props} />);
+      expect(screen.getByRole('...')).toBeInTheDocument();
+    });
+  });
+});
+```
+
+**Key Testing Utilities Used:**
+- `render` from '@testing-library/react'
+- `screen` for querying elements
+- `userEvent` for simulating interactions (async)
+- `waitFor` for async operations
+- `vi.fn()` for mock functions
+- `vi.mock()` for module mocking
+
+### Configuration Files - Already Correct
+
+#### Vitest Configuration (`frontend/vite.config.ts`)
+- ✅ Coverage thresholds already set: lines: 80, branches: 75, functions: 75, statements: 80
+- ✅ Coverage includes: `src/**/*.{ts,tsx}`
+- ✅ Coverage excludes: tests, pages, App.tsx, main.tsx (correct - these are integration level)
+- ✅ Reporter configured: ['text', 'html', 'json', 'lcov']
+- **NO CHANGES NEEDED** to vite.config.ts
+
+#### ESLint Configuration (`.eslintrc.json`)
+- ✅ Already configured with React, TypeScript, and React Hooks rules
+- ✅ Test file overrides present
+- **NO CHANGES NEEDED** to ESLint config
+
+#### Prettier Configuration (`.prettierrc`)
+- ✅ Already configured with sensible defaults
+- **NO CHANGES NEEDED** to Prettier config
+
+### Makefile Updates Required
+
+**Current Issues:**
+1. Line 37: `npm test run` is **INCORRECT** - should be `npm run test` or just `npm test`
+2. Missing `frontend:coverage` target (required by acceptance criteria)
+
+**YOU MUST:**
+1. Fix line 37 in Makefile: Change `npm test run` to `npm test`
+2. Ensure `frontend:coverage` target exists and works (Line 40-43 already has it!)
+
+### CI/CD Workflow - Already Implemented
+
+**Good News:** `.github/workflows/ci-cd.yml` is already comprehensive!
+- ✅ Frontend linting job exists (ESLint + Prettier)
+- ✅ Frontend test job exists with coverage check
+- ✅ Coverage artifacts uploaded
+- ✅ Runs on push to main/master/develop branches
+- **VERIFY** the workflow syntax is valid by running it
 
 ### Implementation Tips & Notes
 
-*   **CRITICAL FINDING:** The current frontend coverage is **90% statements, 85.34% branches, 79.41% functions, 90% lines** based on the coverage/index.html report. The **functions coverage is at 79.41%** which is BELOW the 80% threshold by a small margin.
-
-*   **CRITICAL FINDING:** The coverage report shows that the `api` directory has only **64.69% coverage** (284/439 lines). This is significantly below the 80% threshold and is the main reason for low function coverage. You MUST write comprehensive tests for `frontend/src/api/client.ts` and `frontend/src/api/websocket.ts`.
-
-*   **Note:** The project already has 12 test files in `frontend/tests/components/` covering: CommandForm, EmptyState, ErrorBoundary, Header, Layout, LoadingSpinner, LoginPage, ProtectedRoute, ResponseViewer, Sidebar, VehicleList, VehicleSelector. These tests are comprehensive and well-written.
-
-*   **Tip:** The vite.config.ts **already excludes** `src/pages/**` from coverage (line 40), so you do NOT need to write tests for page components. Focus on component and utility tests only.
-
-*   **Warning:** The task mentions "Configure Prettier to run on pre-commit hook (using husky or similar)" but there is NO husky or git hooks infrastructure in the project. This is OPTIONAL. The acceptance criteria do NOT require git hooks - they only require that `npm run format` works. Skip the git hook setup.
-
-*   **Note:** Based on the file tree and coverage report, the primary missing tests are for:
-    - `frontend/src/api/client.ts` (API client with token refresh) - **64.69% coverage, CRITICAL**
-    - `frontend/src/api/websocket.ts` (WebSocket connection manager) - **64.69% coverage, CRITICAL**
-    - Potentially some edge cases in existing components to push function coverage from 79.41% to 80%+
-
-*   **Tip:** For testing the API client (`frontend/src/api/client.ts`), you should:
-    - Mock axios using `vi.mock('axios')`
-    - Test token injection in request interceptor
-    - Test 401 response handling and automatic token refresh
-    - Test failed queue processing when multiple requests fail with 401 concurrently
-    - Test redirect to login when refresh token is missing
-    - Test error handling for failed refresh attempts
-    - Test the authAPI, vehicleAPI, and commandAPI methods
-
-*   **Tip:** For testing the WebSocket client (`frontend/src/api/websocket.ts`), you should:
-    - Mock the global WebSocket constructor using `vi.stubGlobal('WebSocket', MockWebSocket)`
-    - Test connection establishment with correct URL format (including token query parameter)
-    - Test onMessage parsing and event handling
-    - Test error and close event handling with different close codes (1000, 1001, 1008)
-    - Test WebSocketReconnectionManager retry logic with exponential backoff
-    - Test manual close and cleanup
-
-*   **Note:** All linting and formatting is already passing. The GitHub Actions workflow shows frontend-lint and frontend-test jobs that run ESLint and Prettier checks. You should run `npm run lint` and `npm run format` locally to verify everything passes before completing the task.
-
-*   **Tip:** When writing tests for the API client, pay special attention to the token refresh queue mechanism. The code has a `failedQueue` array that queues requests while a token refresh is in progress. This is complex logic that needs thorough testing.
-
-*   **Note:** The WebSocketReconnectionManager has exponential backoff logic: `Math.min(1000 * Math.pow(2, this.retryCount - 1), 30000)`. You should test that delays are calculated correctly (1s, 2s, 4s, 8s, 16s, 30s max).
-
-*   **Tip:** For mocking axios in tests, use this pattern:
-    ```typescript
-    import { vi } from 'vitest';
-    import axios from 'axios';
-
-    vi.mock('axios');
-    const mockedAxios = axios as jest.Mocked<typeof axios>;
-    ```
-
-*   **Tip:** For mocking WebSocket in tests, create a mock class:
-    ```typescript
-    class MockWebSocket {
-      onopen: (() => void) | null = null;
-      onmessage: ((event: { data: string }) => void) | null = null;
-      onerror: ((error: Event) => void) | null = null;
-      onclose: ((event: { code: number; reason: string }) => void) | null = null;
-      readyState = WebSocket.CONNECTING;
-
-      constructor(public url: string) {}
-      close(code?: number, reason?: string) {}
-    }
-
-    vi.stubGlobal('WebSocket', MockWebSocket);
-    ```
-
-### Summary of What Needs to Be Done
-
-Based on my analysis, the task is **mostly complete**:
-
-✅ **Already Done:**
-- Makefile targets (`frontend-test`, `frontend-coverage`, `frontend-lint`, `frontend-format`) ✓
-- GitHub Actions CI integration for frontend tests and linting ✓
-- Vitest coverage configuration with 80% thresholds ✓
-- ESLint and Prettier configuration ✓
-- Comprehensive component tests (12 test files) ✓
-
-❌ **Still Needed:**
-1. **CRITICAL:** Write comprehensive tests for `frontend/src/api/client.ts` to cover token refresh logic, interceptors, and API methods (currently 64.69% coverage, need 80%+)
-2. **CRITICAL:** Write comprehensive tests for `frontend/src/api/websocket.ts` to cover WebSocket connection, event handling, and WebSocketReconnectionManager (currently 64.69% coverage, need 80%+)
-3. Potentially add a few edge case tests to existing component tests to push function coverage from 79.41% to 80%+
-4. Run `npm run lint` and fix any violations (if any)
-5. Run `npm run format` to ensure consistent formatting
-6. Run `npm run test:coverage` to verify 80%+ coverage threshold is met across all metrics
-7. Verify the HTML coverage report is generated in `frontend/coverage/`
-
-**Primary Focus:** The main blocker for 80% coverage is the **api directory at 64.69%**. Writing thorough tests for `api/client.ts` and `api/websocket.ts` will bring overall coverage above 80% for all metrics (statements, branches, functions, lines).
-
-**Secondary Focus:** The function coverage is at 79.41%, just below 80%. After improving API test coverage, check if function coverage crosses 80%. If not, identify uncovered functions in components and add edge case tests.
-
----
-
-## 4. Acceptance Criteria Checklist
-
-When you complete this task, verify ALL of these criteria:
-
-- [ ] `make frontend-test` (note: uses hyphen not colon) runs all frontend tests successfully (0 failures)
-- [ ] Coverage report shows ≥80% for ALL metrics: lines, statements, branches, AND functions
-- [ ] `npm run lint` (or `make frontend-lint`) passes with no errors
-- [ ] `npm run format` (or `make frontend-format`) formats all files consistently
-- [ ] Coverage HTML report generated in `frontend/coverage/` directory
-- [ ] GitHub Actions workflow already runs frontend tests and linting (already implemented, just verify)
-- [ ] Component tests cover: key components (VehicleList, CommandForm, ResponseViewer), common components (Header, ErrorBoundary)
-- [ ] NEW tests for: API client (`api/client.ts`), WebSocket client (`api/websocket.ts`)
-- [ ] Tests verify: rendering, user interactions, API integration (with mocked API), error handling
-- [ ] No console errors or warnings in tests
-- [ ] All frontend code follows ESLint and Prettier rules
-
-**Commands to verify:**
+**Tip 1: Installing axios-mock-adapter**
+You WILL need `axios-mock-adapter` for testing the API client. Install it:
 ```bash
-cd frontend
-npm run lint                     # Should pass with 0 errors
-npm run format                   # Should format files
-npm run test:coverage            # Should show ≥80% coverage for ALL metrics, 0 failures
-cd ..
-make frontend-test               # Should run tests successfully (note: hyphen not colon)
-make frontend-lint               # Should pass linting
+npm install --save-dev axios-mock-adapter
 ```
 
-**Key Success Metric:** Coverage report must show:
-- Lines: ≥80% (currently 90%, ✓)
-- Statements: ≥80% (currently 90%, ✓)
-- Branches: ≥80% (currently 85.34%, ✓)
-- **Functions: ≥80%** (currently 79.41%, ✗) **← MUST FIX**
-- **api directory: ≥80%** (currently 64.69%, ✗) **← MUST FIX**
+**Tip 2: Mocking localStorage**
+Use Vitest's built-in mocking:
+```typescript
+beforeEach(() => {
+  const localStorageMock = {
+    getItem: vi.fn(),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+    clear: vi.fn(),
+  };
+  global.localStorage = localStorageMock as any;
+});
+```
+
+**Tip 3: Mocking window.location**
+```typescript
+delete (window as any).location;
+window.location = { href: '' } as any;
+```
+
+**Tip 4: Testing Axios Interceptors**
+You need to test the interceptors by triggering actual axios requests with mocked responses, not by calling the interceptor functions directly.
+
+**Tip 5: Test File Naming**
+Create: `frontend/tests/api/client.test.ts` (note: `.ts` not `.tsx` since no JSX)
+
+**Warning 1: Don't Over-Test**
+The acceptance criteria explicitly excludes pages and App.tsx from coverage requirements (see vite.config.ts lines 40-41). DO NOT waste time writing tests for pages - they are considered integration-level and are covered by E2E tests.
+
+**Warning 2: Coverage Already Exceeds Target**
+Current coverage is 90.19% overall. The main issue is the **unbalanced coverage** where api/client.ts drags down the average. Focus efforts on the API client tests specifically.
+
+**Warning 3: Existing Tests Are Comprehensive**
+Don't duplicate existing tests. Review the 13 existing test files carefully before writing new ones. Most components already have excellent coverage.
+
+### Test Execution Verification Steps
+
+After implementing your tests:
+
+1. **Run tests locally:**
+   ```bash
+   cd frontend
+   npm test
+   npm run test:coverage
+   ```
+
+2. **Verify coverage thresholds pass:**
+   - Lines: ≥80%
+   - Branches: ≥75%
+   - Functions: ≥75%
+   - Statements: ≥80%
+
+3. **Check linting:**
+   ```bash
+   npm run lint
+   npm run format
+   ```
+
+4. **Verify Makefile targets work:**
+   ```bash
+   make frontend:test
+   make frontend:coverage
+   make frontend:lint
+   make frontend:format
+   ```
+
+5. **Commit and push to trigger CI**
+
+### Files You MUST Create or Modify
+
+**Create:**
+- `frontend/tests/api/client.test.ts` (NEW - critical priority)
+- Additional tests for VehicleSelector edge cases (optional, low priority)
+
+**Modify:**
+- `Makefile` (fix line 37: `npm test run` → `npm test`)
+- Verify `.github/workflows/ci-cd.yml` is correct (likely already good)
+
+**Do NOT Modify:**
+- `frontend/vite.config.ts` (already correctly configured)
+- `frontend/.eslintrc.json` (already correctly configured)
+- `frontend/.prettierrc` (already correctly configured)
+
+### Final Strategic Recommendation
+
+**Primary Focus: API Client Tests**
+The API client (`frontend/src/api/client.ts`) is the ONLY file significantly below the 80% threshold. This is where you should invest 80% of your effort. Specifically:
+
+1. Write comprehensive tests for the token refresh interceptor logic
+2. Test all exported API methods (authAPI, vehicleAPI, commandAPI)
+3. Test error handling and edge cases
+4. Achieve at least 80% coverage on this file
+
+**Secondary Focus: Minor Fixes**
+- Fix Makefile line 37
+- Verify CI workflow syntax
+- Add a few edge case tests for VehicleSelector (optional)
+
+**Success Criteria:**
+When you run `npm run test:coverage`, you should see:
+- Overall coverage: ≥80% (currently 90.19%, should stay above)
+- api/client.ts: ≥80% (currently 44.35% - PRIMARY TARGET)
+- All tests passing
+- No linting errors
