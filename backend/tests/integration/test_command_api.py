@@ -214,7 +214,7 @@ class TestSubmitCommandEndpoint:
             )
 
             assert response.status_code == status.HTTP_400_BAD_REQUEST
-            assert "vehicle not found" in response.json()["detail"].lower()
+            assert "vehicle not found" in response.json()["error"]["message"].lower()
 
     @pytest.mark.asyncio
     async def test_submit_command_unauthorized(self, async_client: AsyncClient):

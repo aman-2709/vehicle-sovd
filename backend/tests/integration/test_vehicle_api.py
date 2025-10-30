@@ -285,7 +285,7 @@ class TestGetVehicleEndpoint:
             )
 
             assert response.status_code == status.HTTP_404_NOT_FOUND
-            assert "Vehicle not found" in response.json()["detail"]
+            assert "Vehicle not found" in response.json()["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_get_vehicle_by_id_invalid_uuid(

@@ -504,7 +504,7 @@ class TestCommandHistoryFiltering:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "invalid" in response.json()["detail"].lower()
+        assert "invalid" in response.json()["error"]["message"].lower()
 
     @pytest.mark.asyncio
     @patch("app.api.v1.commands.command_service.get_command_history")

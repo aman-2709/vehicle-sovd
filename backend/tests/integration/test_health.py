@@ -96,12 +96,12 @@ class TestReadinessEndpoint:
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
                 data = response.json()
 
-                # FastAPI wraps HTTPException detail in response
-                assert "detail" in data
-                detail = data["detail"]
-                assert detail["status"] == "unavailable"
-                assert detail["checks"]["database"] == "unavailable"
-                assert detail["checks"]["redis"] == "ok"
+                # Response now contains the dict directly with added correlation_id
+                assert "status" in data
+                assert data["status"] == "unavailable"
+                assert data["checks"]["database"] == "unavailable"
+                assert data["checks"]["redis"] == "ok"
+                assert "correlation_id" in data
 
     @pytest.mark.asyncio
     async def test_readiness_unhealthy_redis_failure(self, async_client: AsyncClient):
@@ -117,11 +117,11 @@ class TestReadinessEndpoint:
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
                 data = response.json()
 
-                assert "detail" in data
-                detail = data["detail"]
-                assert detail["status"] == "unavailable"
-                assert detail["checks"]["database"] == "ok"
-                assert detail["checks"]["redis"] == "unavailable"
+                assert "status" in data
+                assert data["status"] == "unavailable"
+                assert data["checks"]["database"] == "ok"
+                assert data["checks"]["redis"] == "unavailable"
+                assert "correlation_id" in data
 
     @pytest.mark.asyncio
     async def test_readiness_unhealthy_all_dependencies(self, async_client: AsyncClient):
@@ -137,11 +137,11 @@ class TestReadinessEndpoint:
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
                 data = response.json()
 
-                assert "detail" in data
-                detail = data["detail"]
-                assert detail["status"] == "unavailable"
-                assert detail["checks"]["database"] == "unavailable"
-                assert detail["checks"]["redis"] == "unavailable"
+                assert "status" in data
+                assert data["status"] == "unavailable"
+                assert data["checks"]["database"] == "unavailable"
+                assert data["checks"]["redis"] == "unavailable"
+                assert "correlation_id" in data
 
     @pytest.mark.asyncio
     async def test_readiness_response_structure_healthy(self, async_client: AsyncClient):
@@ -176,12 +176,11 @@ class TestReadinessEndpoint:
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
                 data = response.json()
 
-                # Verify response structure (wrapped in detail by HTTPException)
-                assert "detail" in data
-                detail = data["detail"]
-                assert "status" in detail
-                assert "checks" in detail
-                assert isinstance(detail["checks"], dict)
+                # Verify response structure (dict directly with correlation_id)
+                assert "status" in data
+                assert "checks" in data
+                assert isinstance(data["checks"], dict)
+                assert "correlation_id" in data
 
 
 class TestHealthEndpointEdgeCases:
@@ -258,9 +257,9 @@ class TestHealthEndpointEdgeCases:
 
                 # Verify both checks are reported accurately
                 data = response.json()
-                assert "detail" in data
-                assert data["detail"]["checks"]["database"] == "unavailable"
-                assert data["detail"]["checks"]["redis"] == "ok"
+                assert "checks" in data
+                assert data["checks"]["database"] == "unavailable"
+                assert data["checks"]["redis"] == "ok"
 
 
 class TestHealthEndpointIntegration:

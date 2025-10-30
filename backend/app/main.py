@@ -11,17 +11,27 @@ Provides:
 - Structured logging with correlation IDs
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import health
 from app.api.v1 import auth, commands, vehicles, websocket
+from app.config import settings
+from app.middleware.error_handling_middleware import (
+    format_error_response,
+    handle_http_exception,
+    handle_unexpected_exception,
+    handle_validation_error,
+)
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.utils.logging import configure_logging
 
 # Configure structured logging before creating the app
-configure_logging()
+configure_logging(log_level=settings.LOG_LEVEL)
 
 # Create FastAPI application instance
 app = FastAPI(
@@ -32,7 +42,41 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Register middleware (order matters - logging middleware should be first)
+
+# Register global exception handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """Handle FastAPI HTTPException."""
+    return await handle_http_exception(request, exc)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    """Handle Starlette HTTPException."""
+    # Convert to FastAPI HTTPException
+    fastapi_exc = HTTPException(
+        status_code=exc.status_code, detail=exc.detail, headers=getattr(exc, "headers", None)
+    )
+    return await handle_http_exception(request, fastapi_exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Handle Pydantic validation errors."""
+    return await handle_validation_error(request, exc)
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle all other unexpected exceptions."""
+    return await handle_unexpected_exception(request, exc)
+
+# Register middleware (order matters - LIFO execution)
+# Execution order: LoggingMiddleware → CORSMiddleware → Endpoints
 app.add_middleware(LoggingMiddleware)
 
 # Configure CORS for frontend communication

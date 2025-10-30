@@ -62,7 +62,7 @@ class TestLoginEndpoint:
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert "Invalid username or password" in response.json()["detail"]
+        assert "Invalid username or password" in response.json()["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_login_invalid_password(

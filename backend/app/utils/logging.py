@@ -14,13 +14,17 @@ from structlog.processors import JSONRenderer, TimeStamper
 from structlog.stdlib import add_log_level, add_logger_name
 
 
-def configure_logging() -> None:
+def configure_logging(log_level: str = "INFO") -> None:
     """
     Configure structured logging for the application.
 
     Sets up structlog with JSON rendering, timestamp formatting, and
     context variable support for correlation IDs. All logs are output
     as parseable JSON with consistent field structure.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+                   Defaults to INFO. Can be configured via LOG_LEVEL env var.
 
     Log fields included:
     - timestamp: ISO 8601 formatted timestamp
@@ -31,11 +35,14 @@ def configure_logging() -> None:
     - user_id: User ID if available (from context vars)
     - Additional contextual fields as provided
     """
+    # Convert log level string to logging level constant
+    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
+
     # Configure standard logging to use structlog
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=logging.INFO,
+        level=numeric_level,
     )
 
     # Configure structlog processors
