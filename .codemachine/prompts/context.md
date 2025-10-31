@@ -10,30 +10,21 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T2",
+  "task_id": "I5.T3",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Create Helm chart in infrastructure/helm/sovd-webapp/. Structure: Chart.yaml, values.yaml, values-production.yaml, templates/. Templates: backend/frontend/vehicle-connector deployments (3 replicas, health checks, resources), services, ingress (ALB with TLS), configmap, secrets, HPA (CPU 70%, 3-10 replicas). Configure resource requests/limits. Document in README.",
+  "description": "Implement CI/CD pipeline in .github/workflows/ci-cd.yml. Stages: 1) Lint (parallel: backend+frontend), 2) Unit tests (parallel, fail <80%), 3) Integration tests (docker-compose), 4) E2E tests, 5) Security scans (parallel: pip-audit, npm audit, Bandit, Trivy), 6) Build images (tag SHA+latest), 7) Push to registry, 8) Deploy staging (on develop), 9) Deploy production (on main, manual approval, smoke tests, rollback). Cache dependencies. Add smoke test script. Add README badges.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.9; Kubernetes/Helm best practices.",
+  "inputs": "Architecture Blueprint Section 3.9; GitHub Actions docs.",
   "target_files": [
-    "infrastructure/helm/sovd-webapp/Chart.yaml",
-    "infrastructure/helm/sovd-webapp/values.yaml",
-    "infrastructure/helm/sovd-webapp/values-production.yaml",
-    "infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml",
-    "infrastructure/helm/sovd-webapp/templates/frontend-deployment.yaml",
-    "infrastructure/helm/sovd-webapp/templates/vehicle-connector-deployment.yaml",
-    "infrastructure/helm/sovd-webapp/templates/services.yaml",
-    "infrastructure/helm/sovd-webapp/templates/ingress.yaml",
-    "infrastructure/helm/sovd-webapp/templates/configmap.yaml",
-    "infrastructure/helm/sovd-webapp/templates/secrets.yaml",
-    "infrastructure/helm/sovd-webapp/templates/hpa.yaml",
-    "infrastructure/helm/sovd-webapp/README.md"
+    ".github/workflows/ci-cd.yml",
+    "scripts/smoke_tests.sh",
+    "README.md"
   ],
   "input_files": [],
-  "deliverables": "Complete Helm chart; production values; HPA; documentation.",
-  "acceptance_criteria": "helm lint passes; helm template generates valid YAML; All resources present; 3 replicas, health checks, resources set; Ingress for ALB; HPA targets 70% CPU; ConfigMap/Secrets placeholders; README documents install/upgrade",
-  "dependencies": ["I5.T1"],
+  "deliverables": "Complete CI/CD workflow; smoke tests; README badges; deployment automation.",
+  "acceptance_criteria": "Pipeline triggers on push/PR; Lint/unit tests parallel; Integration/E2E run with docker-compose; Security scans fail on critical; Images built+pushed; Staging auto-deploys on develop; Production manual approval on main; Smoke tests verify endpoints; Caching works; Badges in README; Pipeline <15min",
+  "dependencies": ["I5.T1", "I5.T2", "I3.T9"],
   "parallelizable": false,
   "done": false
 }
@@ -45,126 +36,197 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: production-deployment (from 05_Operational_Architecture.md)
+### Context: cicd-pipeline (from 05_Operational_Architecture.md)
 
 ```markdown
-**Production Environment (AWS EKS)**
+**CI/CD Pipeline (GitHub Actions)**
 
-**Orchestration:** Kubernetes (EKS)
+**Workflow Stages:**
 
-**Infrastructure as Code:** Terraform (or AWS CloudFormation)
+1. **Lint & Format Check**
+   - Frontend: ESLint, Prettier
+   - Backend: Ruff, Black, mypy
 
-**Architecture:**
-- **Compute**: EKS cluster (3 worker nodes, t3.large, across 3 AZs)
-- **Database**: RDS for PostgreSQL (db.t3.medium, Multi-AZ)
-- **Cache**: ElastiCache for Redis (cache.t3.small, cluster mode)
-- **Load Balancer**: Application Load Balancer (ALB)
-- **Networking**: VPC with public and private subnets
-- **Storage**: EBS volumes for database; S3 for backups and logs
-- **Secrets**: AWS Secrets Manager
-- **DNS**: Route 53 for domain management
-- **TLS Certificates**: AWS Certificate Manager (ACM)
+2. **Unit Tests**
+   - Frontend: Vitest (coverage threshold 80%)
+   - Backend: pytest (coverage threshold 80%)
 
-**Kubernetes Resources:**
-- **Namespaces**: `production`, `staging`
-- **Deployments**:
-  - `frontend-deployment` (3 replicas)
-  - `backend-deployment` (3 replicas)
-  - `vehicle-connector-deployment` (2 replicas)
-- **Services**:
-  - `frontend-service` (ClusterIP, ALB Ingress)
-  - `backend-service` (ClusterIP)
-  - `vehicle-connector-service` (ClusterIP)
-- **Ingress**: ALB Ingress Controller for external access
-- **ConfigMaps**: Non-sensitive configuration
-- **Secrets**: Kubernetes Secrets (synced from AWS Secrets Manager via External Secrets Operator)
+3. **Build Docker Images**
+   - Build frontend and backend images
+   - Tag with commit SHA and `latest`
 
-**Helm Chart Structure:**
+4. **Integration Tests**
+   - Spin up services with docker-compose
+   - Run API integration tests (pytest + httpx)
+   - Run E2E tests (Playwright)
+
+5. **Security Scans**
+   - `npm audit` (frontend dependencies)
+   - `pip-audit` (backend dependencies)
+   - Trivy (Docker image vulnerabilities)
+
+6. **Push Images**
+   - Push to AWS ECR (Elastic Container Registry)
+
+7. **Deploy to Staging**
+   - Update Kubernetes deployment with new image
+   - Run smoke tests
+
+8. **Manual Approval Gate**
+   - Require approval for production deploy
+
+9. **Deploy to Production**
+   - Blue-green deployment strategy
+   - Gradual rollout (10%, 50%, 100%)
+   - Automatic rollback if error rate spikes
+
+**GitHub Actions Workflow File:**
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    # ... (lint, test, build stages)
+
+  deploy-staging:
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Staging
+        run: |
+          helm upgrade --install sovd-webapp ./helm \
+            -f values-staging.yaml -n staging
+
+  deploy-production:
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main'
+    environment: production  # Manual approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        run: |
+          helm upgrade --install sovd-webapp ./helm \
+            -f values-production.yaml -n production
 ```
-sovd-helm-chart/
-├── Chart.yaml
-├── values.yaml (defaults)
-├── values-production.yaml (overrides)
-├── templates/
-│   ├── frontend-deployment.yaml
-│   ├── backend-deployment.yaml
-│   ├── vehicle-connector-deployment.yaml
-│   ├── services.yaml
-│   ├── ingress.yaml
-│   ├── configmap.yaml
-│   └── secrets.yaml
 ```
 
-**Deployment Command:**
-```bash
-helm upgrade --install sovd-webapp ./sovd-helm-chart \
-  -f values-production.yaml \
-  -n production
-```
-```
-
-### Context: task-i5-t2 (from 02_Iteration_I5.md)
+### Context: task-i5-t3 (from 02_Iteration_I5.md)
 
 ```markdown
-*   **Task 5.2: Create Kubernetes Helm Chart**
-    *   **Task ID:** `I5.T2`
-    *   **Description:** Create Helm chart for Kubernetes deployment in `infrastructure/helm/sovd-webapp/`. Chart structure: `Chart.yaml` (metadata), `values.yaml` (default values), `values-production.yaml` (production overrides), `templates/` directory with Kubernetes manifests. Templates to create: 1) `backend-deployment.yaml`: Deployment for backend (3 replicas, resource requests/limits, health checks using /health/live and /health/ready, environment variables from ConfigMap and Secrets), 2) `frontend-deployment.yaml`: Deployment for frontend (3 replicas, Nginx container), 3) `vehicle-connector-deployment.yaml`: Deployment for vehicle connector (2 replicas, can be same image as backend with different entrypoint or CMD), 4) `services.yaml`: ClusterIP Services for backend, frontend, vehicle-connector, 5) `ingress.yaml`: Ingress for ALB (AWS Application Load Balancer) with TLS termination, routes for frontend (/) and backend (/api/*), 6) `configmap.yaml`: ConfigMap for non-sensitive config (database host, Redis host, log level), 7) `secrets.yaml`: placeholder for Secrets (database password, JWT secret, Redis password) - note: use External Secrets Operator in real deployment, 8) `hpa.yaml`: HorizontalPodAutoscaler for backend (target CPU 70%, min 3, max 10 replicas). Configure resource requests/limits: backend (requests: 256Mi memory, 250m CPU; limits: 512Mi, 500m), frontend (requests: 64Mi, 100m; limits: 128Mi, 200m). Document Helm chart usage in `infrastructure/helm/sovd-webapp/README.md`.
+*   **Task 5.3: Create GitHub Actions CI/CD Pipeline**
+    *   **Task ID:** `I5.T3`
+    *   **Description:** Implement comprehensive CI/CD pipeline in `.github/workflows/ci-cd.yml`. Pipeline stages: 1) **Lint & Format Check** (parallel jobs): backend linting (ruff, black --check, mypy), frontend linting (eslint, prettier --check), 2) **Unit Tests** (parallel): backend unit tests with coverage, frontend unit tests with coverage, fail if coverage <80%, 3) **Integration Tests**: start services with docker-compose, run backend integration tests, run frontend integration tests, 4) **E2E Tests**: start full stack, run Playwright E2E tests, 5) **Security Scans** (parallel): pip-audit (backend), npm audit (frontend), Bandit security scan, Docker image scan with Trivy, 6) **Build Docker Images**: build backend and frontend production images, tag with commit SHA and `latest`, 7) **Push Images**: push to container registry (GitHub Container Registry or AWS ECR) - requires authentication setup, 8) **Deploy to Staging** (on push to `develop` branch): deploy Helm chart to staging namespace with staging values, run smoke tests, 9) **Deploy to Production** (on push to `main` branch): manual approval gate (GitHub environment protection), deploy Helm chart to production namespace, gradual rollout (use Helm or custom script), run smoke tests, automatic rollback on failure. Configure caching for dependencies (pip cache, npm cache) to speed up builds. Add status badges to README.
+    *   **Agent Type Hint:** `BackendAgent` + `DevOpsAgent`
+    *   **Inputs:** Architecture Blueprint Section 3.9 (CI/CD Pipeline); GitHub Actions documentation.
+    *   **Input Files:** []
+    *   **Target Files:**
+        *   `.github/workflows/ci-cd.yml`
+        *   `scripts/smoke_tests.sh` (smoke test script for post-deployment validation)
+        *   Updates to `README.md` (add CI/CD status badges)
+    *   **Deliverables:** Complete GitHub Actions CI/CD workflow; smoke test script; README badges; deployment automation.
     *   **Acceptance Criteria:**
-        *   `helm lint infrastructure/helm/sovd-webapp` passes without errors
-        *   `helm template sovd-webapp infrastructure/helm/sovd-webapp` generates valid Kubernetes YAML
-        *   Generated manifests include all specified resources (Deployments, Services, Ingress, ConfigMap, Secrets, HPA)
-        *   Backend deployment has 3 replicas, health checks configured, resource limits set
-        *   Ingress configured for ALB with annotations (AWS-specific: `alb.ingress.kubernetes.io/*`)
-        *   HPA targets CPU utilization 70%, scales backend from 3 to 10 replicas
-        *   ConfigMap includes: DATABASE_HOST, REDIS_HOST, LOG_LEVEL
-        *   Secrets template includes placeholders for: DATABASE_PASSWORD, JWT_SECRET, REDIS_PASSWORD
-        *   `values-production.yaml` overrides: image tags (use specific version, not `latest`), resource limits (higher than defaults), ingress host (production domain)
-        *   README documents: installation (`helm install`), upgrade (`helm upgrade`), configuration options
+        *   Pipeline triggers on push to `develop` and `main` branches, and on pull requests
+        *   Lint & Format Check jobs run in parallel, fail if linting errors
+        *   Unit test jobs run in parallel, fail if tests fail or coverage <80%
+        *   Integration tests start docker-compose, run tests, stop services (even on failure)
+        *   E2E tests run Playwright with headless browser, capture screenshots on failure
+        *   Security scan jobs run in parallel, fail on critical vulnerabilities
+        *   Docker build jobs build production images, tag with SHA and `latest`
+        *   Images pushed to registry (verify in GitHub Container Registry or ECR)
+        *   Staging deployment triggers automatically on push to `develop`
+        *   Production deployment requires manual approval (GitHub environment: `production`)
+        *   Smoke tests verify key endpoints: `/health/ready`, `/api/v1/vehicles`, frontend loads
+        *   Pipeline caches dependencies (verify build time improvement on second run)
+        *   README displays CI/CD status badges (build, test, coverage)
+        *   All pipeline stages complete successfully in <15 minutes
+    *   **Dependencies:** `I5.T1` (Dockerfiles), `I5.T2` (Helm chart), `I3.T9` (E2E tests)
+    *   **Parallelizable:** No (orchestrates all previous work)
 ```
 
-### Context: horizontal-scaling (from 05_Operational_Architecture.md)
+### Context: deployment-staging (from docs/runbooks/deployment.md)
 
 ```markdown
-**Horizontal Scaling Strategy**
+## Staging Deployment
 
-The architecture is designed for horizontal scalability to handle increased load without modifying the application code.
+Staging deployment uses Kubernetes (AWS EKS) with Helm charts. The staging environment mirrors production but with reduced resources.
 
-**Stateless Application Design:**
-- Backend (FastAPI) and Frontend (React SPA) are stateless and can scale horizontally by adding more pod replicas
-- Session state stored externally in Redis (not in-memory within application)
-- No sticky sessions required for load balancing
+### Prerequisites
+- AWS CLI configured: `aws configure`
+- kubectl configured for staging cluster: `aws eks update-kubeconfig --region us-east-1 --name sovd-staging-cluster`
+- Helm 3 installed
+- Docker images pushed to ECR
 
-**Kubernetes Horizontal Pod Autoscaler (HPA):**
-- **Backend HPA Configuration:**
-  - Target Metric: Average CPU Utilization
-  - Target Value: 70%
-  - Min Replicas: 3 (high availability baseline)
-  - Max Replicas: 10 (cost-controlled scaling limit)
-  - Scaling Behavior: Scale up aggressively (add 2 replicas per interval), scale down conservatively (remove 1 replica per interval with 5-minute stabilization window)
+### Step 1: Authenticate to AWS ECR
 
-- **Frontend HPA Configuration:**
-  - Target Metric: Average CPU Utilization
-  - Target Value: 70%
-  - Min Replicas: 2
-  - Max Replicas: 5
-  - Rationale: Frontend is lightweight; typically constrained by backend capacity
-
-**Load Balancer Configuration:**
-- AWS Application Load Balancer (ALB) distributes traffic across backend replicas
-- Health checks use `/health/ready` endpoint to ensure only healthy pods receive traffic
-- Connection draining enabled (30 seconds) for graceful pod termination
-
-**Database Scaling:**
-- Vertical scaling for PostgreSQL RDS (upgrade instance class when needed)
-- Read replicas can be added for read-heavy workloads (future enhancement)
-- Connection pooling in application (SQLAlchemy pool_size=20) prevents connection exhaustion
-
-**Redis Scaling:**
-- ElastiCache cluster mode enables horizontal scaling by adding shards
-- Replication group provides high availability (primary + replicas)
+```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
 ```
 
-### Context: deployment-strategy (from docs/runbooks/deployment.md)
+**Verification**: Login should succeed with "Login Succeeded" message.
+
+### Step 2: Build and Push Docker Images
+
+Build frontend and backend images:
+
+```bash
+# Backend
+cd backend
+docker build -t sovd-backend:${COMMIT_SHA} .
+docker tag sovd-backend:${COMMIT_SHA} <ecr-repo>/sovd-backend:${COMMIT_SHA}
+docker tag sovd-backend:${COMMIT_SHA} <ecr-repo>/sovd-backend:latest
+docker push <ecr-repo>/sovd-backend:${COMMIT_SHA}
+docker push <ecr-repo>/sovd-backend:latest
+
+# Frontend
+cd ../frontend
+docker build -t sovd-frontend:${COMMIT_SHA} .
+docker tag sovd-frontend:${COMMIT_SHA} <ecr-repo>/sovd-frontend:${COMMIT_SHA}
+docker tag sovd-frontend:${COMMIT_SHA} <ecr-repo>/sovd-frontend:latest
+docker push <ecr-repo>/sovd-frontend:${COMMIT_SHA}
+docker push <ecr-repo>/sovd-frontend:latest
+```
+
+### Step 4: Deploy with Helm
+
+Navigate to the Helm chart directory:
+
+```bash
+cd sovd-helm-chart
+```
+
+Deploy or upgrade the release:
+
+```bash
+helm upgrade --install sovd-webapp . \
+  -f values-staging.yaml \
+  -n staging \
+  --set backend.image.tag=${COMMIT_SHA} \
+  --set frontend.image.tag=${COMMIT_SHA} \
+  --wait \
+  --timeout 5m
+```
+
+### Step 6: Run Smoke Tests
+
+Execute automated smoke tests:
+
+```bash
+# From project root
+export API_BASE_URL=http://${ALB_URL}
+pytest tests/smoke/ -v
+```
+
+**Verification**: All smoke tests should pass. If any fail, investigate before proceeding.
+```
+
+### Context: deployment-production (from docs/runbooks/deployment.md)
 
 ```markdown
 ## Production Deployment
@@ -176,27 +238,6 @@ Production deployment follows the same Helm-based process as staging but include
 - Change ticket approved (for tracking)
 - Rollback plan prepared
 - On-call engineer available
-
-### Step 1: Pre-Deployment Checklist
-
-- [ ] Staging deployment successful
-- [ ] Smoke tests passed in staging
-- [ ] Database migrations tested (if any)
-- [ ] Rollback procedure reviewed
-- [ ] Monitoring dashboards open (Grafana)
-- [ ] On-call engineer notified
-
-### Step 2: Authenticate to Production
-
-```bash
-aws eks update-kubeconfig --region us-east-1 --name sovd-production-cluster
-```
-
-**Verification**: Check you're in the production context:
-```bash
-kubectl config current-context
-# Should show production cluster
-```
 
 ### Step 3: Deploy with Gradual Rollout
 
@@ -218,25 +259,20 @@ helm upgrade --install sovd-webapp . \
   --timeout 10m
 ```
 
-### Step 4: Monitor Deployment Progress
+### Step 5: Post-Deployment Verification
 
-Watch the rollout in real-time:
+Run production smoke tests:
 
 ```bash
-# Watch pods being updated
-kubectl rollout status deployment/backend-deployment -n production
-kubectl rollout status deployment/frontend-deployment -n production
-
-# Monitor error rates in Prometheus
-# Navigate to Grafana: http://<grafana-url>
-# Check "Operations Dashboard" for error rate spikes
+export API_BASE_URL=https://sovd.yourdomain.com
+pytest tests/smoke/ -v --production
 ```
 
-**Success Criteria**:
-- All pods transition to "Running" state
-- Error rate remains <1%
-- P95 latency remains <3s
-- No increase in 5xx responses
+**Verification**:
+- Smoke tests pass
+- Health endpoints return 200
+- Login functionality works
+- Command submission works
 ```
 
 ---
@@ -245,218 +281,304 @@ kubectl rollout status deployment/frontend-deployment -n production
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
+### Relevant Existing Code
+
+*   **File:** `.github/workflows/ci-cd.yml`
+    *   **Summary:** This file currently contains **ONLY** the first 5 stages of the CI/CD pipeline: frontend linting, frontend testing (with Lighthouse), backend linting, backend testing (with DB/Redis services), and security scanning (Bandit, pip-audit, npm audit). The file is INCOMPLETE - it is missing stages 6-9 (Build Images, Push Images, Deploy Staging, Deploy Production).
+    *   **Recommendation:** You MUST extend this existing file by adding the missing stages. DO NOT replace the entire file - keep the existing jobs and add new ones. The existing jobs provide a good foundation for stages 1-5.
+    *   **Current State:**
+        - Has `frontend-lint`, `frontend-test`, `frontend-lighthouse`, `backend-lint`, `backend-test`, `backend-security`, `frontend-security` jobs
+        - Has a `ci-success` job that aggregates all job results
+        - Uses caching for npm and pip dependencies (already implemented)
+        - Uses GitHub Services for PostgreSQL and Redis in backend tests
+        - Triggers on push to `main`, `master`, `develop` branches and on PRs
+    *   **What's Missing:**
+        - No Docker image build job
+        - No Docker image push job
+        - No deployment jobs (staging/production)
+        - No integration tests job (using docker-compose)
+        - No E2E tests job (though E2E tests exist in tests/e2e/)
+        - No smoke tests script reference
+        - No Trivy security scanning for Docker images
+
+*   **File:** `Makefile`
+    *   **Summary:** This file contains useful targets for local development including `up`, `down`, `test`, `e2e`, `lint`. The `e2e` target is particularly important as it shows how to run E2E tests with docker-compose orchestration.
+    *   **Recommendation:** You SHOULD reference the Makefile's `e2e` target logic when implementing the E2E job in CI/CD. The Makefile shows the correct pattern: start docker-compose, wait for services, run tests, stop services (even on failure).
+    *   **Key Pattern from Makefile:**
+        ```bash
+        docker-compose up -d
+        # Wait for services (health checks)
+        # Run tests
+        docker-compose down  # Always runs, even if tests fail
+        ```
+    *   **Integration Tests:** The current `test` target runs pytest with coverage but doesn't distinguish between unit and integration tests. Your CI/CD should run integration tests separately from unit tests.
+
 *   **File:** `backend/Dockerfile.prod`
-    *   **Summary:** This is the production Docker image for the backend FastAPI application. It uses multi-stage builds with Python 3.11, installs production dependencies, runs as non-root user (appuser, UID 1001), exposes port 8000, and includes a health check on `/health/ready`.
-    *   **Recommendation:** You MUST reference this Dockerfile in your Helm chart backend deployment. The image should be built from this file and tagged appropriately. Note that it uses 4 workers with uvicorn, listens on port 8000, and has health check configured.
-    *   **Port Configuration:** Backend listens on port 8000 inside the container.
-    *   **Health Check Configuration:** The Dockerfile uses `/health/ready` for health checks with 30s interval, 10s timeout, 40s start period, and 3 retries.
+    *   **Summary:** Production-ready multi-stage Dockerfile for the backend. Uses Python 3.11-slim, installs dependencies in builder stage, creates minimal runtime image with non-root user (appuser, UID 1001), exposes port 8000, includes health check on `/health/ready`.
+    *   **Recommendation:** You MUST use this file with `-f backend/Dockerfile.prod` when building backend production images in stage 6. The image name should follow the pattern `sovd-backend` and be tagged with both `${GITHUB_SHA}` and `latest`.
+    *   **Build Context:** The build context should be the `backend/` directory. Build command should be: `docker build -f backend/Dockerfile.prod -t sovd-backend:${GITHUB_SHA} backend/`
 
 *   **File:** `frontend/Dockerfile.prod`
-    *   **Summary:** This is the production Docker image for the frontend React application. It uses multi-stage builds (Node 20 builder + nginx:alpine runtime), serves static files from `/usr/share/nginx/html`, exposes port 80, and runs as nginx user (UID 101).
-    *   **Recommendation:** You MUST reference this Dockerfile in your Helm chart frontend deployment. The nginx configuration is copied from `frontend/nginx.conf` which includes API proxying to the backend service.
-    *   **Port Configuration:** Frontend Nginx listens on port 80 inside the container.
-    *   **Health Check:** Simple nc check on port 80 with 30s interval.
+    *   **Summary:** Production-ready multi-stage Dockerfile for the frontend. Uses Node 20-alpine builder + nginx:alpine runtime, builds React app with Vite, serves static files from `/usr/share/nginx/html`, exposes port 80, runs as nginx user (UID 101).
+    *   **Recommendation:** You MUST use this file when building frontend production images. Note the special requirement: the nginx.conf file must be copied from `infrastructure/docker/nginx.conf` to `frontend/nginx.conf` BEFORE building (or handle this in the Dockerfile COPY command).
+    *   **Build Context:** The frontend Dockerfile expects `nginx.conf` to be in the frontend directory. Your build step should handle this with:
+        ```bash
+        cp infrastructure/docker/nginx.conf frontend/nginx.conf
+        docker build -f frontend/Dockerfile.prod -t sovd-frontend:${GITHUB_SHA} frontend/
+        ```
 
-*   **File:** `infrastructure/docker/nginx.conf`
-    *   **Summary:** This is the Nginx configuration for the frontend that includes gzip compression, security headers, SPA routing, and critical proxy configurations for `/api/` and `/ws/` endpoints.
-    *   **Recommendation:** Note that the nginx.conf proxies `/api/` requests to `http://backend:8000` and `/ws/` to the same backend for WebSocket support. In your Helm chart, the Service for backend MUST be named `backend` (or update nginx.conf accordingly), and it must expose port 8000.
-    *   **WebSocket Support:** The nginx.conf includes special WebSocket upgrade headers for `/ws/` location with 7-day timeouts.
-    *   **Important:** The proxy_pass uses service name `backend:8000`, so your backend Service name in Kubernetes MUST be `backend`.
+*   **File:** `infrastructure/helm/sovd-webapp/values.yaml`
+    *   **Summary:** Helm chart default values. Shows the image repository format: `YOUR_ECR_REGISTRY/sovd-backend` and `YOUR_ECR_REGISTRY/sovd-frontend`. The tag defaults to `latest` but should be overridden in production.
+    *   **Recommendation:** Your deployment jobs MUST override the image tags using `--set backend.image.tag=${GITHUB_SHA}` and `--set frontend.image.tag=${GITHUB_SHA}` when deploying. This ensures deployments use the specific commit version, not `latest`.
+    *   **Image Registry:** The values file shows `YOUR_ECR_REGISTRY` as a placeholder. In your CI/CD, you should use GitHub Container Registry (ghcr.io) since it's easier to set up than AWS ECR and doesn't require AWS credentials. Format: `ghcr.io/${{ github.repository_owner }}/sovd-backend:${GITHUB_SHA}`
 
-*   **File:** `backend/app/config.py`
-    *   **Summary:** This file defines the application configuration using Pydantic Settings. It loads the following environment variables: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_ALGORITHM` (default HS256), `JWT_EXPIRATION_MINUTES` (default 15), `LOG_LEVEL` (default INFO), `CORS_ORIGINS` (default localhost:3000).
-    *   **Recommendation:** Your ConfigMap MUST include these configuration keys (non-sensitive ones like LOG_LEVEL, CORS_ORIGINS), and your Secrets MUST include the sensitive ones (JWT_SECRET, database password, Redis password). You should construct DATABASE_URL and REDIS_URL from these components in the deployment environment variables.
-    *   **Environment Variables Structure:**
-        - DATABASE_URL format: `postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd`
-        - REDIS_URL format: `redis://redis:6379/0`
-        - In Kubernetes, replace `db` with RDS endpoint and `redis` with ElastiCache endpoint.
+*   **File:** `tests/e2e/`
+    *   **Summary:** Directory contains Playwright E2E tests with three test suites: `auth.spec.ts`, `command_execution.spec.ts`, `vehicle_management.spec.ts`. Has `playwright.config.ts` for configuration.
+    *   **Recommendation:** You MUST integrate these E2E tests into stage 4 of your CI/CD. The tests expect the full stack to be running (frontend + backend + DB + Redis). Use docker-compose to start services, then run `npx playwright test` from the `tests/e2e/` directory.
+    *   **Configuration:** The playwright.config.ts likely points to `http://localhost:3000` for the frontend. Ensure your CI job starts docker-compose and waits for services before running tests.
 
-*   **File:** `docker-compose.yml`
-    *   **Summary:** This shows the development environment setup with all services. It includes PostgreSQL (port 5432), Redis (port 6379), backend (port 8000), frontend (port 3000), Prometheus (port 9090), and Grafana (port 3001).
-    *   **Recommendation:** Use this as a reference for service dependencies and configurations. The backend depends on both db and redis with health check conditions. Your Kubernetes deployment should reflect these dependencies using init containers or readiness probes.
-    *   **Service Names:** In docker-compose, services are named: `db`, `redis`, `backend`, `frontend`, `prometheus`, `grafana`. In Kubernetes, you'll need Services with similar names for internal communication.
+*   **File:** `backend/tests/integration/` and `backend/tests/unit/`
+    *   **Summary:** Backend tests are organized into unit and integration directories. Integration tests likely require database and Redis connections.
+    *   **Recommendation:** Your CI/CD should run integration tests AFTER unit tests, in stage 3. The current `backend-test` job runs all tests together with DB/Redis services - you may want to split this into unit tests (stage 2, no services) and integration tests (stage 3, with services).
+    *   **Coverage Threshold:** The current backend-test job uses `--cov-fail-under=80` which is correct. Keep this requirement.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** The production Dockerfiles (I5.T1) are already created and working. You SHOULD use image references like `{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}` in your deployment templates and define these in values.yaml.
-
-*   **Tip:** For AWS ALB Ingress, you MUST use specific annotations. The essential ones are:
-    - `kubernetes.io/ingress.class: alb` (or use ingressClassName: alb in newer versions)
-    - `alb.ingress.kubernetes.io/scheme: internet-facing`
-    - `alb.ingress.kubernetes.io/target-type: ip` (for EKS with VPC CNI)
-    - `alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'`
-    - `alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...` (for TLS)
-    - `alb.ingress.kubernetes.io/ssl-redirect: '443'` (redirect HTTP to HTTPS)
-
-*   **Note:** The backend has both liveness (`/health/live`) and readiness (`/health/ready`) endpoints implemented in `backend/app/api/health.py`. Your deployment SHOULD use:
-    - `livenessProbe` → `/health/live` (checks if container is alive)
-    - `readinessProbe` → `/health/ready` (checks if container can serve traffic, includes DB and Redis checks)
-    - Use appropriate initialDelaySeconds (30-40s for backend), periodSeconds (10s), timeoutSeconds (5s), failureThreshold (3)
-
-*   **Tip:** For the HPA (HorizontalPodAutoscaler), target the backend deployment with `apiVersion: autoscaling/v2` (or v2beta2). Specify:
-    - `scaleTargetRef` pointing to backend deployment
-    - `minReplicas: 3`, `maxReplicas: 10`
-    - `metrics` with `type: Resource`, `resource.name: cpu`, `target.type: Utilization`, `target.averageUtilization: 70`
-    - Include `behavior` section for controlled scale-down (e.g., stabilizationWindowSeconds: 300)
-
-*   **Note:** The architecture blueprint specifies vehicle-connector as a separate deployment (2 replicas). However, this component hasn't been fully implemented yet as a standalone service. For now, you can create the deployment template using the same backend image but with a different command/args that would be configured when the gRPC vehicle connector is implemented (that's task I5.T6). Use a placeholder in values.yaml like `vehicleConnector.enabled: false` to allow disabling it initially.
-
-*   **Warning:** For the ConfigMap, DO NOT hardcode database credentials or JWT secrets. Only include non-sensitive configuration like:
-    - `LOG_LEVEL: INFO`
-    - `CORS_ORIGINS: https://your-domain.com`
-    - Database and Redis hosts/ports (not passwords)
-    - Environment-specific settings
-
-*   **Tip:** For the Secrets template, create placeholder base64-encoded values that will be replaced by External Secrets Operator in real deployments. Document in comments that these are placeholders and should not be used in production. Example structure:
+*   **Tip - Container Registry Choice:** Use GitHub Container Registry (ghcr.io) instead of AWS ECR for simplicity. GitHub Actions has built-in authentication to ghcr.io via `GITHUB_TOKEN`, so no additional secrets are needed. Image naming format:
     ```yaml
-    apiVersion: v1
-    kind: Secret
-    metadata:
-      name: sovd-secrets
-    type: Opaque
-    data:
-      database-password: cGxhY2Vob2xkZXI=  # placeholder - use External Secrets Operator in production
-      jwt-secret: cGxhY2Vob2xkZXI=  # placeholder
-      redis-password: ""  # Redis may not require password in some setups
+    ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
+    ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}
     ```
 
-*   **Tip:** In your values.yaml, structure the configuration hierarchically:
+*   **Tip - Docker Build and Push Pattern:** Use the official `docker/build-push-action@v5` action for building and pushing images. It handles multi-platform builds, caching, and pushing efficiently:
     ```yaml
-    global:
-      namespace: production
-      domain: sovd.example.com
-
-    backend:
-      replicaCount: 3
-      image:
-        repository: YOUR_ECR_REGISTRY/sovd-backend
-        tag: latest  # Override in production with specific SHA
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "250m"
-        limits:
-          memory: "512Mi"
-          cpu: "500m"
-
-    frontend:
-      replicaCount: 3
-      image:
-        repository: YOUR_ECR_REGISTRY/sovd-frontend
-        tag: latest
-      resources:
-        requests:
-          memory: "64Mi"
-          cpu: "100m"
-        limits:
-          memory: "128Mi"
-          cpu: "200m"
-
-    hpa:
-      enabled: true
-      minReplicas: 3
-      maxReplicas: 10
-      targetCPUUtilizationPercentage: 70
-
-    ingress:
-      enabled: true
-      className: alb
-      annotations:
-        alb.ingress.kubernetes.io/scheme: internet-facing
-      hosts:
-        - host: sovd.example.com
-      tls:
-        - secretName: sovd-tls
-          hosts:
-            - sovd.example.com
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: backend
+        file: backend/Dockerfile.prod
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
+          ghcr.io/${{ github.repository_owner }}/sovd-backend:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
     ```
 
-*   **Tip:** Your values-production.yaml should override only production-specific values:
+*   **Tip - Docker Registry Login:** Before building/pushing, you MUST log in to ghcr.io using:
     ```yaml
-    backend:
-      image:
-        tag: "v1.0.0"  # Specific version, not latest
-      replicaCount: 5  # More replicas in production
-      resources:
-        requests:
-          memory: "512Mi"  # Higher than default
-          cpu: "500m"
-
-    frontend:
-      image:
-        tag: "v1.0.0"
-
-    ingress:
-      hosts:
-        - host: sovd.production.com  # Production domain
-      annotations:
-        alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789:certificate/abc123
-        alb.ingress.kubernetes.io/ssl-redirect: '443'
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     ```
 
-*   **Note:** The Chart.yaml should follow Helm v3 format:
+*   **Tip - Integration Tests with docker-compose:** For stage 3, you need to start docker-compose, run integration tests, then stop docker-compose. Use this pattern:
     ```yaml
-    apiVersion: v2
-    name: sovd-webapp
-    description: A Helm chart for SOVD Command WebApp
-    type: application
-    version: 1.0.0  # Chart version
-    appVersion: "1.0.0"  # Application version
-    keywords:
-      - sovd
-      - automotive
-      - vehicle-diagnostics
-    maintainers:
-      - name: SOVD Team
+    - name: Start services with docker-compose
+      run: docker-compose up -d
+
+    - name: Wait for services to be healthy
+      run: |
+        timeout 60 bash -c 'until docker-compose ps | grep healthy; do sleep 2; done'
+
+    - name: Run integration tests
+      run: |
+        cd backend
+        pytest tests/integration/ -v
+
+    - name: Stop services
+      if: always()  # Always run, even if tests fail
+      run: docker-compose down
     ```
 
-*   **Tip:** For the Services template, you'll need three services:
-    1. **backend-service**: ClusterIP, port 8000, selector matches backend deployment
-    2. **frontend-service**: ClusterIP, port 80, selector matches frontend deployment (this is what ALB Ingress will target)
-    3. **vehicle-connector-service**: ClusterIP, port 50051 (gRPC), selector matches vehicle-connector deployment
-
-*   **Important:** Remember that the nginx.conf in the frontend expects to proxy to a service named `backend`. So your backend Service MUST be named `backend`, or you need to update the nginx configuration. Since the nginx.conf is baked into the frontend Docker image, it's easier to name the Service `backend` to match.
-
-*   **Tip:** Use Helm template functions for flexibility:
-    - `{{ include "sovd-webapp.fullname" . }}` for resource names
-    - `{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}` for images
-    - `{{ .Release.Namespace }}` for namespace
-    - Define helper templates in `_helpers.tpl` for common labels and selectors
-
-*   **Tip:** For health checks in deployments, use this pattern:
+*   **Tip - E2E Tests:** Stage 4 should use the same docker-compose pattern but run Playwright tests from `tests/e2e/`:
     ```yaml
-    livenessProbe:
-      httpGet:
-        path: /health/live
-        port: 8000
-      initialDelaySeconds: 40
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
+    - name: Run E2E tests
+      run: |
+        cd tests/e2e
+        npx playwright test
 
-    readinessProbe:
-      httpGet:
-        path: /health/ready
-        port: 8000
-      initialDelaySeconds: 30
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
+    - name: Upload Playwright screenshots on failure
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: playwright-screenshots
+        path: tests/e2e/test-results/
     ```
 
-*   **Note:** Create a comprehensive README.md in the helm chart directory that documents:
-    - Chart overview and purpose
-    - Prerequisites (kubectl, helm, AWS credentials)
-    - Installation instructions with examples
-    - Configuration options (all values.yaml parameters)
-    - Upgrade and rollback procedures
-    - Troubleshooting common issues
-    - Links to architecture documentation
+*   **Tip - Trivy Security Scanning:** Add Trivy scanning in stage 5 to scan the built Docker images for vulnerabilities:
+    ```yaml
+    - name: Run Trivy vulnerability scanner on backend image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-backend-results.sarif'
 
-### Deployment Strategy Notes
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-backend-results.sarif'
+    ```
 
-*   The deployment runbook (docs/runbooks/deployment.md) shows that production deployments use rolling updates with `maxSurge: 1` and `maxUnavailable: 0` to ensure zero-downtime deployments. Your deployment templates should include this strategy configuration.
+*   **Note - Smoke Tests Script:** You MUST create `scripts/smoke_tests.sh` that tests critical endpoints after deployment. The script should:
+    - Accept an API_BASE_URL environment variable (e.g., staging or production URL)
+    - Test `/health/ready` endpoint (should return 200 with healthy status)
+    - Test `/api/v1/vehicles` endpoint (should return 200, requires authentication or public access)
+    - Test frontend loads (curl the base URL, check for 200)
+    - Exit with code 0 if all tests pass, non-zero if any fail
+    - Example structure:
+        ```bash
+        #!/bin/bash
+        set -e
+        API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
 
-*   The architecture specifies a 3-node EKS cluster across 3 AZs. Consider adding pod anti-affinity rules to spread replicas across different nodes/AZs for high availability.
+        echo "Testing health endpoint..."
+        curl -f ${API_BASE_URL}/health/ready || exit 1
 
-*   Resource requests are critical for HPA to work correctly. The HPA scales based on actual CPU usage vs requested CPU, so requests must be realistic (not too low, not too high).
+        echo "Testing API documentation..."
+        curl -f ${API_BASE_URL}/docs || exit 1
+
+        echo "All smoke tests passed!"
+        ```
+
+*   **Tip - Deployment Jobs:** Stage 8 (staging) and stage 9 (production) should be separate jobs that:
+    - Run AFTER all build/test/scan jobs succeed (use `needs: [build-images, ...]`)
+    - Use conditional execution: staging runs on `github.ref == 'refs/heads/develop'`, production runs on `github.ref == 'refs/heads/main'`
+    - Production should use `environment: production` to enable manual approval gate in GitHub settings
+    - Both should install kubectl and helm, configure kubeconfig (for now, can be mocked/skipped since we don't have real clusters)
+    - Run helm upgrade with appropriate values file
+    - Run smoke tests after deployment
+    - For production, include rollback logic if smoke tests fail
+
+*   **Tip - GitHub Environment Setup (for Manual Approval):** The production deployment job requires a GitHub environment named `production` with protection rules. This is configured in GitHub repository settings (Settings → Environments → New environment → "production" → Add required reviewers). In your workflow, reference it with:
+    ```yaml
+    deploy-production:
+      environment: production  # This triggers the approval gate
+    ```
+
+*   **Note - Caching:** The current workflow already implements caching for npm (Node.js) and pip (Python). When you add docker builds, also add Docker layer caching using `cache-from: type=gha` and `cache-to: type=gha,mode=max` in the `docker/build-push-action` step.
+
+*   **Tip - README Badges:** Add GitHub Actions badges to README.md at the top of the file:
+    ```markdown
+    # Cloud-to-Vehicle SOVD Command WebApp
+
+    ![CI/CD Pipeline](https://github.com/{owner}/{repo}/actions/workflows/ci-cd.yml/badge.svg)
+    ![Backend Coverage](https://img.shields.io/badge/backend%20coverage-80%25-brightgreen)
+    ![Frontend Coverage](https://img.shields.io/badge/frontend%20coverage-80%25-brightgreen)
+
+    ## Project Overview
+    ...
+    ```
+    Replace `{owner}/{repo}` with actual repository details or use `${{ github.repository }}` pattern.
+
+*   **Warning - Kubernetes Deployment Limitation:** Since this is likely a development/demo environment without real AWS EKS clusters, the deployment stages (8 and 9) may need to be **mocked or skipped initially**. You can:
+    1. Create the deployment job structure but comment out the actual kubectl/helm commands
+    2. Add a TODO comment explaining that real deployments require EKS cluster setup and AWS credentials
+    3. Keep the smoke tests section functional for when real infrastructure is available
+    4. Alternative: Use a local Kubernetes cluster (minikube or kind) in CI for testing deployments
+
+*   **Tip - Job Dependencies and Ordering:** Structure your jobs with `needs` to enforce correct ordering:
+    ```yaml
+    jobs:
+      # Stage 1: Linting (parallel)
+      backend-lint: ...
+      frontend-lint: ...
+
+      # Stage 2: Unit tests (parallel, depend on lint)
+      backend-test:
+        needs: [backend-lint]
+      frontend-test:
+        needs: [frontend-lint]
+
+      # Stage 3: Integration tests (depend on unit tests)
+      integration-tests:
+        needs: [backend-test, frontend-test]
+
+      # Stage 4: E2E tests (depend on integration)
+      e2e-tests:
+        needs: [integration-tests]
+
+      # Stage 5: Security scans (parallel, can run after unit tests)
+      security-backend:
+        needs: [backend-test]
+      security-frontend:
+        needs: [frontend-test]
+
+      # Stage 6: Build images (depend on all tests passing)
+      build-images:
+        needs: [backend-test, frontend-test, integration-tests, e2e-tests]
+
+      # Stage 7: Scan images (depends on build)
+      trivy-scan:
+        needs: [build-images]
+
+      # Stage 8: Deploy staging (depends on all previous stages)
+      deploy-staging:
+        needs: [build-images, trivy-scan]
+        if: github.ref == 'refs/heads/develop'
+
+      # Stage 9: Deploy production (depends on all previous stages)
+      deploy-production:
+        needs: [build-images, trivy-scan]
+        if: github.ref == 'refs/heads/main'
+        environment: production
+    ```
+
+*   **Tip - Workflow Optimization for 15min Limit:** To keep the pipeline under 15 minutes:
+    - Use aggressive caching (npm, pip, docker layers)
+    - Run linting and unit tests in parallel
+    - Run security scans in parallel with other stages when possible
+    - Use `--parallel` flags for test runners where supported
+    - Limit Playwright E2E tests to critical paths (not every single test if it's slow)
+    - Use `docker/build-push-action` with layer caching instead of plain docker build commands
+
+*   **Note - Integration vs Unit Tests:** The current `backend-test` job runs ALL backend tests (unit + integration) together. For better organization and faster feedback, consider:
+    - Splitting into `backend-unit-test` (stage 2, no services, fast) using `pytest tests/unit/`
+    - And `backend-integration-test` (stage 3, with services) using `pytest tests/integration/`
+    - However, since the current job already uses GitHub Services for DB/Redis, it's acceptable to keep it as-is for simplicity. Just ensure it's placed in the right stage.
+
+*   **Tip - Helm Installation in CI:** For deployment jobs, install Helm using the official action:
+    ```yaml
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.13.0'
+    ```
+
+*   **Tip - Kubeconfig Setup (when ready):** For real deployments, configure kubectl with:
+    ```yaml
+    - name: Configure kubectl
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+        kubectl config current-context
+    ```
+    (Requires KUBECONFIG_STAGING secret in GitHub repository)
+
+### Workflow Structure Summary
+
+Based on the architecture blueprint and existing code, your complete CI/CD workflow should have these jobs:
+
+1. **frontend-lint** (existing) - Keep as-is
+2. **frontend-test** (existing) - Keep as-is
+3. **frontend-lighthouse** (existing) - Keep as-is
+4. **backend-lint** (existing) - Keep as-is
+5. **backend-test** (existing) - Keep as-is, but consider renaming to backend-unit-test
+6. **backend-security** (existing) - Keep as-is
+7. **frontend-security** (existing) - Keep as-is
+8. **integration-tests** (NEW) - Add this for stage 3
+9. **e2e-tests** (NEW) - Add this for stage 4
+10. **build-backend-image** (NEW) - Add this for stage 6
+11. **build-frontend-image** (NEW) - Add this for stage 6
+12. **trivy-scan-backend** (NEW) - Add this for stage 5 (after build)
+13. **trivy-scan-frontend** (NEW) - Add this for stage 5 (after build)
+14. **deploy-staging** (NEW) - Add this for stage 8
+15. **deploy-production** (NEW) - Add this for stage 9
+16. **ci-success** (existing) - Update to include all new jobs in the needs list
+
+Total: ~15-16 jobs organized into 9 stages as specified in the architecture blueprint.

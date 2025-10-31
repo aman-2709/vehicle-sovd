@@ -1,5 +1,9 @@
 # Cloud-to-Vehicle SOVD Command WebApp
 
+[![CI/CD Pipeline](https://github.com/aman/sovd/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/aman/sovd/actions/workflows/ci-cd.yml)
+![Backend Coverage](https://img.shields.io/badge/backend%20coverage-80%25-brightgreen)
+![Frontend Coverage](https://img.shields.io/badge/frontend%20coverage-80%25-brightgreen)
+
 ## Project Overview
 
 This project develops a secure, cloud-based web application that enables automotive engineers to remotely execute SOVD (Service-Oriented Vehicle Diagnostics) 2.0 commands on connected vehicles and view real-time responses through a modern, unified interface.

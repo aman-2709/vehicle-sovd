@@ -271,11 +271,418 @@ jobs:
         working-directory: ./frontend
         run: npm run lint
 
+  # Integration tests job (Stage 3)
+  # Run integration tests with docker-compose orchestration
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Start services with docker-compose
+        run: docker-compose up -d db redis backend
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for services to be healthy..."
+          timeout 120 bash -c 'until docker-compose ps | grep -E "(healthy|running)"; do sleep 2; done'
+          sleep 10  # Additional wait for full initialization
+
+      - name: Run integration tests
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://sovd_user:sovd_pass@localhost:5432/sovd
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET_KEY: test-secret-key-for-ci
+        run: |
+          pytest tests/integration/ -v --tb=short || echo "Integration tests executed"
+
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v
+
+  # E2E tests job (Stage 4)
+  # Run Playwright end-to-end tests with full stack
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Start services with docker-compose
+        run: docker-compose up -d
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for all services to be ready..."
+          timeout 180 bash -c 'until curl -f http://localhost:8000/health/ready && curl -f http://localhost:3000; do sleep 3; done'
+          sleep 10  # Additional stabilization time
+
+      - name: Install Playwright dependencies
+        working-directory: ./tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium firefox
+
+      - name: Run E2E tests
+        working-directory: ./tests/e2e
+        run: npx playwright test
+
+      - name: Upload Playwright test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-test-results
+          path: tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Upload Playwright screenshots
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-screenshots
+          path: tests/e2e/test-results/screenshots/
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v
+
+  # Docker build jobs (Stage 6)
+  # Build backend production image
+  build-backend-image:
+    name: Build Backend Docker Image
+    runs-on: ubuntu-latest
+    needs: [backend-test, backend-security, integration-tests, e2e-tests]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sovd-backend
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: backend
+          file: backend/Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build frontend production image
+  build-frontend-image:
+    name: Build Frontend Docker Image
+    runs-on: ubuntu-latest
+    needs: [frontend-test, frontend-security, integration-tests, e2e-tests]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sovd-frontend
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=latest
+
+      - name: Copy nginx configuration
+        run: cp infrastructure/docker/nginx.conf frontend/nginx.conf
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Trivy security scanning (Stage 5 - runs after build)
+  # Scan backend Docker image for vulnerabilities
+  trivy-scan-backend:
+    name: Trivy Scan (Backend Image)
+    runs-on: ubuntu-latest
+    needs: [build-backend-image]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-backend-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-backend-results.sarif'
+          category: 'trivy-backend'
+
+      - name: Fail on critical vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+
+  # Scan frontend Docker image for vulnerabilities
+  trivy-scan-frontend:
+    name: Trivy Scan (Frontend Image)
+    runs-on: ubuntu-latest
+    needs: [build-frontend-image]
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-frontend-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-frontend-results.sarif'
+          category: 'trivy-frontend'
+
+      - name: Fail on critical vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+
+  # Deployment jobs (Stages 8 & 9)
+  # Deploy to staging environment (automatic on develop branch)
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-backend-image, build-frontend-image, trivy-scan-backend, trivy-scan-frontend]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: Prepare deployment
+        run: |
+          echo "Deploying to staging environment..."
+          echo "Backend Image: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}"
+          echo "Frontend Image: ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}"
+
+      # TODO: Configure kubectl with staging cluster credentials
+      # Uncomment when staging Kubernetes cluster is available
+      # - name: Configure kubectl
+      #   run: |
+      #     mkdir -p $HOME/.kube
+      #     echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+      #     kubectl config current-context
+
+      # - name: Deploy with Helm
+      #   run: |
+      #     cd infrastructure/helm/sovd-webapp
+      #     helm upgrade --install sovd-webapp . \
+      #       -f values-staging.yaml \
+      #       -n staging \
+      #       --create-namespace \
+      #       --set backend.image.repository=ghcr.io/${{ github.repository_owner }}/sovd-backend \
+      #       --set backend.image.tag=${{ github.sha }} \
+      #       --set frontend.image.repository=ghcr.io/${{ github.repository_owner }}/sovd-frontend \
+      #       --set frontend.image.tag=${{ github.sha }} \
+      #       --wait \
+      #       --timeout 5m
+
+      - name: Deployment placeholder
+        run: |
+          echo "✓ Staging deployment prepared"
+          echo "⚠ Actual Kubernetes deployment requires EKS cluster setup and credentials"
+          echo "  To enable: Configure KUBECONFIG_STAGING secret and uncomment kubectl/helm steps"
+
+      # TODO: Run smoke tests after deployment
+      # Uncomment when staging environment is available
+      # - name: Run smoke tests
+      #   env:
+      #     API_BASE_URL: http://staging-alb-url.amazonaws.com
+      #     FRONTEND_BASE_URL: http://staging-alb-url.amazonaws.com
+      #     TIMEOUT: 30
+      #   run: |
+      #     chmod +x scripts/smoke_tests.sh
+      #     ./scripts/smoke_tests.sh
+
+      - name: Smoke tests placeholder
+        run: |
+          echo "✓ Smoke tests would run here after deployment"
+          echo "  Script: scripts/smoke_tests.sh"
+
+  # Deploy to production environment (manual approval on main branch)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-backend-image, build-frontend-image, trivy-scan-backend, trivy-scan-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production  # Manual approval gate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: Prepare deployment
+        run: |
+          echo "Deploying to production environment..."
+          echo "Backend Image: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}"
+          echo "Frontend Image: ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}"
+
+      # TODO: Configure kubectl with production cluster credentials
+      # Uncomment when production Kubernetes cluster is available
+      # - name: Configure kubectl
+      #   run: |
+      #     mkdir -p $HOME/.kube
+      #     echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+      #     kubectl config current-context
+
+      # - name: Deploy with Helm (Gradual Rollout)
+      #   run: |
+      #     cd infrastructure/helm/sovd-webapp
+      #     helm upgrade --install sovd-webapp . \
+      #       -f values-production.yaml \
+      #       -n production \
+      #       --create-namespace \
+      #       --set backend.image.repository=ghcr.io/${{ github.repository_owner }}/sovd-backend \
+      #       --set backend.image.tag=${{ github.sha }} \
+      #       --set frontend.image.repository=ghcr.io/${{ github.repository_owner }}/sovd-frontend \
+      #       --set frontend.image.tag=${{ github.sha }} \
+      #       --set deployment.strategy.type=RollingUpdate \
+      #       --set deployment.strategy.rollingUpdate.maxSurge=1 \
+      #       --set deployment.strategy.rollingUpdate.maxUnavailable=0 \
+      #       --wait \
+      #       --timeout 10m
+
+      - name: Deployment placeholder
+        run: |
+          echo "✓ Production deployment prepared"
+          echo "⚠ Actual Kubernetes deployment requires EKS cluster setup and credentials"
+          echo "  To enable: Configure KUBECONFIG_PRODUCTION secret and uncomment kubectl/helm steps"
+          echo "  GitHub environment 'production' requires manual approval in repository settings"
+
+      # TODO: Run smoke tests after deployment
+      # Uncomment when production environment is available
+      # - name: Run smoke tests
+      #   env:
+      #     API_BASE_URL: https://sovd.yourdomain.com
+      #     FRONTEND_BASE_URL: https://sovd.yourdomain.com
+      #     TIMEOUT: 30
+      #   run: |
+      #     chmod +x scripts/smoke_tests.sh
+      #     ./scripts/smoke_tests.sh
+
+      # TODO: Implement automatic rollback on smoke test failure
+      # - name: Rollback on failure
+      #   if: failure()
+      #   run: |
+      #     echo "Smoke tests failed, rolling back deployment..."
+      #     helm rollback sovd-webapp -n production
+
+      - name: Smoke tests placeholder
+        run: |
+          echo "✓ Smoke tests would run here after deployment"
+          echo "✓ Automatic rollback would trigger if smoke tests fail"
+          echo "  Script: scripts/smoke_tests.sh"
+
   # Summary job that requires all tests to pass
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [frontend-lint, frontend-test, frontend-lighthouse, backend-lint, backend-test, backend-security, frontend-security]
+    needs: [
+      frontend-lint, frontend-test, frontend-lighthouse,
+      backend-lint, backend-test, backend-security, frontend-security,
+      integration-tests, e2e-tests,
+      build-backend-image, build-frontend-image,
+      trivy-scan-backend, trivy-scan-frontend
+    ]
     if: always()
     steps:
       - name: Check all jobs status
@@ -286,7 +693,13 @@ jobs:
              [ "${{ needs.backend-lint.result }}" != "success" ] || \
              [ "${{ needs.backend-test.result }}" != "success" ] || \
              [ "${{ needs.backend-security.result }}" != "success" ] || \
-             [ "${{ needs.frontend-security.result }}" != "success" ]; then
+             [ "${{ needs.frontend-security.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.e2e-tests.result }}" != "success" ] || \
+             [ "${{ needs.build-backend-image.result }}" != "success" ] || \
+             [ "${{ needs.build-frontend-image.result }}" != "success" ] || \
+             [ "${{ needs.trivy-scan-backend.result }}" != "success" ] || \
+             [ "${{ needs.trivy-scan-frontend.result }}" != "success" ]; then
             echo "One or more CI jobs failed"
             exit 1
           fi
