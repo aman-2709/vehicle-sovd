@@ -21,6 +21,8 @@ black>=23.11.0
 mypy>=1.7.0
 types-python-jose>=3.3.4
 types-passlib>=1.7.7
+types-grpcio>=1.60.0
+types-protobuf>=4.24.0
 
 # Security scanning
 bandit>=1.7.0

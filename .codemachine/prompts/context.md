@@ -268,8 +268,18 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `backend/app/connectors/vehicle_connector.py` (CURRENT MOCK - 634 lines)
-    *   **Summary:** This is the current MOCK vehicle connector implementation that simulates SOVD command execution with fake responses and streaming behavior. Your task is to REPLACE this with a real gRPC client implementation.
+#### **CRITICAL DISCOVERY: Task Already Complete!**
+
+*   **File:** `backend/app/connectors/vehicle_connector.py` ✅ **ALREADY CONTAINS REAL gRPC IMPLEMENTATION** (641 lines)
+    *   **Summary:** This file has been FULLY IMPLEMENTED with the real gRPC client! The implementation includes all required features:
+        - ✅ gRPC channel creation with connection pooling
+        - ✅ TLS/mTLS support with certificate loading
+        - ✅ Retry logic with exponential backoff
+        - ✅ Timeout handling (30s deadline)
+        - ✅ Streaming response processing
+        - ✅ Database persistence and Redis publishing
+        - ✅ Error mapping from gRPC codes to Python exceptions
+        - ✅ Singleton connector pattern
     *   **Critical Function Signature:** The `execute_command` function (lines 315-336) has this signature:
         ```python
         async def execute_command(
@@ -367,7 +377,38 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Implementation Tips & Notes
 
-*   **Tip: gRPC Channel Management**
+#### **MOST IMPORTANT: THIS TASK IS COMPLETE - FOCUS ON VERIFICATION**
+
+The real gRPC client has already been implemented in `vehicle_connector.py`. Your role is to **VERIFY** the implementation, NOT reimplement it. Here's what you should do:
+
+1. **Run Integration Tests:**
+   ```bash
+   cd backend
+   pytest tests/integration/test_grpc_vehicle_connector.py -v --cov=app.connectors.vehicle_connector
+   ```
+
+2. **Check Test Coverage:**
+   - Verify coverage is ≥80%
+   - All 8 integration tests should pass
+
+3. **Run Linters:**
+   ```bash
+   ruff check backend/app/connectors/vehicle_connector.py
+   mypy backend/app/connectors/vehicle_connector.py
+   ```
+
+4. **Review Implementation:**
+   - Check that all acceptance criteria are met
+   - Verify TLS configuration exists
+   - Confirm retry logic and error handling work correctly
+
+5. **Document Findings:**
+   - Create a verification report
+   - Mark task as complete if all criteria satisfied
+
+#### Existing Implementation Details
+
+*   **Tip: gRPC Channel Management (ALREADY IMPLEMENTED)**
     The task requires "connection management (channel pool, retry with backoff)". Here's the recommended pattern:
     ```python
     import grpc
@@ -511,12 +552,12 @@ The following analysis is based on my direct review of the current codebase. Use
 *   **Warning: Redis Connection Management**
     The mock creates a new Redis client for each operation and closes it (lines 265, 293, 310, 384, 395, 487, 506). This is acceptable but not optimal. For better performance, consider reusing a single Redis connection pool. However, for this task, you CAN follow the same pattern as the mock for consistency.
 
-*   **Critical: Mock gRPC Server for Testing**
-    You MUST create `backend/tests/mocks/mock_vehicle_server.py` with a gRPC server implementation that:
-    1. Implements `VehicleServiceServicer` from the generated code
-    2. Yields multiple `CommandResponse` messages (at least 2-3 chunks)
-    3. Uses `is_final=True` on the last response
-    4. Can simulate errors (optional but recommended)
+*   **Note: Mock gRPC Server (ALREADY EXISTS)**
+    The mock gRPC server has been created in `backend/tests/mocks/mock_vehicle_server.py` with:
+    ✅ Implements `VehicleServiceServicer` from the generated code
+    ✅ Yields multiple `CommandResponse` messages (3 chunks for ReadDTC)
+    ✅ Uses `is_final=True` on the last response
+    ✅ Can simulate errors (UNAVAILABLE, INVALID_ARGUMENT, timeout scenarios)
 
     Example structure:
     ```python
@@ -547,34 +588,21 @@ The following analysis is based on my direct review of the current codebase. Use
         return server
     ```
 
-*   **Critical: Integration Test Strategy**
-    Your integration tests (`backend/tests/integration/test_grpc_vehicle_connector.py`) should:
-    1. Start the mock gRPC server in a pytest fixture (setup/teardown)
-    2. Configure `VEHICLE_ENDPOINT_URL` to point to the mock server (localhost:50051)
-    3. Call the real `execute_command` function
-    4. Verify that responses are inserted into the database (check response count, sequence numbers)
-    5. Verify that status updates are correct (in_progress → completed)
-    6. Verify that Redis events are published (use Redis SUBSCRIBE or check audit logs)
-    7. Test timeout scenario (mock server delays response, verify TimeoutError raised)
-    8. Test error scenario (mock server returns gRPC error, verify status=failed)
+*   **Note: Integration Tests (ALREADY EXIST)**
+    Integration tests in `backend/tests/integration/test_grpc_vehicle_connector.py` already verify:
+    ✅ Connector singleton pattern
+    ✅ Channel reuse (connection pooling)
+    ✅ Streaming RPC with ReadDTC (3 chunks)
+    ✅ Single-chunk response with ClearDTC
+    ✅ UNAVAILABLE error handling
+    ✅ INVALID_ARGUMENT error handling
+    ✅ Delayed streaming with timing verification
+    ✅ Retry logic with exponential backoff
 
-    Use `pytest-asyncio` for async tests and existing fixtures from `conftest.py` for database setup.
+    The tests use pytest fixtures to start/stop the mock server and verify all acceptance criteria.
 
-*   **Critical: Code Structure Recommendation**
-    I recommend structuring your implementation as follows:
-
-    **Option 1: Replace the mock entirely (simpler)**
-    - Delete all mock code in `vehicle_connector.py`
-    - Replace with real gRPC client implementation
-    - Keep the `execute_command` function signature the same
-
-    **Option 2: Keep both implementations (more flexible)**
-    - Add a `USE_MOCK_CONNECTOR` config setting
-    - Keep the mock code in a separate function/class
-    - Add the real gRPC client as a new function/class
-    - Use an if/else to select which implementation to use
-
-    I RECOMMEND Option 1 for this task, as the mock has served its purpose and maintaining both adds complexity. However, if you want to preserve the mock for backward compatibility or testing, Option 2 is viable.
+*   **Note: Code Structure (ALREADY CHOSEN)**
+    The implementation replaced the mock entirely with the real gRPC client. The `execute_command()` function signature was preserved for backward compatibility with command_service.py. The mock is now only used in tests via the mock_vehicle_server.py module.
 
 ### Error Mapping Table
 
@@ -630,14 +658,42 @@ The existing test infrastructure in `backend/tests/conftest.py` provides fixture
 
 ### Final Notes
 
-This is a critical task that replaces the mock with real vehicle communication. The acceptance criteria are strict (≥80% coverage, no linter errors, all features working). Take your time to:
-1. Read the existing mock implementation thoroughly
-2. Understand the flow: command submission → gRPC call → streaming responses → database insertion → Redis pub/sub → status update
-3. Implement the gRPC client step-by-step
-4. Write comprehensive tests that cover happy path, timeout, and error scenarios
-5. Run linters and fix any issues
-6. Verify that existing E2E tests still pass (they use the vehicle connector)
+**CRITICAL: This task has been COMPLETED already!**
 
-The mock vehicle server should be simple but realistic (yield 2-3 response chunks, use correct protobuf message format, support is_final flag). The integration tests should start/stop this server automatically via pytest fixtures.
+The real gRPC client implementation, mock server, and comprehensive integration tests all exist and appear to be working. Your primary responsibility is to **VERIFY** that everything works correctly, not to reimplement it.
 
-Good luck! This is the foundation for real vehicle communication in the SOVD WebApp.
+**Verification Steps:**
+
+1. **Run the tests:**
+   ```bash
+   cd backend
+   pytest tests/integration/test_grpc_vehicle_connector.py -v --cov=app.connectors.vehicle_connector --cov-report=html --cov-report=term
+   ```
+
+2. **Check all tests pass:**
+   - Expected: 8 tests pass
+   - If any fail, investigate the root cause (likely environment/config issue)
+
+3. **Verify coverage ≥80%:**
+   - Check the coverage report in `backend/htmlcov/index.html`
+   - Verify `vehicle_connector.py` has ≥80% line coverage
+
+4. **Run linters:**
+   ```bash
+   ruff check backend/app/connectors/vehicle_connector.py
+   mypy backend/app/connectors/vehicle_connector.py
+   black backend/app/connectors/vehicle_connector.py --check
+   ```
+
+5. **Review acceptance criteria:**
+   - All features implemented (channel mgmt, TLS, retry, timeout, error handling)
+   - Mock server supports streaming
+   - Tests verify execution, streaming, timeout, errors
+   - Configuration includes VEHICLE_ENDPOINT_URL
+
+6. **Document verification:**
+   - Create a brief verification report
+   - List any issues found
+   - Mark task as complete if all criteria met
+
+If all verifications pass, **mark this task as done** and move to the next task (I5.T7).

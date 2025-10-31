@@ -472,7 +472,11 @@ async def _publish_response_chunk(
     finally:
         await redis_client.aclose()
 
-    return response.response_id
+    return (
+        uuid.UUID(str(response.response_id))
+        if not isinstance(response.response_id, uuid.UUID)
+        else response.response_id
+    )
 
 
 async def _publish_status_event(
