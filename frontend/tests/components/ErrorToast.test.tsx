@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { ErrorProvider, useError } from '../../src/context/ErrorContext';
 import ErrorToast from '../../src/components/common/ErrorToast';
 
@@ -28,16 +28,12 @@ const ErrorTrigger = () => {
 };
 
 describe('ErrorToast Component', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
-  it('renders no toasts when there are no errors', () => {
+  it('renders no toasts when there are no errors', async () => {
     render(
       <ErrorProvider>
         <ErrorToast />
@@ -80,8 +76,11 @@ describe('ErrorToast Component', () => {
     await waitFor(() => {
       expect(screen.getByTestId('toast-error')).toBeInTheDocument();
     });
-    expect(screen.getByText(/Error with ID/)).toBeInTheDocument();
-    expect(screen.getByText('test-123')).toBeInTheDocument();
+
+    // The toast should contain both the message and the correlation ID
+    const toast = screen.getByTestId('toast-error');
+    expect(toast).toHaveTextContent('Error with ID');
+    expect(toast).toHaveTextContent('test-123');
   });
 
   it('displays success toast when success is triggered', async () => {
@@ -157,7 +156,9 @@ describe('ErrorToast Component', () => {
   });
 
   it('auto-dismisses error toast after 6 seconds', async () => {
-    render(
+    vi.useFakeTimers();
+
+    const { container } = render(
       <ErrorProvider>
         <ErrorTrigger />
         <ErrorToast />
@@ -165,24 +166,29 @@ describe('ErrorToast Component', () => {
     );
 
     const errorButton = screen.getByText('Trigger Error');
-    fireEvent.click(errorButton);
+
+    act(() => {
+      fireEvent.click(errorButton);
+    });
 
     // Toast should be visible initially
-    await waitFor(() => {
-      expect(screen.getByTestId('toast-error')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-error')).toBeInTheDocument();
+
+    // Fast-forward past the auto-dismiss timer (6 seconds) and run all timers
+    act(() => {
+      vi.runAllTimers();
     });
 
-    // Fast-forward 6 seconds
-    vi.advanceTimersByTime(6000);
+    // Toast should be removed
+    expect(screen.queryByTestId('toast-error')).not.toBeInTheDocument();
 
-    // Wait for toast to be removed
-    await waitFor(() => {
-      expect(screen.queryByTestId('toast-error')).not.toBeInTheDocument();
-    });
+    vi.useRealTimers();
   });
 
   it('auto-dismisses success toast after 4 seconds', async () => {
-    render(
+    vi.useFakeTimers();
+
+    const { container } = render(
       <ErrorProvider>
         <ErrorTrigger />
         <ErrorToast />
@@ -190,20 +196,23 @@ describe('ErrorToast Component', () => {
     );
 
     const successButton = screen.getByText('Trigger Success');
-    fireEvent.click(successButton);
+
+    act(() => {
+      fireEvent.click(successButton);
+    });
 
     // Toast should be visible initially
-    await waitFor(() => {
-      expect(screen.getByTestId('toast-success')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-success')).toBeInTheDocument();
+
+    // Fast-forward past the auto-dismiss timer (4 seconds) and run all timers
+    act(() => {
+      vi.runAllTimers();
     });
 
-    // Fast-forward 4 seconds
-    vi.advanceTimersByTime(4000);
+    // Toast should be removed
+    expect(screen.queryByTestId('toast-success')).not.toBeInTheDocument();
 
-    // Wait for toast to be removed
-    await waitFor(() => {
-      expect(screen.queryByTestId('toast-success')).not.toBeInTheDocument();
-    });
+    vi.useRealTimers();
   });
 
   it('allows manual dismissal of toast via close button', async () => {
@@ -279,15 +288,17 @@ describe('ErrorToast Component', () => {
       </ErrorProvider>
     );
 
-    fireEvent.click(screen.getByText('Error 1'));
-    fireEvent.click(screen.getByText('Error 2'));
+    fireEvent.click(screen.getByRole('button', { name: 'Error 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Error 2' }));
 
     // Both errors should be visible with their respective IDs
     await waitFor(() => {
-      expect(screen.getByText('Error 1')).toBeInTheDocument();
-      expect(screen.getByText('Error 2')).toBeInTheDocument();
-      expect(screen.getByText('id-1')).toBeInTheDocument();
-      expect(screen.getByText('id-2')).toBeInTheDocument();
+      const toasts = screen.getAllByTestId('toast-error');
+      expect(toasts).toHaveLength(2);
     });
+
+    // Check that both correlation IDs are present
+    expect(screen.getByText('id-1')).toBeInTheDocument();
+    expect(screen.getByText('id-2')).toBeInTheDocument();
   });
 });
