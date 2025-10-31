@@ -10,27 +10,37 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T9",
+  "task_id": "I4.T10",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Optimize frontend performance: code splitting with React.lazy, bundle analysis with vite-plugin-bundle-analyzer, tree-shake MUI components, configure Vite optimizations, add Nginx compression, measure performance metrics (FCP, TTI), configure Lighthouse CI. Document metrics.",
-  "agent_type_hint": "FrontendAgent",
-  "inputs": "Architecture Blueprint Section 2.2 (NFRs - Performance).",
+  "description": "Security hardening: add security headers middleware (CSP, X-Frame-Options, HSTS), run dependency audit (pip-audit, npm audit), configure CORS properly, ensure secrets from env, input sanitization, run Bandit/eslint-plugin-security, update CI for security scans, document in security_review.md.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Architecture Blueprint Section 3.8 (Security); Section 2.2 (NFRs).",
   "target_files": [
-    "frontend/vite.config.ts",
-    "frontend/src/App.tsx",
-    "infrastructure/docker/nginx.conf",
+    "backend/app/middleware/security_headers_middleware.py",
+    "backend/app/main.py",
+    "backend/requirements-dev.txt",
     "frontend/package.json",
     ".github/workflows/ci-cd.yml",
-    "README.md"
+    "docs/architecture/security_review.md"
   ],
   "input_files": [
-    "frontend/vite.config.ts"
+    "backend/app/main.py"
   ],
-  "deliverables": "Optimized bundle with code splitting; bundle analyzer; Nginx compression; performance metrics; Lighthouse CI.",
-  "acceptance_criteria": "Production build has code splitting; Main chunk <500KB; Total <2MB; FCP <1.5s; TTI <3s; Lighthouse score >90; Nginx serves with gzip; Lighthouse CI in workflow; README documents metrics",
-  "dependencies": ["I3.T4"],
-  "parallelizable": true,
+  "deliverables": "Security headers; dependency audit results; CORS config; security scans in CI; security review doc.",
+  "acceptance_criteria": "All responses include security headers; CSP restricts sources; HSTS present; pip-audit/npm audit pass or documented; CORS configured (not *); JWT_SECRET from env; Bandit/ESLint pass; CI runs scans; security_review.md documents threats",
+  "dependencies": [
+    "I4.T1",
+    "I4.T2",
+    "I4.T3",
+    "I4.T4",
+    "I4.T5",
+    "I4.T6",
+    "I4.T7",
+    "I4.T8",
+    "I4.T9"
+  ],
+  "parallelizable": false,
   "done": false
 }
 ```
@@ -41,51 +51,118 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: NFR Performance Requirements (from 01_Context_and_Drivers.md)
+### Context: Security Non-Functional Requirements (from 01_Context_and_Drivers.md)
 
 ```markdown
-<!-- anchor: nfr-performance -->
-#### Performance
-- **Response Time**: 95th percentile round-trip time < 2 seconds for standard commands
-- **Throughput**: Support 100 concurrent users executing commands
-- **Database Performance**: Query response time < 100ms for 95% of operations
-- **Frontend Load Time**: Initial page load < 3 seconds on standard broadband
+<!-- anchor: nfr-security -->
+#### Security
+- **Encryption in Transit**: TLS 1.3 for all communication (web client ↔ backend, backend ↔ vehicle)
+- **Encryption at Rest**: Sensitive data encrypted in database
+- **Authentication**: JWT-based authentication with short-lived tokens (15 min) and refresh tokens
+- **Authorization**: Role-based access control enforced at API gateway
+- **Audit Logging**: All command executions logged with user identity, timestamp, and outcome
+- **Input Validation**: Strict validation of all user inputs to prevent injection attacks
+- **Secrets Management**: Secure storage and rotation of API keys, database credentials
 
-**Architectural Impact**: Requires stateless, horizontally scalable services, efficient database indexing, and optimized frontend bundle size.
+**Architectural Impact**: API gateway for centralized auth, dedicated auth service, secure secrets management (e.g., AWS Secrets Manager), audit log service.
 ```
 
-### Context: Performance Optimization Techniques (from 05_Operational_Architecture.md)
+### Context: Security Considerations and Threat Model (from 05_Operational_Architecture.md)
 
 ```markdown
-<!-- anchor: performance-optimization -->
-**Performance Optimization Techniques**
+<!-- anchor: security-considerations -->
+#### Security Considerations
 
-**Backend Optimizations:**
-- **Async I/O**: FastAPI async endpoints; asyncio for concurrent operations
-- **Database Query Optimization**: Indexed queries; eager loading for relationships; EXPLAIN ANALYZE
-- **Caching**:
-  - Vehicle status cached in Redis (TTL=30s)
-  - Recent command responses cached (TTL=5min)
-  - Cache invalidation on status change
-- **Connection Pooling**: Reuse database and gRPC connections
+<!-- anchor: security-threat-model -->
+**Threat Model & Mitigations**
 
-**Frontend Optimizations:**
-- **Code Splitting**: React lazy loading for routes; Vite automatic chunking
-- **Bundle Optimization**: Tree-shaking; minification; gzip compression
-- **API Caching**: React Query caches GET requests; stale-while-revalidate
-- **Pagination**: Vehicle list and command history paginated (limit=20)
-- **Debouncing**: Search inputs debounced (300ms) to reduce API calls
+**Threat: Unauthorized Command Execution**
+- **Mitigation**: JWT-based authentication on every request; RBAC enforcement; audit logging
 
-**Network Optimizations:**
-- **HTTP/2**: Multiplexing reduces connection overhead
-- **gRPC**: Efficient binary protocol for vehicle communication
-- **CDN**: Frontend static assets served from CloudFront (AWS CDN)
-- **Compression**: Gzip for HTTP responses; protobuf for gRPC
+**Threat: Man-in-the-Middle (MITM) Attacks**
+- **Mitigation**: TLS 1.3 for all communication; HSTS headers; certificate pinning for vehicle communication
 
-**Monitoring Performance:**
-- Target: 95th percentile response time < 2 seconds
-- Alerting if p95 > 3 seconds
-- Regular load testing (k6 or Locust) to identify bottlenecks
+**Threat: SQL Injection**
+- **Mitigation**: Parameterized queries via SQLAlchemy ORM; input validation with Pydantic
+
+**Threat: Cross-Site Scripting (XSS)**
+- **Mitigation**: React automatic escaping; Content-Security-Policy headers; sanitized user inputs
+
+**Threat: Credential Stuffing / Brute Force**
+- **Mitigation**: Rate limiting (Nginx); account lockout after 5 failed attempts; CAPTCHA for login (future)
+
+**Threat: Token Theft**
+- **Mitigation**: Short-lived access tokens (15 min); httpOnly cookies for refresh tokens; token binding (future)
+
+**Threat: Insider Threat / Privilege Escalation**
+- **Mitigation**: RBAC; audit logs for all actions; least-privilege principle; database row-level security (future)
+
+**Threat: Denial of Service (DoS)**
+- **Mitigation**: Rate limiting; API Gateway throttling; AWS WAF for DDoS; auto-scaling
+
+**Threat: Data Breach / Database Compromise**
+- **Mitigation**: Encryption at rest (AWS RDS); encryption in transit (TLS); secrets in AWS Secrets Manager; regular security audits
+
+<!-- anchor: security-practices -->
+**Security Practices**
+
+**Secrets Management:**
+- **Development**: `.env` file (gitignored), Docker secrets
+- **Production**: AWS Secrets Manager
+  - Database credentials, JWT signing key, API keys
+  - Automatic rotation for database passwords (90 days)
+  - IAM roles for service access (no hardcoded credentials)
+
+**Input Validation:**
+- All API inputs validated with Pydantic models (type, format, range)
+- SOVD command validation against SOVD 2.0 schema
+- Vehicle ID validation (UUID format, exists in database)
+- File upload validation (if future feature): MIME type, size limit, virus scanning
+
+**Dependency Security:**
+- **Frontend**: `npm audit` in CI pipeline; Dependabot alerts
+- **Backend**: `pip-audit` / `safety` in CI pipeline
+- Automated dependency updates for critical vulnerabilities
+
+**Secure Development Lifecycle:**
+- Code review required (CODEOWNERS)
+- Static analysis: Bandit (Python security linter), ESLint security plugin
+- Secrets scanning: git-secrets, TruffleHog
+- Penetration testing: Annual third-party audit (production)
+```
+
+### Context: Authentication & Authorization Strategy (from 05_Operational_Architecture.md)
+
+```markdown
+<!-- anchor: authentication-authorization -->
+#### Authentication & Authorization
+
+<!-- anchor: auth-strategy -->
+**Authentication Strategy: JWT-Based with Refresh Tokens**
+
+**Implementation:**
+- **Access Tokens**: Short-lived (15 minutes), stateless JWT tokens
+  - Contains: `user_id`, `username`, `role`, `exp` (expiration), `iat` (issued at)
+  - Signed with HS256 algorithm (HMAC with SHA-256)
+  - Validated on every API request via middleware
+- **Refresh Tokens**: Long-lived (7 days), stored in database
+  - Used to obtain new access tokens without re-authentication
+  - Supports token revocation (logout invalidates refresh token)
+  - Rotated on each refresh for security
+
+**Authentication Flow:**
+1. User submits credentials to `/api/v1/auth/login`
+2. Backend validates against database (password hashed with bcrypt)
+3. On success, generates access + refresh tokens
+4. Client stores access token in memory, refresh token in httpOnly cookie (or local storage with XSS mitigations)
+5. Client includes access token in `Authorization: Bearer {token}` header
+6. On access token expiration, client calls `/api/v1/auth/refresh` with refresh token
+7. Backend validates refresh token, issues new access token
+
+**Integration with External IdP (Future):**
+- Architecture supports OAuth2/OIDC integration
+- FastAPI middleware can validate external IdP tokens (e.g., Auth0, Okapi, Azure AD)
+- User profile synced to local database on first login
 ```
 
 ---
@@ -96,203 +173,167 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-#### File: `frontend/vite.config.ts`
-**Summary:** This file already contains comprehensive Vite optimization configuration including:
-- Bundle visualization with `rollup-plugin-visualizer` (generates `stats.html`)
-- Gzip compression via `vite-plugin-compression`
-- Manual chunk splitting for vendor libraries (react, mui, query, axios)
-- Terser minification with console.log removal
-- CSS code splitting
-- ES target set to 'esnext' for modern browsers
+*   **File:** `backend/app/middleware/security_headers_middleware.py`
+    *   **Summary:** This middleware is ALREADY IMPLEMENTED and adds comprehensive security headers to all HTTP responses including Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, HSTS, Referrer-Policy, and Permissions-Policy.
+    *   **Status:** ✅ COMPLETE - Security headers middleware is already fully implemented with all required headers.
+    *   **Recommendation:** You DO NOT need to implement this middleware. It already exists and is properly registered in `main.py`. However, you MUST verify that it is working correctly and that all headers are present in responses.
 
-**Status:**  **FULLY OPTIMIZED** - All required optimizations are already implemented.
+*   **File:** `backend/app/main.py`
+    *   **Summary:** This is the main FastAPI application entry point. It already imports and registers the SecurityHeadersMiddleware (line 34, 143). CORS is configured with environment-variable-based origins (lines 148-154).
+    *   **Current CORS Configuration:**
+        ```python
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.CORS_ORIGINS.split(","),  # Environment-configurable origins
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        ```
+    *   **Status:** ✅ CORS is already properly configured to use environment variable `CORS_ORIGINS` and NOT using wildcard (*). Default value in config.py is "http://localhost:3000".
+    *   **Recommendation:** CORS configuration is CORRECT. You SHOULD verify that no wildcard is used and that the configuration is properly documented.
 
-**Recommendation:** You SHOULD verify this configuration is working correctly and NOT modify it unless required by acceptance criteria.
+*   **File:** `backend/app/config.py`
+    *   **Summary:** Application configuration using Pydantic Settings. All sensitive values are loaded from environment variables: DATABASE_URL, REDIS_URL, JWT_SECRET, CORS_ORIGINS.
+    *   **Status:** ✅ Secrets management is correctly implemented using environment variables.
+    *   **Issue:** There is NO `.env.example` file in the repository root to document required environment variables.
+    *   **Recommendation:** You MUST create a `.env.example` file documenting all required environment variables with example (non-secret) values.
 
-#### File: `frontend/src/App.tsx`
-**Summary:** This file already implements route-based code splitting with React.lazy() for all major page components:
-- DashboardPage, VehiclesPage, CommandPage, HistoryPage, CommandDetailPage are all lazy-loaded
-- Suspense fallback with LoadingSpinner is configured
-- Only critical components (LoginPage, Layout) are eagerly loaded
+*   **File:** `backend/requirements-dev.txt`
+    *   **Summary:** Development dependencies file. Already includes `bandit>=1.7.0` and `pip-audit>=2.6.0` for security scanning.
+    *   **Status:** ✅ Security scanning tools are already in development dependencies.
+    *   **Recommendation:** These tools are already available. You just need to ensure they are used correctly in the CI/CD pipeline.
 
-**Status:**  **FULLY IMPLEMENTED** - Code splitting is complete.
+*   **File:** `frontend/package.json`
+    *   **Summary:** Frontend dependencies. Already includes `eslint-plugin-security: ^1.7.1` in devDependencies.
+    *   **Status:** ✅ ESLint security plugin is already installed.
+    *   **Recommendation:** The security plugin is already installed and configured in `.eslintrc.json`.
 
-**Recommendation:** You SHOULD NOT modify this file. The code splitting implementation meets all requirements.
+*   **File:** `frontend/.eslintrc.json`
+    *   **Summary:** ESLint configuration with security plugin already enabled. Extends "plugin:security/recommended" (line 14) and includes "security" in plugins (line 29).
+    *   **Status:** ✅ ESLint security plugin is properly configured.
+    *   **Recommendation:** Configuration is correct. You just need to verify it works.
 
-#### File: `infrastructure/docker/nginx.conf`
-**Summary:** This file already contains production-grade Nginx configuration with:
-- Gzip compression enabled for all text assets (text/plain, text/css, application/javascript, etc.)
-- Compression level 6 (balanced performance)
-- Minimum size threshold of 1024 bytes
-- Security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection)
-- Cache-Control headers for static assets (1 year for hashed assets, 6 months for images)
-- SPA routing with try_files fallback to index.html
+*   **File:** `.github/workflows/ci-cd.yml`
+    *   **Summary:** CI/CD pipeline with comprehensive security scanning ALREADY IMPLEMENTED. Includes dedicated jobs for:
+        - `backend-security` (lines 210-244): Runs Bandit and pip-audit
+        - `frontend-security` (lines 247-272): Runs npm audit and ESLint with security rules
+    *   **Status:** ✅ Security scans are ALREADY in the CI/CD pipeline.
+    *   **Current Implementation:**
+        - Bandit runs on `backend/app/` directory with JSON output
+        - pip-audit runs on requirements.txt (allows failures with warning)
+        - npm audit runs with `--audit-level=high` (allows failures with warning)
+        - ESLint runs with security plugin enabled
+    *   **Recommendation:** The security scans are already implemented. You SHOULD verify they run correctly and update the security_review.md with the actual results.
 
-**Status:**  **FULLY CONFIGURED** - Compression and caching are production-ready.
+*   **File:** `docs/architecture/security_review.md`
+    *   **Summary:** Comprehensive security review document ALREADY EXISTS with detailed threat model, OWASP Top 10 compliance mapping, dependency audit results (dated 2025-10-30), static analysis results, and security best practices.
+    *   **Status:** ✅ Document is substantially complete with actual audit results.
+    *   **Current Audit Results:**
+        - Backend: 1 medium vulnerability in ecdsa (python-jose dependency) - DOCUMENTED as low risk
+        - Frontend: 13 vulnerabilities (8 low, 5 moderate) in dev dependencies - DOCUMENTED as low risk
+        - Bandit: 7 low-severity findings (all false positives or acceptable) - DOCUMENTED
+        - ESLint: 5 security warnings (all false positives) - DOCUMENTED
+    *   **Recommendation:** The document is already comprehensive and up-to-date. You SHOULD verify the information is current and make any minor updates if audit results have changed.
 
-**Recommendation:** You SHOULD NOT modify this file unless adding Brotli compression (currently commented out). Current gzip configuration exceeds requirements.
+*   **File:** `backend/pyproject.toml`
+    *   **Summary:** Python project configuration with tool configurations for Black, Ruff, mypy, pytest, and coverage. Does NOT include Bandit configuration.
+    *   **Recommendation:** You MAY add a `[tool.bandit]` section to configure Bandit exclude paths or suppress known false positives, but this is OPTIONAL.
 
-#### File: `frontend/package.json`
-**Summary:** This file contains all necessary dependencies:
-- `@lhci/cli@^0.14.0` is already installed for Lighthouse CI
-- `rollup-plugin-visualizer@^5.12.0` for bundle analysis
-- `vite-plugin-compression@^0.5.1` for gzip compression
-- All optimization tools are present
+### Implementation Tips & Notes
 
-**Status:**  **DEPENDENCIES SATISFIED** - No additional packages needed.
+*   **Tip:** The security hardening task is MOSTLY COMPLETE. Almost all required components are already implemented:
+    - ✅ Security headers middleware exists and is registered
+    - ✅ CORS is properly configured (not using wildcard)
+    - ✅ Secrets are loaded from environment variables
+    - ✅ Dependency scanning tools (Bandit, pip-audit, ESLint security, npm audit) are installed
+    - ✅ CI/CD pipeline runs all security scans
+    - ✅ security_review.md document exists with comprehensive threat analysis and audit results
 
-**Recommendation:** You SHOULD NOT add new dependencies. All required tools are installed.
+*   **Note:** Your PRIMARY task is VERIFICATION and DOCUMENTATION:
+    1. **Verify** that security headers are present in HTTP responses (test the running app)
+    2. **Verify** that CORS is not using wildcard (code review confirms this)
+    3. **Verify** that secrets are from environment (code review confirms this)
+    4. **Run** security scans locally and verify they pass (or document failures)
+    5. **Update** security_review.md if audit results have changed
+    6. **Create** `.env.example` file (THIS IS MISSING and REQUIRED)
+    7. **Document** any findings in security_review.md
 
-#### File: `.github/workflows/ci-cd.yml`
-**Summary:** This file already contains a comprehensive CI/CD pipeline with:
-- A dedicated `frontend-lighthouse` job that:
-  - Builds the production bundle
-  - Installs and runs `@lhci/cli`
-  - Executes Lighthouse CI with config from `.lighthouserc.js`
-  - Uploads Lighthouse reports as artifacts
-- Runs after `frontend-test` job completes
-- Integrated into the `ci-success` job dependency chain
+*   **Warning:** The acceptance criteria states "pip-audit/npm audit pass or documented". The current security_review.md shows that vulnerabilities exist but are documented as low-risk (dev dependencies only). This is ACCEPTABLE per the criteria - they don't need to pass, they need to be DOCUMENTED, which they are.
 
-**Status:**  **LIGHTHOUSE CI CONFIGURED** - Full automation is in place.
+*   **Tip:** When running Bandit, use the same command as the CI/CD pipeline:
+    ```bash
+    bandit -r backend/app/
+    ```
+    Expected result: 7 low-severity findings (all documented as false positives in security_review.md)
 
-**Recommendation:** You SHOULD verify the Lighthouse CI configuration in `.lighthouserc.js` matches the acceptance criteria targets.
+*   **Tip:** When running pip-audit:
+    ```bash
+    pip-audit -r backend/requirements.txt
+    ```
+    Expected result: 1 vulnerability in ecdsa (documented as low risk because we use HS256, not ECDSA)
 
-#### File: `.lighthouserc.js`
-**Summary:** This file contains Lighthouse CI configuration with performance budgets:
-- Performance category minimum score: 0.9 (90%)
-- First Contentful Paint (FCP): max 1500ms (1.5s)
-- Time to Interactive (TTI): max 3000ms (3s)
-- Resource budgets: script size <500KB, total size <2MB
-- Uses Lighthouse recommended preset as baseline
-- Runs 3 times and averages results for reliability
+*   **Tip:** The CSP header currently uses 'unsafe-inline' for scripts and styles. This is DOCUMENTED as an accepted risk in security_review.md section 7.1 because it's required by React and MUI. This is ACCEPTABLE and should not be changed.
 
-**Status:**  **PERFORMANCE BUDGETS CONFIGURED** - All acceptance criteria thresholds are defined.
+*   **Critical:** You MUST create a `.env.example` file in the project root with all required environment variables. Based on `config.py`, the required variables are:
+    - DATABASE_URL (example: "postgresql://user:password@localhost:5432/sovd")
+    - REDIS_URL (example: "redis://localhost:6379")
+    - JWT_SECRET (example: "your-secret-key-change-in-production")
+    - JWT_ALGORITHM (optional, default: "HS256")
+    - JWT_EXPIRATION_MINUTES (optional, default: 15)
+    - LOG_LEVEL (optional, default: "INFO")
+    - CORS_ORIGINS (optional, default: "http://localhost:3000")
 
-**Recommendation:** You SHOULD verify these thresholds match the task acceptance criteria exactly.
+*   **Testing Strategy:** To verify security headers, you can:
+    1. Start the backend: `cd backend && uvicorn app.main:app --reload`
+    2. Make a request: `curl -I http://localhost:8000/health`
+    3. Verify headers include: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, Referrer-Policy, Permissions-Policy
 
-#### File: `README.md`
-**Summary:** This file already contains extensive performance documentation:
-- A dedicated "Performance Metrics" section (lines 128-227)
-- Documents all performance benchmarks (FCP <1.5s, TTI <3s, Lighthouse >90, bundle sizes)
-- Explains all optimization strategies (code splitting, bundle optimization, caching, network optimizations)
-- Provides instructions for running performance tests locally
-- Documents Lighthouse CI integration and report access
-- Lists performance best practices for developers
-
-**Status:**  **DOCUMENTATION COMPLETE** - Comprehensive performance documentation exists.
-
-**Recommendation:** You MAY need to update this section with ACTUAL measured performance metrics after running the production build, but the structure and content are already complete.
-
----
-
-## 4. Implementation Tips & Notes
-
-### **CRITICAL FINDING: Task May Already Be Complete**
-
-Based on my codebase analysis, **ALL requirements of task I4.T9 appear to be FULLY IMPLEMENTED**:
-
- **Code Splitting with React.lazy**: Already implemented in `App.tsx` (lines 17-21)
- **Bundle Analysis**: `rollup-plugin-visualizer` configured in `vite.config.ts` (lines 16-22)
- **Vite Optimizations**: Comprehensive configuration in `vite.config.ts` (manual chunks, minification, tree-shaking)
- **Nginx Compression**: Gzip enabled in `nginx.conf` (lines 11-26)
- **Lighthouse CI**: Configured in `.github/workflows/ci-cd.yml` (lines 79-114) and `.lighthouserc.js`
- **Performance Metrics Documentation**: Extensive section in `README.md` (lines 128-227)
-
-### **Recommended Implementation Strategy**
-
-Since the implementation appears complete, you SHOULD focus on **VERIFICATION** and **VALIDATION**:
-
-1. **Verify Production Build Meets Criteria:**
-   ```bash
-   cd frontend
-   npm run build
-   ```
-   - Check that `dist/` folder is created
-   - Verify bundle sizes in terminal output
-   - Confirm `stats.html` is generated (bundle analyzer)
-   - Check for code splitting (multiple chunk files in `dist/assets/`)
-
-2. **Measure Actual Performance Metrics:**
-   - Run Lighthouse CI locally to verify performance scores
-   - Compare actual metrics against acceptance criteria:
-     - Main chunk < 500KB 
-     - Total bundle < 2MB 
-     - FCP < 1.5s 
-     - TTI < 3s 
-     - Lighthouse score > 90 
-
-3. **Verify Nginx Compression:**
-   - Confirm gzip files (.gz) are generated in `dist/` after build
-   - Check nginx.conf has correct gzip configuration (already confirmed above)
-
-4. **Verify CI/CD Integration:**
-   - Confirm `.github/workflows/ci-cd.yml` has `frontend-lighthouse` job
-   - Verify `.lighthouserc.js` thresholds match acceptance criteria
-   - Check that CI uploads Lighthouse reports as artifacts
-
-5. **Update README with Actual Metrics (if needed):**
-   - If the README section "Current Performance (Post-Optimization)" (line 141) is empty or contains placeholder text, update it with real measured metrics
-   - Add actual bundle sizes, FCP, TTI, and Lighthouse scores from your build
-
-### **Warning: Avoid Over-Engineering**
-
-L **DO NOT:**
-- Add additional optimization plugins that aren't needed
-- Modify working code splitting configuration
-- Change chunk splitting strategy (already optimal)
-- Add unnecessary dependencies
-- Reconfigure Lighthouse CI (already correct)
-
- **DO:**
-- Run verification builds and tests
-- Measure actual performance metrics
-- Update README with real numbers if missing
-- Ensure all files are committed to git
-- Confirm CI/CD pipeline runs successfully
-
-### **Acceptance Criteria Checklist**
-
-Use this checklist to verify each acceptance criterion:
-
-- [ ] Production build has code splitting (verify multiple chunks in `dist/assets/`)
-- [ ] Main chunk < 500KB (check build output or `stats.html`)
-- [ ] Total bundle < 2MB (check build output)
-- [ ] FCP < 1.5s (run Lighthouse locally)
-- [ ] TTI < 3s (run Lighthouse locally)
-- [ ] Lighthouse score > 90 (run Lighthouse locally)
-- [ ] Nginx serves with gzip (confirm `nginx.conf` line 12: `gzip on;`)
-- [ ] Lighthouse CI in workflow (confirm `.github/workflows/ci-cd.yml` line 79-114)
-- [ ] README documents metrics (confirm `README.md` lines 128-227)
-
-### **Testing Commands**
-
-Run these commands to verify everything works:
-
-```bash
-# Build production bundle and verify sizes
-cd frontend
-npm run build
-ls -lh dist/assets/  # Check chunk file sizes
-
-# Generate bundle visualization
-npm run analyze  # Opens stats.html in browser
-
-# Run Lighthouse CI locally (requires build to be served)
-npx serve dist -p 3000 &
-sleep 3
-npx @lhci/cli autorun --config=../.lighthouserc.js
-```
-
-### **Expected Outcome**
-
-If all verifications pass, you can mark the task as **DONE** with minimal or no code changes. The implementation was completed in a previous iteration, likely by another agent or developer.
-
-If any acceptance criterion fails, focus on fixing ONLY that specific issue rather than re-implementing the entire optimization stack.
+*   **Final Acceptance Criteria Checklist:**
+    - ✅ All responses include security headers (verify by testing)
+    - ✅ CSP restricts sources (already implemented in middleware)
+    - ✅ HSTS present (already implemented in middleware)
+    - ✅ pip-audit/npm audit pass or documented (already documented in security_review.md)
+    - ✅ CORS configured (not *) (already correct in main.py)
+    - ✅ JWT_SECRET from env (already correct in config.py)
+    - ✅ Bandit/ESLint pass (already documented in security_review.md)
+    - ✅ CI runs scans (already implemented in ci-cd.yml)
+    - ⏳ security_review.md documents threats (already exists, verify it's current)
 
 ---
 
-## 5. Final Notes
+## 4. Task Execution Recommendations
 
-This task demonstrates the importance of **code review before implementation**. The SOVD project has already undergone comprehensive frontend performance optimization, and the configuration is production-ready. Your primary responsibility is to **verify, validate, and document** rather than re-implement.
+Based on my analysis, this task is **95% complete**. Here's what you need to do:
 
-Good luck, Coder Agent! =�
+### 4.1 Required Actions (Missing Pieces)
+
+1. **Create `.env.example` file** in project root with documented environment variables
+2. **Verify security headers** by running the app and testing with curl or browser
+3. **Run security scans locally** to confirm they work:
+   - `bandit -r backend/app/`
+   - `pip-audit -r backend/requirements.txt`
+   - `npm audit --audit-level=high` (in frontend directory)
+4. **Update security_review.md** if audit results have changed since 2025-10-30
+
+### 4.2 Optional Enhancements
+
+1. Add Bandit configuration to `pyproject.toml` to suppress known false positives
+2. Add security testing to integration tests (verify headers are present)
+3. Update README.md with security best practices section
+
+### 4.3 What NOT to Do
+
+- Do NOT reimplement security_headers_middleware.py (it already exists and works)
+- Do NOT change CORS configuration (it's already correct)
+- Do NOT change secrets management (it's already using environment variables)
+- Do NOT remove 'unsafe-inline' from CSP (it's a documented accepted risk)
+
+### 4.4 Success Criteria
+
+The task is complete when:
+- `.env.example` file exists and documents all required variables
+- Security headers are verified to be present in responses
+- Security scans run successfully (or failures are documented)
+- security_review.md is verified to be current and accurate
+- All acceptance criteria from the task specification are met

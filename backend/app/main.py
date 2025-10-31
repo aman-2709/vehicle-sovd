@@ -139,7 +139,8 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded)
     return response
 
 # Register middleware (order matters - LIFO execution)
-# Execution order: SecurityHeadersMiddleware → LoggingMiddleware → CORSMiddleware → SlowAPIMiddleware → Endpoints
+# Execution order: SecurityHeadersMiddleware → LoggingMiddleware → CORSMiddleware
+# → SlowAPIMiddleware → Endpoints
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(LoggingMiddleware)
