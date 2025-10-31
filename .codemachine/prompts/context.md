@@ -10,29 +10,27 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I4.T8",
+  "task_id": "I4.T9",
   "iteration_id": "I4",
   "iteration_goal": "Production Readiness - Command History, Monitoring & Refinements",
-  "description": "Enhance frontend error handling: global error toast with MUI Snackbar, retry logic for API calls (max 3 with backoff), offline detection banner, loading states on buttons, improved form validation, confirmation dialogs. Write component tests.",
+  "description": "Optimize frontend performance and reduce bundle size. Implement: 1) Code splitting for routes (use React.lazy() for page components in `App.tsx`), 2) Image optimization (if images added, use appropriate formats and compression), 3) Analyze bundle size using `vite-plugin-bundle-analyzer`, identify large dependencies, 4) Tree-shake unused MUI components (import specific components instead of entire library), 5) Configure Vite build optimizations in `vite.config.ts` (minification, compression), 6) Add compression middleware to Nginx configuration (gzip for static files), 7) Implement service worker for caching static assets (optional, using Vite PWA plugin), 8) Measure and document performance metrics: First Contentful Paint (FCP), Time to Interactive (TTI), bundle size. Configure Lighthouse CI in GitHub Actions to track performance scores. Document performance benchmarks in README.",
   "agent_type_hint": "FrontendAgent",
-  "inputs": "Architecture Blueprint Section 2.2 (NFRs - Usability).",
+  "inputs": "Architecture Blueprint Section 2.2 (NFRs - Performance - Frontend Load Time).",
   "target_files": [
-    "frontend/src/components/common/ErrorToast.tsx",
-    "frontend/src/context/ErrorContext.tsx",
-    "frontend/src/utils/errorMessages.ts",
-    "frontend/src/api/client.ts",
-    "frontend/src/components/common/OfflineBanner.tsx",
-    "frontend/tests/components/ErrorToast.test.tsx"
+    "frontend/vite.config.ts",
+    "frontend/src/App.tsx",
+    "infrastructure/docker/nginx.conf",
+    "frontend/package.json",
+    ".github/workflows/ci-cd.yml",
+    "README.md"
   ],
   "input_files": [
-    "frontend/src/api/client.ts"
+    "frontend/vite.config.ts",
+    "frontend/src/App.tsx"
   ],
-  "deliverables": "Global error notifications; retry logic; offline detection; loading states; confirmations; tests.",
-  "acceptance_criteria": "API errors show toast with user-friendly message; 503 errors retried 3x; Offline banner when offline; Buttons show spinner during calls; Form errors inline; Logout shows confirmation; Error codes mapped; Tests verify toast, retry, offline; No errors",
-  "dependencies": [
-    "I3.T4",
-    "I4.T5"
-  ],
+  "deliverables": "Optimized frontend bundle with code splitting; bundle analyzer integration; Nginx compression; performance metrics documentation; Lighthouse CI.",
+  "acceptance_criteria": "`npm run build` generates production bundle with code splitting (multiple chunk files in `dist/assets/`); Bundle size for main chunk <500 KB (verify with bundle analyzer report); Total bundle size <2 MB; FCP <1.5 seconds on standard broadband (measure with Lighthouse); TTI <3 seconds (requirement met); Lighthouse performance score >90 (verify in CI); Nginx serves static files with gzip compression (verify response headers); Code splitting reduces initial load time (verify in network tab); README includes performance metrics and optimization strategies; Lighthouse CI job added to GitHub Actions (runs on every commit)",
+  "dependencies": ["I3.T4"],
   "parallelizable": true,
   "done": false
 }
@@ -44,62 +42,82 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Usability Requirements (from 01_Context_and_Drivers.md)
+### Context: nfr-performance (from 01_Context_and_Drivers.md)
 
 ```markdown
-<!-- anchor: nfr-usability -->
-#### Usability
-- **Intuitive UI**: Clean, modern interface following UX best practices
-- **Error Handling**: Clear error messages with actionable guidance
-- **Responsive Design**: Support for desktop and tablet form factors
+#### Performance
+- **Response Time**: 95th percentile round-trip time < 2 seconds for standard commands
+- **Throughput**: Support 100 concurrent users executing commands
+- **Database Performance**: Query response time < 100ms for 95% of operations
+- **Frontend Load Time**: Initial page load < 3 seconds on standard broadband
 
-**Architectural Impact**: Component-based UI framework (React), design system, comprehensive error handling middleware.
+**Architectural Impact**: Requires stateless, horizontally scalable services, efficient database indexing, and optimized frontend bundle size.
 ```
 
-### Context: Error Handling Requirement (from 01_Context_and_Drivers.md)
+### Context: performance-optimization (from 05_Operational_Architecture.md)
 
 ```markdown
-**Response Handling**
-- Display command responses in structured, human-readable format
-- Support for streaming responses with progressive rendering
-- Response caching and history retrieval
-- Error handling with clear diagnostic messages
+**Performance Optimization Techniques**
+
+**Backend Optimizations:**
+- **Async I/O**: FastAPI async endpoints; asyncio for concurrent operations
+- **Database Query Optimization**: Indexed queries; eager loading for relationships; EXPLAIN ANALYZE
+- **Caching**:
+  - Vehicle status cached in Redis (TTL=30s)
+  - Recent command responses cached (TTL=5min)
+  - Cache invalidation on status change
+- **Connection Pooling**: Reuse database and gRPC connections
+
+**Frontend Optimizations:**
+- **Code Splitting**: React lazy loading for routes; Vite automatic chunking
+- **Bundle Optimization**: Tree-shaking; minification; gzip compression
+- **API Caching**: React Query caches GET requests; stale-while-revalidate
+- **Pagination**: Vehicle list and command history paginated (limit=20)
+- **Debouncing**: Search inputs debounced (300ms) to reduce API calls
+
+**Network Optimizations:**
+- **HTTP/2**: Multiplexing reduces connection overhead
+- **gRPC**: Efficient binary protocol for vehicle communication
+- **CDN**: Frontend static assets served from CloudFront (AWS CDN)
+- **Compression**: Gzip for HTTP responses; protobuf for gRPC
+
+**Monitoring Performance:**
+- Target: 95th percentile response time < 2 seconds
+- Alerting if p95 > 3 seconds
+- Regular load testing (k6 or Locust) to identify bottlenecks
 ```
 
-### Context: Backend Error Code System (from error_codes.py)
+### Context: task-i4-t9 (from 02_Iteration_I4.md)
 
-The backend implements a hierarchical error code system with the following categories:
-- **RATE_001**: Rate limit exceeded
-- **AUTH_xxx**: Authentication errors (invalid credentials, expired tokens, insufficient permissions)
-- **VAL_xxx**: Validation errors (vehicle not found, invalid command, missing fields)
-- **DB_xxx**: Database errors (connection failed, query timeout)
-- **VEH_xxx**: Vehicle communication errors (unreachable, timeout, invalid response)
-- **SYS_xxx**: System errors (internal error, service unavailable, timeout)
-
-All backend error responses follow this standardized format:
-```json
-{
-  "error": {
-    "code": "AUTH_001",
-    "message": "Invalid username or password",
-    "correlation_id": "uuid-here",
-    "timestamp": "2025-10-30T14:48:00Z",
-    "path": "/api/v1/auth/login"
-  }
-}
+```markdown
+*   **Task 4.9: Performance Optimization and Bundle Analysis**
+    *   **Task ID:** `I4.T9`
+    *   **Description:** Optimize frontend performance and reduce bundle size. Implement: 1) Code splitting for routes (use React.lazy() for page components in `App.tsx`), 2) Image optimization (if images added, use appropriate formats and compression), 3) Analyze bundle size using `vite-plugin-bundle-analyzer`, identify large dependencies, 4) Tree-shake unused MUI components (import specific components instead of entire library), 5) Configure Vite build optimizations in `vite.config.ts` (minification, compression), 6) Add compression middleware to Nginx configuration (gzip for static files), 7) Implement service worker for caching static assets (optional, using Vite PWA plugin), 8) Measure and document performance metrics: First Contentful Paint (FCP), Time to Interactive (TTI), bundle size. Configure Lighthouse CI in GitHub Actions to track performance scores. Document performance benchmarks in README.
+    *   **Agent Type Hint:** `FrontendAgent`
+    *   **Inputs:** Architecture Blueprint Section 2.2 (NFRs - Performance - Frontend Load Time).
+    *   **Input Files:** [`frontend/vite.config.ts`, `frontend/src/App.tsx`]
+    *   **Target Files:**
+        *   Updates to `frontend/vite.config.ts` (add bundle analyzer, optimizations)
+        *   Updates to `frontend/src/App.tsx` (implement code splitting)
+        *   Updates to `infrastructure/docker/nginx.conf` (add compression)
+        *   Updates to `frontend/package.json` (add bundle analyzer dependency)
+        *   Updates to `.github/workflows/ci-cd.yml` (add Lighthouse CI step)
+        *   Updates to `README.md` (document performance metrics)
+    *   **Deliverables:** Optimized frontend bundle with code splitting; bundle analyzer integration; Nginx compression; performance metrics documentation; Lighthouse CI.
+    *   **Acceptance Criteria:**
+        *   `npm run build` generates production bundle with code splitting (multiple chunk files in `dist/assets/`)
+        *   Bundle size for main chunk <500 KB (verify with bundle analyzer report)
+        *   Total bundle size <2 MB
+        *   FCP <1.5 seconds on standard broadband (measure with Lighthouse)
+        *   TTI <3 seconds (requirement met)
+        *   Lighthouse performance score >90 (verify in CI)
+        *   Nginx serves static files with gzip compression (verify response headers)
+        *   Code splitting reduces initial load time (verify in network tab)
+        *   README includes performance metrics and optimization strategies
+        *   Lighthouse CI job added to GitHub Actions (runs on every commit)
+    *   **Dependencies:** `I3` (frontend implementation)
+    *   **Parallelizable:** Yes (optimization task)
 ```
-
-### Context: Error Status Code Mapping
-
-The backend maps error codes to HTTP status codes:
-- **401**: AUTH_INVALID_CREDENTIALS, AUTH_TOKEN_EXPIRED, AUTH_TOKEN_INVALID
-- **403**: AUTH_INSUFFICIENT_PERMISSIONS, AUTH_USER_INACTIVE
-- **404**: VAL_VEHICLE_NOT_FOUND, VAL_RESOURCE_NOT_FOUND
-- **400**: VAL_INVALID_COMMAND, VAL_MISSING_FIELD, VAL_INVALID_FORMAT
-- **429**: RATE_LIMIT_EXCEEDED
-- **503**: VEH_UNREACHABLE, DB_CONNECTION_FAILED, SYS_SERVICE_UNAVAILABLE
-- **504**: VEH_COMMAND_TIMEOUT, DB_QUERY_TIMEOUT, SYS_TIMEOUT
-- **500**: VEH_COMMAND_FAILED, SYS_INTERNAL_ERROR
 
 ---
 
@@ -109,119 +127,147 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `frontend/src/api/client.ts`
-    *   **Summary:** This is the core API client using Axios with automatic JWT injection and token refresh logic. It has request/response interceptors that handle authentication (401) with automatic token refresh via a queuing mechanism.
-    *   **Recommendation:** You MUST enhance this file to add retry logic for 503/504 errors. The current interceptor only handles 401 for token refresh. Add a new response interceptor that catches 503/504 errors and retries with exponential backoff (max 3 retries). DO NOT modify the existing 401 refresh logic - it's working correctly.
-    *   **Implementation Note:** The retry logic should be added as a SEPARATE concern from token refresh. Use a retry counter on the config object (similar to `_retry` for token refresh) to track retry attempts. Implement exponential backoff: 1st retry after 1s, 2nd after 2s, 3rd after 4s.
+*   **File:** `frontend/vite.config.ts`
+    *   **Summary:** Current Vite configuration is minimal with only basic React plugin and test configuration. It does NOT have any build optimization settings, bundle analysis, or compression configured.
+    *   **Recommendation:** You MUST extend this file to add:
+        - `rollup-plugin-visualizer` (bundle analyzer) - note: use the rollup version, not vite-plugin-visualizer
+        - Build optimization settings in a `build: {}` section
+        - Consider adding `vite-plugin-compression` for build-time gzip generation
+    *   **Current State:** The config only has `plugins: [react()]`, `server`, `preview`, and `test` sections. The production build settings are using all Vite defaults.
 
-*   **File:** `frontend/src/context/AuthContext.tsx`
-    *   **Summary:** Authentication context managing JWT tokens and auth state. Access token in memory, refresh token in localStorage.
-    *   **Recommendation:** You SHOULD integrate this with your ErrorContext to clear error state on successful logout. The logout function is already robust with try-catch, so errors during logout should be captured by your global error handler.
+*   **File:** `frontend/src/App.tsx`
+    *   **Summary:** This is the main routing component. All page components are currently imported synchronously at the top: `LoginPage`, `DashboardPage`, `VehiclesPage`, `CommandPage`, `HistoryPage`, `CommandDetailPage`, and `Layout` component.
+    *   **Recommendation:** You MUST convert all page imports to use `React.lazy()` for code splitting. The pattern should be:
+        ```typescript
+        const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
+        ```
+        Then wrap routes with `<Suspense fallback={<LoadingSpinner />}>` component.
+    *   **Important Note:** The `Layout`, `ProtectedRoute`, and `LoginPage` components can remain synchronously imported as they're needed immediately on app initialization. Focus lazy loading on the protected route pages (DashboardPage, VehiclesPage, CommandPage, HistoryPage, CommandDetailPage).
 
-*   **File:** `backend/app/utils/error_codes.py`
-    *   **Summary:** Backend error code enum with hierarchical categories (AUTH, VAL, DB, VEH, SYS) and mapping to HTTP status codes and user-friendly messages.
-    *   **Recommendation:** You MUST create a frontend utility `errorMessages.ts` that maps backend error codes to user-friendly, actionable messages. Extract the error code from the backend response format `response.data.error.code` and map it to a friendly message. For unknown codes, fall back to the backend's `message` field.
+*   **File:** `frontend/package.json`
+    *   **Summary:** Contains all frontend dependencies. Currently has React 18, MUI 5.14, React Router 6.20, Tanstack Query 5.8, Axios 1.6, and various dev dependencies.
+    *   **Recommendation:** You MUST add these dev dependencies:
+        - `rollup-plugin-visualizer` (for bundle analysis)
+        - `vite-plugin-compression` (optional, for gzip)
+        - `@lhci/cli` (for Lighthouse CI)
+        - Consider adding a new script: `"analyze": "vite build && open stats.html"`
+    *   **Analysis:** The current dependencies are reasonable. MUI is known to be large, so ensure you're importing components specifically (which the codebase already seems to do based on the component files I surveyed).
 
-*   **File:** `backend/app/middleware/error_handling_middleware.py`
-    *   **Summary:** Global error handler that formats all exceptions into standardized responses with error codes and correlation IDs. All errors follow the format: `{error: {code, message, correlation_id, timestamp, path}}`.
-    *   **Recommendation:** Your frontend ErrorContext MUST extract the `correlation_id` from error responses and display it in the error toast. This allows users to report errors with a specific ID that engineers can search in logs.
+*   **File:** `.github/workflows/ci-cd.yml`
+    *   **Summary:** Existing CI/CD pipeline has frontend-lint, frontend-test, backend-lint, backend-test jobs. It uses Node 18, runs on ubuntu-latest, and includes coverage checks with 80% threshold.
+    *   **Recommendation:** You MUST add a new job called `frontend-lighthouse` that:
+        - Depends on the `frontend-test` job
+        - Builds the production frontend bundle
+        - Runs Lighthouse CI using `@lhci/cli`
+        - Sets performance budget thresholds (score >90, FCP <1.5s, TTI <3s)
+        - Uploads results as artifacts
+    *   **Integration Point:** Add after the `frontend-test` job and before `ci-success`. Update the `ci-success` needs array to include the new lighthouse job.
 
-*   **File:** `frontend/src/components/common/Header.tsx`
-    *   **Summary:** Application header with navigation and user profile menu. Logout is async with navigation to login after completion.
-    *   **Recommendation:** You MUST add a confirmation dialog before logout. Create a reusable `ConfirmDialog` component that you can use here and in other components. The confirmation should say "Are you sure you want to log out?" with Cancel and Confirm buttons.
+*   **File:** `infrastructure/docker/nginx.conf`
+    *   **Summary:** This file does NOT currently exist in the infrastructure/docker directory. You will need to CREATE it from scratch.
+    *   **Recommendation:** You MUST create a production-ready Nginx configuration file that:
+        - Enables gzip compression for static assets (JS, CSS, HTML, JSON, SVG)
+        - Sets appropriate cache headers for static files (max-age for JS/CSS with hashes)
+        - Serves the React SPA from `/usr/share/nginx/html`
+        - Handles client-side routing (all routes return index.html via try_files)
+        - Includes security headers (you can keep it basic for this task)
+    *   **Location:** Create at `infrastructure/docker/nginx.conf` (this will be used by a production Dockerfile in the future)
 
-*   **File:** `frontend/src/components/common/LoadingSpinner.tsx`, `ErrorBoundary.tsx`, `EmptyState.tsx`
-    *   **Summary:** Common UI components already exist for loading states, error boundaries, and empty states.
-    *   **Recommendation:** You SHOULD leverage these existing patterns. Your ErrorToast should follow similar MUI component structure and theming. The LoadingSpinner can be reused in button loading states.
+*   **File:** `frontend/src/main.tsx`
+    *   **Summary:** Entry point sets up React with BrowserRouter, ThemeProvider, QueryClient, AuthProvider, ErrorProvider. The React.StrictMode is enabled.
+    *   **Recommendation:** No changes needed to this file. The Suspense boundaries will be added in App.tsx around the routes.
+
+*   **File:** `README.md`
+    *   **Summary:** Current README has project overview, tech stack, quick start, and service descriptions. It does NOT have a performance metrics or optimization section.
+    *   **Recommendation:** You MUST add a new section called "## Performance Metrics" (after the Docker Services section) that documents:
+        - Target performance benchmarks (FCP, TTI, bundle size)
+        - Current measured performance (after optimization)
+        - Optimization strategies implemented
+        - How to run performance tests locally (using Lighthouse in Chrome DevTools)
+        - Link to Lighthouse CI reports in GitHub Actions
 
 ### Implementation Tips & Notes
 
-*   **Tip:** MUI provides `Snackbar` and `Alert` components that work together for toast notifications. Use `Alert` inside `Snackbar` for severity levels (error, warning, info, success). Position the Snackbar at `anchorOrigin={{ vertical: 'top', horizontal: 'center' }}` for maximum visibility.
+*   **Tip:** When implementing React.lazy(), you MUST wrap the Routes with a Suspense boundary. The LoadingSpinner component already exists at `frontend/src/components/common/LoadingSpinner.tsx` - reuse it as the fallback.
 
-*   **Note:** For offline detection, use the browser's `navigator.onLine` API along with event listeners for `online` and `offline` events. Create a React hook `useOnlineStatus` that returns a boolean and can be used in any component.
+*   **Tip:** For Vite bundle optimization, the key settings to configure in vite.config.ts are:
+    ```typescript
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor': ['react', 'react-dom', 'react-router-dom'],
+            'mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
+            'query': ['@tanstack/react-query'],
+          }
+        }
+      },
+      chunkSizeWarningLimit: 1000, // Increased to 1MB
+      minify: 'terser', // Use terser for better minification
+      sourcemap: false, // Disable sourcemaps in production
+    }
+    ```
 
-*   **Tip:** The retry logic should ONLY retry on network errors or 503/504 status codes. DO NOT retry 400/401/403/404 errors - these are client errors that won't be fixed by retrying. Use Axios error type checking: `axios.isAxiosError(error)` and check `error.response?.status`.
+*   **Note:** The project uses Vite 5.0, which has excellent default tree-shaking. The codebase already imports MUI components specifically (e.g., `import Button from '@mui/material/Button'`), so you don't need to change import patterns across the codebase.
 
-*   **Note:** For button loading states, Material-UI Button accepts a `loading` prop when using the LoadingButton component from `@mui/lab`. However, this package may not be installed. Instead, you can add a `CircularProgress` component as a startIcon: `startIcon={isLoading ? <CircularProgress size={20} /> : null}`.
-
-*   **Tip:** Error message mapping should be comprehensive. Based on the error codes, create friendly messages like:
-    - `AUTH_001`: "Invalid username or password. Please try again."
-    - `AUTH_002`: "Your session has expired. Please log in again."
-    - `VEH_UNREACHABLE`: "The vehicle is currently unreachable. Please check vehicle connectivity."
-    - `RATE_001`: "Too many requests. Please wait a moment before trying again."
-
-*   **Warning:** DO NOT display raw error messages from the backend directly to users without mapping. Some error messages may contain technical details that confuse non-technical users. Always map error codes to user-friendly messages first, and only fall back to the backend message if no mapping exists.
-
-*   **Tip:** The ErrorContext should provide functions like `showError(message, options?)`, `showSuccess(message)`, `showInfo(message)`, `clearErrors()`. This makes it easy for any component to trigger notifications. Store errors in a queue to support multiple simultaneous toasts.
-
-*   **Note:** For form validation errors (422), the backend returns detailed validation messages in the format `"field -> nested: message"`. Your error mapping should handle these specially and extract just the validation messages without the technical field paths when possible.
-
-*   **Tip:** The offline banner should be non-dismissible and sticky at the top of the page (above the header or just below it). Use MUI `Alert` with severity "warning" and icon. It should automatically disappear when the connection is restored.
-
-*   **Note:** Confirmation dialogs should use MUI `Dialog` with `DialogTitle`, `DialogContent`, and `DialogActions`. Create a reusable `ConfirmDialog` component that accepts props: `open`, `title`, `message`, `onConfirm`, `onCancel`, `confirmText`, `cancelText`.
-
-*   **Warning:** When implementing retry logic, be careful with the interceptor order. The retry interceptor should run BEFORE the token refresh interceptor, so that retries don't interfere with token refresh attempts. Add the retry interceptor first, then the token refresh interceptor.
-
-*   **Tip:** For testing, use `vitest` with `@testing-library/react`. Mock the Axios instance for testing retry logic. Use `waitFor` from testing-library to test async error handling. Mock `navigator.onLine` for offline detection tests.
-
-### Critical Success Factors
-
-1. **User-Friendly Messages**: Error codes must be mapped to clear, actionable messages that guide users on what to do next
-2. **Correlation ID Visibility**: Always display the correlation_id in error toasts so users can report issues with a reference ID
-3. **Retry Logic Precision**: Only retry network errors and 503/504 (service unavailable/timeout), never retry 4xx errors
-4. **Non-Intrusive Loading**: Loading states should be clear but not block the entire UI - use button-level spinners
-5. **Graceful Offline**: The offline banner should be informative and automatically appear/disappear based on connection state
-6. **Test Coverage**: Achieve 80%+ coverage by testing error toast display, retry behavior, offline detection, and confirmation dialogs
-7. **Accessibility**: Ensure toasts are announced to screen readers (MUI Alert has aria-live by default)
-8. **No Duplicate Handlers**: DO NOT modify the existing 401 token refresh logic - it's working correctly
-
-### Component Architecture Recommendations
-
-**ErrorContext Structure:**
-```typescript
-interface ErrorContextType {
-  showError: (message: string, options?: { code?: string; correlationId?: string }) => void;
-  showSuccess: (message: string) => void;
-  showWarning: (message: string) => void;
-  showInfo: (message: string) => void;
-  clearError: (id: string) => void;
-  clearAllErrors: () => void;
-}
-```
-
-**Error Toast Queue:**
-- Support multiple simultaneous toasts (stack them vertically)
-- Each toast should auto-dismiss after 6 seconds for errors, 4 seconds for success
-- User can manually dismiss by clicking the close button
-- Store toasts in an array in context state
-
-**Retry Logic Flow:**
-```
-1. Request fails with 503/504 or network error
-2. Check retry count on config (_retryCount)
-3. If < 3, increment count and wait (exponential backoff)
-4. Retry the request with updated config
-5. If still fails after 3 attempts, reject and show error toast
-```
-
-**Offline Detection Hook:**
-```typescript
-function useOnlineStatus(): boolean {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+*   **Note:** For Lighthouse CI, you'll need to create a `.lighthouserc.js` configuration file at the project root with performance budgets. Example configuration:
+    ```javascript
+    module.exports = {
+      ci: {
+        collect: {
+          staticDistDir: './frontend/dist',
+        },
+        assert: {
+          preset: 'lighthouse:recommended',
+          assertions: {
+            'categories:performance': ['error', { minScore: 0.9 }],
+            'first-contentful-paint': ['error', { maxNumericValue: 1500 }],
+            'interactive': ['error', { maxNumericValue: 3000 }],
+          },
+        },
+      },
     };
-  }, []);
+    ```
 
-  return isOnline;
-}
-```
+*   **Warning:** The current frontend Dockerfile is a development Dockerfile only (uses Vite dev server). The nginx.conf you create will be used in a future production Dockerfile task (I5.T1). For now, just create the config file - it won't be used in docker-compose yet.
+
+*   **Tip:** When adding the bundle analyzer, configure it to generate an HTML report in `frontend/stats.html` so developers can visualize the bundle locally. Add `stats.html` to `.gitignore`.
+
+*   **Performance Target Summary:**
+    - Main chunk: <500 KB
+    - Total bundle: <2 MB
+    - FCP: <1.5 seconds
+    - TTI: <3 seconds
+    - Lighthouse score: >90
+
+*   **Testing Your Changes:**
+    1. Run `npm run build` in frontend directory
+    2. Check dist/assets/ for multiple chunk files (evidence of code splitting)
+    3. Open stats.html in browser to analyze bundle composition
+    4. Use `npx serve dist` to test production build locally
+    5. Run Lighthouse audit in Chrome DevTools on the production build
+    6. Verify gzip headers would be present with Nginx (you can test this later when production Dockerfile is created)
+
+### Project Conventions
+
+*   **Code Style:** The project uses ESLint and Prettier. All TypeScript code follows strict typing (`"strict": true` in tsconfig.json).
+
+*   **File Naming:** React components use PascalCase (e.g., `DashboardPage.tsx`), utilities use camelCase (e.g., `errorMessages.ts`).
+
+*   **Import Organization:** The codebase follows a pattern of external imports first, then internal imports organized by feature.
+
+*   **Documentation:** All configuration files have detailed comments explaining each setting. Maintain this pattern when updating vite.config.ts.
+
+*   **Git Workflow:** The project uses develop and main branches. This task should be implemented on a feature branch.
+
+### Additional Context from Codebase Survey
+
+*   **Available Components:** I confirmed that `LoadingSpinner` exists at `frontend/src/components/common/LoadingSpinner.tsx`. You can import it with: `import LoadingSpinner from './components/common/LoadingSpinner';`
+
+*   **Current Build Setup:** The frontend uses Vite 5.0 with the React plugin. The build command is `vite build` (via `npm run build`). Output goes to `frontend/dist/`.
+
+*   **Existing Optimizations:** The codebase already uses React Query for API caching, which is good. The error handling and offline detection were implemented in I4.T8, so the UX is already improved.
+
+*   **Infrastructure Directory:** The `infrastructure/docker/` directory exists with `prometheus.yml` and a `grafana/` folder. You'll be adding `nginx.conf` alongside these files.
+
+*   **CI/CD Integration:** The existing workflow uses `actions/checkout@v3`, `actions/setup-node@v3` with Node 18, and caches npm dependencies. Follow this same pattern for the Lighthouse job.

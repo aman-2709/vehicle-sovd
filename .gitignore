@@ -39,6 +39,10 @@ dist/
 build/
 *.egg-info/
 
+# Bundle analyzer
+stats.html
+.lighthouseci/
+
 # Test coverage
 .coverage
 coverage.json

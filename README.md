@@ -125,6 +125,104 @@ The development environment includes six services:
    - Pre-loaded with 3 dashboards (Operations, Commands, Vehicles)
    - Persistent volume: `grafana-data`
 
+## Performance Metrics
+
+The frontend is optimized for fast load times and minimal bundle size to provide a responsive user experience.
+
+### Performance Benchmarks
+
+**Target Performance:**
+- **First Contentful Paint (FCP):** < 1.5 seconds on standard broadband
+- **Time to Interactive (TTI):** < 3 seconds
+- **Lighthouse Performance Score:** > 90
+- **Main Chunk Size:** < 500 KB
+- **Total Bundle Size:** < 2 MB
+
+**Current Performance (Post-Optimization):**
+These metrics are continuously monitored via Lighthouse CI in the GitHub Actions pipeline. Each commit triggers an automated performance audit to ensure standards are maintained.
+
+### Optimization Strategies
+
+The following optimizations have been implemented to achieve these performance targets:
+
+#### 1. Code Splitting
+- **React.lazy()** for route-based code splitting reduces initial bundle size
+- Page components (Dashboard, Vehicles, Commands, History) are lazy-loaded on demand
+- Only critical code (Login, Layout, Auth) is included in the main bundle
+- Results in multiple smaller chunks instead of one large bundle
+
+#### 2. Bundle Optimization
+- **Manual chunk splitting** separates vendor libraries from application code:
+  - `vendor-react`: React core libraries (react, react-dom, react-router-dom)
+  - `vendor-mui`: Material-UI components and styling (@mui/material, @emotion)
+  - `vendor-query`: React Query for data fetching
+  - `vendor-axios`: HTTP client library
+- **Tree-shaking** removes unused code automatically (Vite)
+- **Minification** with Terser reduces file sizes (console.log removed in production)
+- **Compression** with gzip and brotli for smaller transfer sizes
+
+#### 3. Caching Strategy
+- **Static assets** (JS/CSS with hash-based filenames) cached for 1 year (immutable)
+- **Images and fonts** cached for 6 months
+- **HTML files** never cached (always serve fresh index.html)
+- **API responses** cached by React Query with stale-while-revalidate strategy
+
+#### 4. Network Optimizations
+- **Gzip compression** for all text-based assets (HTML, CSS, JS, JSON, SVG)
+- **HTTP/2** multiplexing reduces connection overhead
+- **CDN-ready** static asset headers with CORS support
+- **Nginx** production server optimized for serving static files
+
+#### 5. Monitoring & CI
+- **Lighthouse CI** runs on every commit to track performance metrics
+- **Bundle analyzer** generates visual reports of bundle composition (run `npm run analyze`)
+- **Performance budgets** enforced in CI (fails if metrics exceed thresholds)
+- **Automated regression detection** prevents performance degradation
+
+### Running Performance Tests Locally
+
+**Build and Analyze Bundle:**
+```bash
+cd frontend
+npm run build        # Build production bundle
+npm run analyze      # Generate bundle visualization (opens stats.html)
+```
+
+**Measure Performance with Lighthouse:**
+```bash
+# Build production bundle
+cd frontend
+npm run build
+
+# Serve production build locally
+npx serve dist -p 3000
+
+# Run Lighthouse in Chrome DevTools:
+# 1. Open http://localhost:3000 in Chrome
+# 2. Open DevTools (F12)
+# 3. Go to "Lighthouse" tab
+# 4. Select "Performance" category
+# 5. Click "Analyze page load"
+```
+
+**View Lighthouse CI Reports:**
+Performance reports from GitHub Actions are available as artifacts in the workflow runs:
+1. Go to GitHub Actions tab in repository
+2. Select a workflow run with "Frontend Performance (Lighthouse)" job
+3. Download the `lighthouse-report` artifact
+4. Extract and open the HTML report
+
+### Performance Best Practices
+
+When adding new features, follow these guidelines to maintain performance:
+
+1. **Lazy Load Large Components:** Use `React.lazy()` for routes or large feature components
+2. **Optimize Images:** Use WebP format, compress images, lazy load below-the-fold images
+3. **Minimize Dependencies:** Avoid adding large libraries unless necessary
+4. **Use React Query:** Leverage built-in caching for API calls (avoid redundant requests)
+5. **Monitor Bundle Size:** Run `npm run analyze` before committing to check for size increases
+6. **Test Performance:** Run Lighthouse locally after changes to verify metrics
+
 ### Database Initialization
 
 After starting the services for the first time, initialize the database:
