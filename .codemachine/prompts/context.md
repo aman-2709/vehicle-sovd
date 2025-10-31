@@ -29,7 +29,9 @@ This is the full specification of the task you must complete.
   ],
   "deliverables": "Production Dockerfiles; Nginx config; .dockerignore files; tested images.",
   "acceptance_criteria": "Backend build succeeds, image <500MB, runs as non-root; Frontend build succeeds, image <50MB, serves at :80; Nginx has gzip+security headers+API proxy; .dockerignore excludes tests/node_modules; No build errors",
-  "dependencies": ["I4.T1"],
+  "dependencies": [
+    "I4.T1"
+  ],
   "parallelizable": true,
   "done": false
 }
@@ -41,9 +43,8 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Production Deployment Environment (from 05_Operational_Architecture.md)
+### Context: production-deployment (from 05_Operational_Architecture.md)
 
-```markdown
 **Production Environment (AWS EKS)**
 
 **Orchestration:** Kubernetes (EKS)
@@ -76,6 +77,7 @@ The following are the relevant sections from the architecture and plan documents
 - **Secrets**: Kubernetes Secrets (synced from AWS Secrets Manager via External Secrets Operator)
 
 **Helm Chart Structure:**
+```
 sovd-helm-chart/
 ├── Chart.yaml
 ├── values.yaml (defaults)
@@ -90,98 +92,33 @@ sovd-helm-chart/
 │   └── secrets.yaml
 ```
 
-### Context: Development vs Production Deployment Strategy (from deployment.md runbook)
+### Context: deployment-constraints (from 01_Context_and_Drivers.md)
 
-```markdown
-**Development Environment (Local)**
+**Deployment Constraints:**
+- Must support containerization (Docker)
+- Must be deployable to cloud platforms (AWS, GCP, Azure)
+- Local development environment using docker-compose
+- Production deployment using Kubernetes (EKS/GKE/AKS)
 
-**Orchestration:** Docker Compose
+### Context: nfr-performance (from 01_Context_and_Drivers.md)
 
-**Components:**
-- Frontend: Vite dev server with HMR
-- Backend: FastAPI with uvicorn --reload
-- Database: PostgreSQL container
-- Redis: Redis container
-- Monitoring: Prometheus + Grafana
+**Performance Requirements:**
+- API response time: <200ms for CRUD operations (p95)
+- Command execution roundtrip: <500ms for simple commands
+- WebSocket message latency: <100ms
+- Database query performance: <50ms for indexed lookups
+- Frontend: First Contentful Paint (FCP) <1.5s, Time to Interactive (TTI) <3s
 
-**Key Features:**
-- Volume mounts for hot-reload development
-- No authentication/TLS (localhost only)
-- Seed data auto-loaded
-- Port mappings: 3000 (frontend), 8000 (backend), 5432 (db), 6379 (redis)
+### Context: nfr-security (from 01_Context_and_Drivers.md)
 
-**Production Environment Notes:**
-- Production uses optimized, multi-stage Docker builds
-- Runs as non-root user for security
-- No development dependencies included
-- Minimal attack surface
-- Read-only root filesystem where possible
-```
-
-### Context: Docker Best Practices & Security (from deployment.md runbook)
-
-```markdown
-**Production Docker Image Requirements:**
-
-1. **Multi-stage builds**: Separate build and runtime stages to minimize final image size
-2. **Non-root user**: All containers MUST run as non-root user (UID > 1000)
-3. **Minimal base images**: Use Alpine or slim variants where possible
-4. **No secrets in images**: Environment variables only, never hardcoded secrets
-5. **Security scanning**: Images scanned with Trivy in CI/CD pipeline
-6. **Size targets**:
-   - Backend: <500MB (Python + dependencies)
-   - Frontend: <50MB (Nginx + static files)
-7. **Health checks**: Dockerfiles MUST include HEALTHCHECK instructions
-8. **.dockerignore**: Exclude tests, node_modules, .git, __pycache__, coverage reports
-```
-
-### Context: Nginx Configuration Requirements (from deployment.md runbook)
-
-```markdown
-**Nginx Requirements for Production Frontend:**
-
-1. **Gzip Compression**: Enable gzip for text/css/js/json files
-2. **Security Headers**:
-   - X-Frame-Options: SAMEORIGIN
-   - X-Content-Type-Options: nosniff
-   - X-XSS-Protection: 1; mode=block
-   - Referrer-Policy: strict-origin-when-cross-origin
-   - Content-Security-Policy: (strict CSP)
-3. **API Reverse Proxy**: Proxy /api/ requests to backend service
-   - Preserve headers: X-Real-IP, X-Forwarded-For, X-Forwarded-Proto
-   - WebSocket upgrade support for /ws/ endpoints
-4. **SPA Routing**: Serve index.html for all routes (try_files $uri /index.html)
-5. **Cache Control**:
-   - Static assets (hashed): Cache-Control: public, immutable, expires 1y
-   - HTML files: no-cache, no-store, must-revalidate
-6. **Health Check Endpoint**: /health returns 200 OK
-```
-
-### Context: Technology Stack (from 02_Architecture_Overview.md)
-
-```markdown
-**Backend:**
-- Python 3.11
-- FastAPI 0.104+
-- uvicorn (ASGI server)
-- SQLAlchemy 2.0 (async ORM)
-- asyncpg (PostgreSQL driver)
-- Redis 5.0+
-- structlog (logging)
-- Prometheus client
-
-**Frontend:**
-- Node 20 LTS
-- React 18.2
-- TypeScript 5.3
-- Vite 5.0 (build tool)
-- Material-UI 5.14
-- Axios 1.6
-- React Query 5.8
-
-**Production Web Server:**
-- Nginx Alpine (lightweight, production-grade)
-```
+**Security Requirements:**
+- All data encrypted in transit (TLS 1.2+)
+- All data encrypted at rest (AES-256)
+- JWT-based authentication with short-lived tokens (15min access, 7d refresh)
+- Role-based access control (RBAC) for engineers and admins
+- Comprehensive audit logging for all critical operations
+- No secrets in codebase or container images
+- Regular security scanning of dependencies and container images
 
 ---
 
@@ -189,253 +126,188 @@ sovd-helm-chart/
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### Relevant Existing Code
+### CRITICAL FINDING: Task Already Completed!
 
-#### File: `backend/Dockerfile` (Development Version)
-- **Summary**: This is the current DEVELOPMENT Dockerfile using Python 3.11-slim. It includes hot-reload with uvicorn --reload and volume mounts. It installs ALL dependencies (including dev tools like gcc) and runs as root user.
-- **Recommendation**: You MUST create a NEW file `backend/Dockerfile.prod` that is COMPLETELY DIFFERENT. Do NOT copy the development Dockerfile structure. Production must use multi-stage build, no dev dependencies, non-root user, no volume mounts, and optimized for size.
-- **Key Differences Required**:
-  - Stage 1 (builder): Install dependencies, compile packages
-  - Stage 2 (runtime): Copy only production requirements, create non-root user, copy compiled packages
-  - Remove: gcc, python3-dev, libpq-dev from runtime stage
-  - Remove: --reload flag from uvicorn command
-  - Add: USER directive to run as non-root
-  - Health check should use /health/ready endpoint
+**All target files already exist and appear to be production-ready:**
 
-#### File: `frontend/Dockerfile` (Development Version)
-- **Summary**: This is the current DEVELOPMENT Dockerfile using Node 20 Alpine. It runs the Vite dev server with HMR on port 3000. It includes build tools (python3, make, g++) needed for some npm packages.
-- **Recommendation**: You MUST create a NEW file `frontend/Dockerfile.prod` with COMPLETELY DIFFERENT structure. Production must:
-  - Stage 1: Build the static files using `npm run build` (outputs to ./dist)
-  - Stage 2: Use nginx:alpine base image, copy ONLY ./dist files to /usr/share/nginx/html
-  - No Node.js in final image (only Nginx)
-  - Copy your new nginx.conf to /etc/nginx/conf.d/default.conf
-  - Expose port 80 (not 3000)
-  - Run as non-root user (nginx user)
+#### Existing Files Analysis:
 
-#### File: `backend/requirements.txt`
-- **Summary**: This file contains the production Python dependencies with pinned versions. It includes FastAPI, SQLAlchemy, asyncpg, redis, structlog, prometheus-fastapi-instrumentator, and security libraries (python-jose, passlib).
-- **Recommendation**: In your multi-stage Dockerfile, the builder stage MUST install these requirements. The runtime stage should copy the installed packages from the builder. Note that asyncpg and passlib have C extensions that require compilation during build.
-- **Important**: There is also a `backend/requirements-dev.txt` file (pytest, ruff, black, mypy) that MUST NOT be installed in production images.
+1. **`backend/Dockerfile.prod`** - ALREADY EXISTS AND IS COMPLETE
+   - **Summary:** Production-ready multi-stage Dockerfile for FastAPI backend
+   - **Features:**
+     - Multi-stage build (builder + runtime)
+     - Builder stage: Python 3.11-slim with gcc, python3-dev, libpq-dev for compiling dependencies
+     - Runtime stage: Python 3.11-slim with minimal runtime libraries (libpq5, curl)
+     - Non-root user execution (UID 1001, user: appuser)
+     - Dependencies installed to user site-packages and copied from builder
+     - Uvicorn production config: 4 workers, uvloop, httptools
+     - Health check using /health/ready endpoint
+     - Image optimization: no build tools in runtime, no pip cache
+   - **Recommendation:** This file meets all acceptance criteria. Verify image size <500MB by building it.
 
-#### File: `frontend/package.json`
-- **Summary**: This file defines the build script as `vite build`. Running `npm run build` will generate optimized static files in the `./dist` directory.
-- **Recommendation**: Your production Dockerfile must run `npm run build` in the builder stage. The build output is configured in vite.config.ts to output to ./dist with code splitting (vendor-react, vendor-mui, vendor-query, vendor-axios chunks).
-- **Note**: The build process includes terser minification (drops console.log), gzip compression plugin, and bundle analysis. The dist folder will contain index.html and /assets/*.js/*.css files.
+2. **`backend/.dockerignore`** - ALREADY EXISTS AND IS COMPREHENSIVE
+   - **Summary:** Comprehensive exclusion list for backend build context
+   - **Excludes:** Python cache (\_\_pycache\_\_, *.pyc), tests, coverage files, dev files (.env, .vscode, .idea), Git files, Docker files, docs, CI/CD configs, virtual envs, logs, temp files
+   - **Recommendation:** This file meets acceptance criteria. All required exclusions are present.
 
-#### File: `frontend/vite.config.ts`
-- **Summary**: Vite is configured to build with aggressive optimizations: code splitting into 4 vendor chunks, terser minification with console.log removal, gzip compression, and sourcemap disabled.
-- **Recommendation**: The production build will output to `./dist` directory. In your Dockerfile's runtime stage (nginx), copy ./dist/* to /usr/share/nginx/html. The nginx.conf should serve index.html and handle SPA routing.
-- **Build Output Structure**:
-  - dist/index.html (main entry point)
-  - dist/assets/[name]-[hash].js (chunked JS files)
-  - dist/assets/[name]-[hash].css (styles)
-  - dist/assets/*.gz (pre-compressed files from vite-plugin-compression)
+3. **`frontend/Dockerfile.prod`** - ALREADY EXISTS AND IS COMPLETE
+   - **Summary:** Production-ready multi-stage Dockerfile for React SPA with Nginx
+   - **Features:**
+     - Multi-stage build (builder + runtime)
+     - Builder stage: Node 20 Alpine with build tools, npm ci for clean install, Vite build for optimized static assets
+     - Runtime stage: nginx:alpine for minimal footprint
+     - Copies only dist/ artifacts (no source, no node_modules)
+     - Custom nginx.conf for gzip, security headers, SPA routing, API proxy
+     - Health check on /health endpoint
+     - Nginx runs in foreground (daemon off)
+   - **IMPORTANT BUILD CONTEXT NOTE:** The Dockerfile expects to be built from project root with frontend/ subdirectory:
+     - `COPY frontend/package*.json ./` and `COPY frontend/ ./`
+     - Build command: `docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .` (from project root)
+   - **Recommendation:** This file meets all acceptance criteria. Verify image size <50MB by building it.
 
-#### File: `infrastructure/docker/nginx.conf`
-- **Summary**: This is an EXISTING production-ready nginx configuration created in task I4.T9. It already includes gzip compression, security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy), SPA routing, cache control for static assets, and a /health endpoint.
-- **Recommendation**: You can REUSE this existing nginx.conf file in your frontend production Dockerfile. However, you MUST UNCOMMENT and CONFIGURE the API reverse proxy section (lines 78-88) to proxy /api/ requests to the backend service and add WebSocket support for /ws/ endpoints.
-- **Required Changes to nginx.conf**:
-  - Uncomment the `location /api/` block
-  - Update `proxy_pass` to `http://backend:8000` (assuming backend service named "backend" in Kubernetes)
-  - Add WebSocket upgrade headers for streaming responses
-  - Add a `location /ws/` block for WebSocket connections with upgrade headers
+4. **`frontend/.dockerignore`** - ALREADY EXISTS AND IS COMPREHENSIVE
+   - **Summary:** Comprehensive exclusion list for frontend build context
+   - **Excludes:** node_modules, dist/build output, test files, coverage, dev files (.env, .vscode, .idea), Git files, Docker files, docs, CI/CD configs, linter configs (eslintrc, prettierrc), tsconfig, bundle reports, logs, temp files
+   - **Recommendation:** This file meets acceptance criteria. All required exclusions are present.
 
-### Existing Infrastructure Components
+5. **`infrastructure/docker/nginx.conf`** - ALREADY EXISTS AND IS PRODUCTION-READY
+   - **Summary:** Production Nginx configuration for serving React SPA and proxying API/WebSocket
+   - **Features:**
+     - Gzip compression (6 levels, multiple MIME types)
+     - Security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy)
+     - Cache control: 1y for /assets/, 6M for images/fonts, no-cache for HTML
+     - SPA routing: try_files with fallback to index.html
+     - API reverse proxy: /api/ → http://backend:8000
+     - WebSocket proxy: /ws/ → http://backend:8000 with upgrade headers and 7d timeout
+     - Health check endpoint: /health returns 200 "healthy"
+     - Custom error pages
+   - **Recommendation:** This config is complete and meets all acceptance criteria. It already includes all required features: gzip, security headers, API/WebSocket proxy.
 
-#### Directory: `infrastructure/docker/`
-- **Summary**: This directory already exists and contains nginx.conf. You should place any additional Docker-related configuration here.
-- **Recommendation**: The nginx.conf file is already in the correct location. Reference it in your frontend Dockerfile.prod with: `COPY infrastructure/docker/nginx.conf /etc/nginx/conf.d/default.conf`
+### Implementation Guidance
 
-### Implementation Tips & Notes
+**STOP! Before proceeding, you MUST verify the task status.**
 
-#### Tip 1: Multi-stage Build Best Practices
-- **Backend Multi-stage Pattern**:
-  - Stage 1 (AS builder): Use python:3.11-slim, install build dependencies (gcc, python3-dev, libpq-dev), pip install requirements
-  - Stage 2 (runtime): Use python:3.11-slim, create non-root user, copy /usr/local/lib/python3.11/site-packages from builder, copy application code, switch to non-root user
-  - This pattern reduces final image size by 40-60% compared to single-stage builds
+The task is marked as `"done": false`, but ALL target files already exist and appear to meet the acceptance criteria. You have THREE options:
 
-#### Tip 2: Non-root User Security
-- **Backend**: Create a user named `appuser` with UID 1001, create /app directory owned by appuser, switch to appuser before CMD
-- **Frontend**: Nginx Alpine image already has `nginx` user (UID 101). Use `USER nginx` directive and ensure /usr/share/nginx/html is readable by nginx user.
+#### Option 1: Verify and Mark Complete (RECOMMENDED)
+1. Build the Docker images to verify they meet acceptance criteria:
+   ```bash
+   # Backend (from project root)
+   docker build -f backend/Dockerfile.prod -t sovd-backend:prod backend/
 
-#### Tip 3: .dockerignore Files
-- **Backend .dockerignore MUST exclude**:
-  - `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`
-  - `tests/`, `htmlcov/`, `coverage.json`, `.coverage`
-  - `.git/`, `.gitignore`, `.env`, `.env.example`
-  - `alembic/versions/*.pyc` (keep .py files for migrations)
-  - `README.md`, `Makefile`, `docker-compose.yml`
-  - `Dockerfile`, `Dockerfile.prod` (don't copy Dockerfiles into image)
+   # Frontend (from project root - note the context is root!)
+   docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .
+   ```
 
-- **Frontend .dockerignore MUST exclude**:
-  - `node_modules/` (reinstall in image)
-  - `dist/` (rebuilt in image)
-  - `coverage/`, `stats.html`
-  - `.git/`, `.gitignore`, `.env`, `.env.example`
-  - `tests/`, `*.test.ts`, `*.test.tsx`
-  - `README.md`, `Makefile`, `docker-compose.yml`
-  - `Dockerfile`, `Dockerfile.prod`
+2. Check image sizes:
+   ```bash
+   docker images | grep sovd
+   # Backend should be <500MB
+   # Frontend should be <50MB
+   ```
 
-#### Tip 4: Health Check Endpoints
-- **Backend**: Use `/health/ready` (implemented in task I4.T4). This endpoint checks database and Redis connectivity. HEALTHCHECK should use: `curl -f http://localhost:8000/health/ready || exit 1`
-- **Frontend**: Use the built-in `/health` endpoint in nginx.conf (already configured). HEALTHCHECK: `wget --no-verbose --tries=1 --spider http://localhost:80/health || exit 1`
+3. Test the images:
+   ```bash
+   # Backend: Check it runs as non-root
+   docker run --rm sovd-backend:prod id
+   # Should show: uid=1001(appuser) gid=1001(appuser)
 
-#### Tip 5: Build Context and Image Naming
-- **Backend build context**: `./backend/` (cd into backend dir before building)
-- **Frontend build context**: `./frontend/` (cd into frontend dir before building)
-- **Image tags for testing**: `sovd-backend:prod-test` and `sovd-frontend:prod-test`
-- **Build commands**:
-  ```bash
-  cd backend && docker build -f Dockerfile.prod -t sovd-backend:prod-test .
-  cd frontend && docker build -f Dockerfile.prod -t sovd-frontend:prod-test .
-  ```
+   # Frontend: Check it serves on port 80
+   docker run -d -p 8080:80 sovd-frontend:prod
+   curl http://localhost:8080/health
+   # Should return: healthy
+   ```
 
-#### Tip 6: Uvicorn Production Configuration
-- **Production uvicorn command**:
-  - `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --http httptools`
-  - Remove `--reload` flag (only for development)
-  - Add `--workers 4` for parallel processing
-  - Use `--loop uvloop` for better async performance
-  - Use `--http httptools` for faster HTTP parsing
-  - Workers should be: (2 * CPU cores) + 1, defaulting to 4 for production
+4. If all tests pass, update the task status to `"done": true` in the tasks JSON file and report completion.
 
-#### Tip 7: Environment Variable Handling
-- **Backend**: Database URL, Redis URL, JWT secrets should come from environment variables (not hardcoded). The config.py module already handles this via pydantic-settings.
-- **Frontend**: API base URL is baked into the build at build time (not runtime). Vite uses `import.meta.env.VITE_API_BASE_URL`. For production, this should be `/api` (relative path, proxied by nginx).
+#### Option 2: Improve Existing Files (If Gaps Found)
+If you find any deficiencies during verification:
+1. Document the specific issues found
+2. Make targeted improvements to address only those issues
+3. Retest to confirm fixes
+4. Update task status when complete
 
-#### Warning 1: Nginx Proxy Configuration
-- The current nginx.conf has the API proxy section COMMENTED OUT. You MUST uncomment and properly configure it. The backend service in Kubernetes will be accessible at `http://backend:8000` (service name + port).
-- WebSocket connections for real-time responses (/ws/ endpoints) REQUIRE special headers:
-  ```nginx
-  location /ws/ {
-      proxy_pass http://backend:8000;
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade $http_upgrade;
-      proxy_set_header Connection "upgrade";
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-  }
-  ```
+#### Option 3: Question the Task Status (If Uncertain)
+If you're uncertain about the completion status:
+1. Ask the user to clarify whether the task needs to be done or just verified
+2. Provide your analysis of the existing files
+3. Wait for user confirmation before proceeding
 
-#### Warning 2: CSP Header Not Yet Configured
-- The nginx.conf includes basic security headers but does NOT include Content-Security-Policy (CSP). This is acceptable for I5.T1 scope, but note that CSP should be added in a future security hardening task.
-- Current security headers are sufficient: X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy.
+### Key Project Context
 
-#### Note 1: Image Size Validation
-- After building, verify image sizes with: `docker images | grep sovd`
-- Backend should be <500MB (expect ~350-450MB with Python + packages)
-- Frontend should be <50MB (expect ~25-35MB with Nginx Alpine + static files)
-- If backend exceeds 500MB, review what's being copied from builder stage (may be copying unnecessary files)
+**Backend Dependencies (requirements.txt):**
+- FastAPI, uvicorn[standard]
+- SQLAlchemy 2.0, alembic, asyncpg (PostgreSQL)
+- Redis, slowapi (rate limiting)
+- python-jose[cryptography] (JWT), passlib[bcrypt]
+- pydantic, pydantic-settings, jsonschema
+- structlog (logging)
+- prometheus-fastapi-instrumentator (metrics)
 
-#### Note 2: Testing Production Images Locally
-- You can test production images locally before pushing to ECR:
-  ```bash
-  # Backend
-  docker run -p 8000:8000 -e DATABASE_URL=... -e REDIS_URL=... -e JWT_SECRET=... sovd-backend:prod-test
+**Frontend Dependencies (package.json):**
+- React 18, react-router-dom
+- Material-UI (MUI)
+- TanStack React Query, axios
+- TypeScript, Vite
+- Testing: vitest, testing-library/react
 
-  # Frontend (standalone, no API proxy needed for basic test)
-  docker run -p 80:80 sovd-frontend:prod-test
+**Application Structure:**
+- **Backend:** FastAPI app at `app.main:app` with middleware: CORS, logging, rate limiting, security headers, error handling
+- **Frontend:** React SPA with Vite, client-side routing, API client with JWT auth
+- **APIs:** /api/v1/auth, /api/v1/vehicles, /api/v1/commands, /ws/responses, /health/live, /health/ready, /metrics
 
-  # Frontend with backend (use docker-compose with prod images)
-  ```
-- For local testing, create a temporary docker-compose.prod.yml that uses the production images with environment variables.
+### Docker Build Best Practices Applied
 
-#### Note 3: Build Caching and CI/CD Integration
-- Multi-stage builds enable Docker layer caching. In CI/CD (GitHub Actions), use `--cache-from` and `--cache-to` flags to speed up builds.
-- The CI/CD pipeline (I5.T3) will build these images, tag with commit SHA, and push to AWS ECR.
-- Ensure Dockerfiles are optimized for layer caching: copy requirements files BEFORE copying application code (so dependencies layer is cached).
+The existing Dockerfiles follow industry best practices:
 
----
+1. **Multi-stage builds:** Separate builder and runtime stages minimize final image size
+2. **Minimal base images:** `python:3.11-slim` and `nginx:alpine` for small footprint
+3. **Layer caching optimization:** COPY requirements/package.json first, then source code
+4. **No root execution:** Backend uses UID 1001 non-root user
+5. **No secrets in images:** All secrets loaded from environment at runtime
+6. **Health checks:** Both images include HEALTHCHECK directives
+7. **Production tuning:** Uvicorn with 4 workers, uvloop, httptools for backend; Nginx with gzip for frontend
+8. **Security hardening:** Minimal runtime dependencies, no dev tools, security headers in Nginx
 
-## 4. Step-by-Step Implementation Guide
+### Potential Issues to Watch For
 
-Based on the analysis above, here is the recommended implementation sequence:
+1. **Frontend Dockerfile build context:** Must be built from project root, not frontend/ directory
+   - Correct: `docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .`
+   - Wrong: `cd frontend && docker build -f Dockerfile.prod -t sovd-frontend:prod .`
 
-### Step 1: Create `backend/Dockerfile.prod`
-1. **Stage 1 (builder)**:
-   - Base: `FROM python:3.11-slim AS builder`
-   - Install build dependencies: gcc, python3-dev, libpq-dev
-   - Set WORKDIR /app
-   - Copy requirements.txt
-   - RUN pip install --user --no-cache-dir -r requirements.txt
-   - This installs packages to /root/.local
+2. **Backend image size:** With all dependencies, may approach 500MB limit. If it exceeds:
+   - Consider using `python:3.11-slim` (already done)
+   - Ensure \_\_pycache\_\_ and .pyc files excluded (already done in .dockerignore)
+   - Verify no unnecessary packages in requirements.txt
 
-2. **Stage 2 (runtime)**:
-   - Base: `FROM python:3.11-slim`
-   - Install runtime dependencies: libpq5, curl (for healthcheck)
-   - Create non-root user: `RUN useradd -m -u 1001 appuser`
-   - Set WORKDIR /app
-   - Copy installed packages from builder: `COPY --from=builder /root/.local /home/appuser/.local`
-   - Update PATH to include user packages
-   - Copy application code: `COPY --chown=appuser:appuser . /app`
-   - Switch user: `USER appuser`
-   - EXPOSE 8000
-   - HEALTHCHECK using curl on /health/ready
-   - CMD: `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4`
+3. **Nginx CSP header:** The existing nginx.conf has basic security headers but may need Content-Security-Policy (CSP) added if not already set by backend middleware
+   - Check if backend's security_headers_middleware.py sets CSP for API responses
+   - If not, consider adding to nginx.conf: `add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;`
 
-### Step 2: Create `backend/.dockerignore`
-- List all exclusions from Tip 3 above
-- Verify no sensitive files are accidentally included
+### Testing Checklist
 
-### Step 3: Create `frontend/Dockerfile.prod`
-1. **Stage 1 (builder)**:
-   - Base: `FROM node:20-alpine AS builder`
-   - Install build tools: python3, make, g++ (needed for some npm packages)
-   - Set WORKDIR /app
-   - Copy package*.json
-   - RUN npm ci --legacy-peer-deps (clean install)
-   - Copy source code: `COPY . .`
-   - RUN npm run build (outputs to ./dist)
+Before marking this task complete, verify:
 
-2. **Stage 2 (runtime)**:
-   - Base: `FROM nginx:alpine`
-   - Copy dist files: `COPY --from=builder /app/dist /usr/share/nginx/html`
-   - Copy nginx config: `COPY ../infrastructure/docker/nginx.conf /etc/nginx/conf.d/default.conf`
-   - USER nginx
-   - EXPOSE 80
-   - HEALTHCHECK using wget on /health
-   - CMD: `["nginx", "-g", "daemon off;"]`
+- [ ] Backend image builds without errors
+- [ ] Backend image size <500MB
+- [ ] Backend runs as non-root user (uid=1001)
+- [ ] Frontend image builds without errors
+- [ ] Frontend image size <50MB
+- [ ] Frontend serves on port 80
+- [ ] Nginx has gzip compression enabled
+- [ ] Nginx has security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection)
+- [ ] Nginx proxies /api/ to backend
+- [ ] Nginx proxies /ws/ with WebSocket upgrade headers
+- [ ] .dockerignore files exclude tests, node_modules, \_\_pycache\_\_
+- [ ] No build errors or warnings
 
-### Step 4: Create `frontend/.dockerignore`
-- List all exclusions from Tip 3 above
-- Critical: exclude node_modules and dist directories
+### Recommendation
 
-### Step 5: Update `infrastructure/docker/nginx.conf`
-- Uncomment the API proxy location block (lines 78-88)
-- Update proxy_pass to http://backend:8000
-- Add WebSocket location block for /ws/ paths with upgrade headers
-- Ensure all security headers are present
-- Verify gzip settings are enabled
-- Keep existing SPA routing and cache control settings
+**This task appears to be ALREADY COMPLETE.** All deliverables exist and meet the specified acceptance criteria.
 
-### Step 6: Build and Test Images Locally
-1. Build backend: `cd backend && docker build -f Dockerfile.prod -t sovd-backend:prod-test .`
-2. Verify backend image size: `docker images sovd-backend:prod-test` (should be <500MB)
-3. Build frontend: `cd frontend && docker build -f Dockerfile.prod -t sovd-frontend:prod-test .`
-4. Verify frontend image size: `docker images sovd-frontend:prod-test` (should be <50MB)
-5. Test backend runs: `docker run --rm -p 8000:8000 -e DATABASE_URL=... sovd-backend:prod-test` (should start without errors)
-6. Test frontend serves: `docker run --rm -p 80:80 sovd-frontend:prod-test` (nginx should start, health check passes)
-7. Verify health checks work
-8. Inspect running containers to confirm non-root user: `docker exec <container-id> whoami` (should return appuser for backend, nginx for frontend)
+**Your next action should be:**
+1. Run the verification tests listed above
+2. If all tests pass, mark the task as done
+3. Proceed to the next task (I5.T2: Create Helm Chart)
 
-### Step 7: Verify Acceptance Criteria
-- ✅ Backend build succeeds without errors
-- ✅ Backend image <500MB
-- ✅ Backend runs as non-root user (appuser, UID 1001)
-- ✅ Frontend build succeeds without errors
-- ✅ Frontend image <50MB
-- ✅ Frontend serves on port 80
-- ✅ Nginx has gzip compression enabled
-- ✅ Nginx has security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy)
-- ✅ Nginx has API reverse proxy configured (/api/ → backend:8000)
-- ✅ Nginx has WebSocket support (/ws/ with upgrade headers)
-- ✅ .dockerignore excludes tests, node_modules, __pycache__, coverage files
-- ✅ No build errors or warnings
-
----
-
-**End of Task Briefing Package**
-
-This briefing provides everything needed to implement production-optimized Docker images for the SOVD Command WebApp. Follow the step-by-step guide and refer to the codebase analysis for specific implementation details. Good luck!
+If any tests fail or gaps are found, address them specifically rather than recreating the entire solution.
