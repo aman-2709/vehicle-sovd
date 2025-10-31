@@ -184,3 +184,13 @@ serviceAccount:
 # RBAC
 rbac:
   create: true
+
+# External Secrets Operator - ENABLED FOR PRODUCTION
+# Syncs secrets from AWS Secrets Manager to Kubernetes Secrets
+externalSecrets:
+  enabled: true
+  secretStoreName: "aws-secrets-manager"
+  region: "us-east-1"
+  databaseSecretKey: "sovd/production/database"
+  jwtSecretKey: "sovd/production/jwt"
+  redisSecretKey: "sovd/production/redis"

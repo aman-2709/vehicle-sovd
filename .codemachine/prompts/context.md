@@ -10,27 +10,25 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T8",
+  "task_id": "I5.T9",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Establish production database migration strategy using Alembic. Create migration workflow: 1) Developers create migrations locally using `alembic revision --autogenerate`, 2) Review generated migration for correctness (manual verification), 3) Test migration on local database (`alembic upgrade head`, verify schema, `alembic downgrade -1`, verify rollback), 4) Commit migration file to version control, 5) CI pipeline runs migration in staging environment automatically, 6) Production migration runs as Kubernetes Job before application deployment (Helm pre-upgrade hook). Implement Kubernetes Job manifest `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`: runs Alembic upgrade command, uses same backend image, has access to database credentials from Secrets, runs as pre-upgrade hook (ensures migrations complete before new pods start). Create migration testing script `scripts/test_migration.sh`: applies migration, seeds test data, runs basic queries, rolls back. Document migration best practices in `docs/runbooks/database_migrations.md`: how to create migration, testing checklist, rollback procedures, handling migration conflicts.",
+  "description": "Integrate AWS Secrets Manager. Create secrets: sovd/database/credentials (JSON), sovd/redis/password, sovd/jwt/secret. Install External Secrets Operator. Create SecretStore (points to Secrets Manager, uses IRSA). Create ExternalSecret (maps Secrets Manager → K8s Secrets). Update backend deployment to use K8s Secrets for env vars. Configure IAM role for service account (secretsmanager:GetSecretValue). Create create_aws_secrets.sh script. Document in secrets_management.md.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.9 (Deployment - Database Scaling); Alembic documentation; Kubernetes Job patterns.",
+  "inputs": "Architecture Blueprint Section 3.8; External Secrets Operator docs.",
   "target_files": [
-    "infrastructure/helm/sovd-webapp/templates/migration-job.yaml",
-    "scripts/test_migration.sh",
-    "docs/runbooks/database_migrations.md",
-    ".github/workflows/ci-cd.yml"
+    "infrastructure/helm/sovd-webapp/templates/secretstore.yaml",
+    "infrastructure/helm/sovd-webapp/templates/externalsecret.yaml",
+    "infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml",
+    "scripts/create_aws_secrets.sh",
+    "docs/runbooks/secrets_management.md"
   ],
-  "input_files": [
-    "backend/alembic/env.py",
-    "backend/alembic.ini"
-  ],
-  "deliverables": "Kubernetes migration Job with Helm hook; migration testing script; documentation; CI integration.",
-  "acceptance_criteria": "`migration-job.yaml` defines Kubernetes Job with Alembic upgrade command; Job runs as Helm pre-upgrade hook (annotation: `\"helm.sh/hook\": pre-upgrade`); Job has access to database URL from Secret; Job uses `restartPolicy: OnFailure` and `backoffLimit: 3`; `test_migration.sh` applies latest migration, verifies schema, rolls back successfully; CI pipeline runs migration test in integration test stage; `database_migrations.md` includes: migration creation steps, testing checklist, rollback procedure, conflict resolution; Migration workflow documented: local development → staging → production; Helm upgrade in staging/production waits for migration Job to complete before deploying pods; Test migration Job in local Kubernetes cluster (minikube or kind) successfully",
+  "input_files": [],
+  "deliverables": "External Secrets integration; SecretStore/ExternalSecret; IAM role; secrets script; documentation.",
+  "acceptance_criteria": "External Secrets Operator installed; SecretStore created, points to AWS; ExternalSecret syncs to K8s Secrets; Backend pods use K8s Secrets for DATABASE_URL, REDIS_URL, JWT_SECRET; IAM role with GetSecretValue policy; create_aws_secrets.sh creates all secrets; Rotation: changing AWS secret updates K8s within 5min; secrets_management.md: setup, rotation, troubleshooting; No secrets in Git",
   "dependencies": [
-    "I1.T8",
-    "I5.T2"
+    "I5.T2",
+    "I5.T7"
   ],
   "parallelizable": true,
   "done": false
@@ -43,175 +41,103 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: deployment-strategy (from 05_Operational_Architecture.md)
+### Context: AWS Secrets Manager Integration (from infrastructure_setup.md)
 
-```markdown
-#### Deployment Strategy
+The infrastructure setup guide already documents the complete flow for creating AWS Secrets Manager secrets and configuring External Secrets Operator. Key points:
 
-**Production Environment (AWS EKS)**
+**AWS Secrets Created:**
+1. `sovd/production/database` - Contains JSON with DATABASE_URL
+2. `sovd/production/jwt` - Contains JSON with JWT_SECRET
+3. `sovd/production/redis` - Contains JSON with REDIS_URL
 
-**Orchestration:** Kubernetes (EKS)
-
-**Infrastructure as Code:** Terraform (or AWS CloudFormation)
-
-**Architecture:**
-- **Compute**: EKS cluster (3 worker nodes, t3.large, across 3 AZs)
-- **Database**: RDS for PostgreSQL (db.t3.medium, Multi-AZ)
-- **Cache**: ElastiCache for Redis (cache.t3.small, cluster mode)
-- **Load Balancer**: Application Load Balancer (ALB)
-- **Networking**: VPC with public and private subnets
-- **Storage**: EBS volumes for database; S3 for backups and logs
-- **Secrets**: AWS Secrets Manager
-- **DNS**: Route 53 for domain management
-- **TLS Certificates**: AWS Certificate Manager (ACM)
-
-**Kubernetes Resources:**
-- **Namespaces**: `production`, `staging`
-- **Deployments**:
-  - `frontend-deployment` (3 replicas)
-  - `backend-deployment` (3 replicas)
-  - `vehicle-connector-deployment` (2 replicas)
-- **Services**:
-  - `frontend-service` (ClusterIP, ALB Ingress)
-  - `backend-service` (ClusterIP)
-  - `vehicle-connector-service` (ClusterIP)
-- **Ingress**: ALB Ingress Controller for external access
-- **ConfigMaps**: Non-sensitive configuration
-- **Secrets**: Kubernetes Secrets (synced from AWS Secrets Manager via External Secrets Operator)
-
-**Helm Chart Structure:**
-```
-sovd-helm-chart/
-├── Chart.yaml
-├── values.yaml (defaults)
-├── values-production.yaml (overrides)
-├── templates/
-│   ├── frontend-deployment.yaml
-│   ├── backend-deployment.yaml
-│   ├── vehicle-connector-deployment.yaml
-│   ├── services.yaml
-│   ├── ingress.yaml
-│   ├── configmap.yaml
-│   └── secrets.yaml
-```
-
-**Deployment Command:**
+**External Secrets Operator Installation:**
 ```bash
-helm upgrade --install sovd-webapp ./sovd-helm-chart \
-  -f values-production.yaml \
-  -n production
+helm repo add external-secrets https://charts.external-secrets.io
+helm repo update
+
+helm install external-secrets \
+  external-secrets/external-secrets \
+  -n external-secrets-system \
+  --create-namespace \
+  --set installCRDs=true
 ```
 
-**CI/CD Pipeline (GitHub Actions)**
+**SecretStore Configuration:**
+- Uses IAM Roles for Service Accounts (IRSA)
+- Points to AWS Secrets Manager in us-east-1 region
+- Service account: `sovd-webapp-production-sa`
+- Namespace: `production`
 
-**Workflow Stages:**
+**ExternalSecret Configuration:**
+- Refresh interval: 1 hour
+- Maps AWS Secrets Manager keys to Kubernetes Secret keys
+- Creation policy: Owner
+- Target secret names defined per resource (database-secret, jwt-secret, redis-secret)
 
-1. **Lint & Format Check**
-   - Frontend: ESLint, Prettier
-   - Backend: Ruff, Black, mypy
+### Context: IAM Role Configuration (from iam/main.tf)
 
-2. **Unit Tests**
-   - Frontend: Vitest (coverage threshold 80%)
-   - Backend: pytest (coverage threshold 80%)
+The Terraform IAM module already creates the service account role with Secrets Manager permissions:
 
-3. **Build Docker Images**
-   - Build frontend and backend images
-   - Tag with commit SHA and `latest`
+**IAM Role:**
+- Name: `sovd-{environment}-service-account-role`
+- Trust policy: Allows OIDC provider (EKS) to assume role
+- Condition: Only service account `sovd-webapp-{environment}-sa` in namespace `{environment}`
 
-4. **Integration Tests**
-   - Spin up services with docker-compose
-   - Run API integration tests (pytest + httpx)
-   - Run E2E tests (Playwright)
+**Secrets Manager Policy:**
+- Policy name: `sovd-{environment}-secrets-manager-access`
+- Permissions: `secretsmanager:GetSecretValue`, `secretsmanager:DescribeSecret`
+- Resource scope: `arn:aws:secretsmanager:*:{account_id}:secret:sovd/{environment}/*`
 
-5. **Security Scans**
-   - `npm audit` (frontend dependencies)
-   - `pip-audit` (backend dependencies)
-   - Trivy (Docker image vulnerabilities)
+**IMPORTANT:** The IAM role is already created by Terraform (task I5.T7). You do NOT need to create it again.
 
-6. **Push Images**
-   - Push to AWS ECR (Elastic Container Registry)
+### Context: Helm Chart Structure (from values.yaml)
 
-7. **Deploy to Staging**
-   - Update Kubernetes deployment with new image
-   - Run smoke tests
+The Helm chart has placeholders for External Secrets integration:
 
-8. **Manual Approval Gate**
-   - Require approval for production deploy
-
-9. **Deploy to Production**
-   - Blue-green deployment strategy
-   - Gradual rollout (10%, 50%, 100%)
-   - Automatic rollback if error rate spikes
+**External Secrets Configuration (values.yaml):**
+```yaml
+externalSecrets:
+  enabled: false  # Default disabled
+  secretStoreName: "aws-secrets-manager"
+  databaseSecretKey: "sovd/production/database"
+  jwtSecretKey: "sovd/production/jwt"
+  redisSecretKey: "sovd/production/redis"
 ```
 
-### Context: database-schema-validation (from 03_Verification_and_Glossary.md)
+**Existing Secrets Template (secrets.yaml):**
+- Currently uses static base64 placeholders
+- Has conditional block for ExternalSecret (lines 29-60)
+- Already defines ExternalSecret spec with remoteRef mappings
+- Maps to secret keys: `database-password`, `jwt-secret`, `redis-password`
 
-```markdown
-#### Database Schema Validation
+### Context: Backend Deployment Environment Variables (from backend-deployment.yaml)
 
-**SQL DDL Scripts**
-*   **Validation**: Execute SQL script against clean PostgreSQL instance, verify no errors
-*   **Tool**: psql or pgAdmin
-*   **Execution**: `scripts/init_db.sh` runs DDL, reports errors
-*   **Acceptance**: All tables, indexes, constraints created successfully
+The backend deployment currently loads secrets from Kubernetes Secrets:
 
-**Alembic Migrations**
-*   **Validation**: Migration applies (`alembic upgrade head`) and rolls back (`alembic downgrade -1`) without errors
-*   **Execution**: CI pipeline runs migration tests in integration stage
-*   **Acceptance**: Schema after migration matches expected state, no data loss on rollback
+**Current Configuration:**
+- DATABASE_PASSWORD from secret key `database-password`
+- JWT_SECRET from secret key `jwt-secret`
+- REDIS_PASSWORD from secret key `redis-password` (optional)
+- DATABASE_URL and REDIS_URL are constructed using helpers with password injected
+
+**CRITICAL ISSUE:** The ExternalSecret in secrets.yaml maps AWS Secrets Manager properties to K8s secret keys, but the property names don't match the secret structure documented in infrastructure_setup.md.
+
+**Current mapping (secrets.yaml):**
+```yaml
+- secretKey: database-password
+  remoteRef:
+    key: sovd/production/database
+    property: password  # ❌ Should be DATABASE_URL or the password field from JSON
 ```
 
-### Context: continuous-deployment (from 03_Verification_and_Glossary.md)
-
-```markdown
-#### Continuous Deployment
-
-**Staging Environment**
-*   **Trigger**: Automatic on merge to develop branch
-*   **Target**: Kubernetes staging namespace
-*   **Database**: Shared staging RDS instance (separate from production)
-*   **Secrets**: AWS Secrets Manager staging secrets
-*   **Monitoring**: Prometheus/Grafana available for debugging
-
-**Production Environment**
-*   **Trigger**: Manual approval after merge to main branch
-*   **Target**: Kubernetes production namespace
-*   **Deployment Strategy**: Rolling update (zero-downtime) or canary (gradual rollout)
-*   **Database Migrations**: Automated via Kubernetes Job (Helm pre-upgrade hook)
-*   **Smoke Tests**: Automated health checks, sample API calls
-*   **Rollback**: Automatic on smoke test failure, manual via `helm rollback` if needed
-*   **Monitoring**: Real-time alerts on error rate, response time anomalies
+**Expected AWS Secret Structure (infrastructure_setup.md):**
+```json
+{
+  "DATABASE_URL": "postgresql://user:pass@host:port/db"
+}
 ```
 
-### Context: task-i5-t8 (from 02_Iteration_I5.md)
-
-```markdown
-*   **Task 5.8: Implement Database Migration Strategy for Production**
-    *   **Task ID:** `I5.T8`
-    *   **Description:** Establish production database migration strategy using Alembic. Create migration workflow: 1) Developers create migrations locally using `alembic revision --autogenerate`, 2) Review generated migration for correctness (manual verification), 3) Test migration on local database (`alembic upgrade head`, verify schema, `alembic downgrade -1`, verify rollback), 4) Commit migration file to version control, 5) CI pipeline runs migration in staging environment automatically, 6) Production migration runs as Kubernetes Job before application deployment (Helm pre-upgrade hook). Implement Kubernetes Job manifest `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`: runs Alembic upgrade command, uses same backend image, has access to database credentials from Secrets, runs as pre-upgrade hook (ensures migrations complete before new pods start). Create migration testing script `scripts/test_migration.sh`: applies migration, seeds test data, runs basic queries, rolls back. Document migration best practices in `docs/runbooks/database_migrations.md`: how to create migration, testing checklist, rollback procedures, handling migration conflicts.
-    *   **Agent Type Hint:** `BackendAgent` or `DatabaseAgent`
-    *   **Inputs:** Architecture Blueprint Section 3.9 (Deployment - Database Scaling); Alembic documentation; Kubernetes Job patterns.
-    *   **Input Files:** [`backend/alembic/env.py`, `backend/alembic.ini`]
-    *   **Target Files:**
-        *   `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`
-        *   `scripts/test_migration.sh`
-        *   `docs/runbooks/database_migrations.md`
-        *   Updates to `.github/workflows/ci-cd.yml` (add migration testing step)
-    *   **Deliverables:** Kubernetes migration Job with Helm hook; migration testing script; documentation; CI integration.
-    *   **Acceptance Criteria:**
-        *   `migration-job.yaml` defines Kubernetes Job with Alembic upgrade command
-        *   Job runs as Helm pre-upgrade hook (annotation: `"helm.sh/hook": pre-upgrade`)
-        *   Job has access to database URL from Secret
-        *   Job uses `restartPolicy: OnFailure` and `backoffLimit: 3`
-        *   `test_migration.sh` applies latest migration, verifies schema, rolls back successfully
-        *   CI pipeline runs migration test in integration test stage
-        *   `database_migrations.md` includes: migration creation steps, testing checklist, rollback procedure, conflict resolution
-        *   Migration workflow documented: local development → staging → production
-        *   Helm upgrade in staging/production waits for migration Job to complete before deploying pods
-        *   Test migration Job in local Kubernetes cluster (minikube or kind) successfully
-    *   **Dependencies:** `I1.T8` (Alembic setup), `I5.T2` (Helm chart)
-    *   **Parallelizable:** Yes (database operations independent of app features)
-```
+**You MUST align these structures.**
 
 ---
 
@@ -221,148 +147,255 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `backend/alembic/env.py`
-    *   **Summary:** This file configures Alembic to work with SQLAlchemy 2.0's async engine using asyncpg driver. It reads the DATABASE_URL from environment variables and supports both offline (SQL generation) and online (database execution) migration modes.
-    *   **Recommendation:** Your Kubernetes Job MUST set the `DATABASE_URL` environment variable in the exact same format that this file expects: `postgresql+asyncpg://user:pass@host:port/database`. The env.py file reads from `os.getenv("DATABASE_URL")` on line 40.
-    *   **Key Implementation Detail:** The env.py uses `asyncio.run(run_async_migrations())` for online migrations and `async_engine_from_config()` with `NullPool` to avoid connection pooling during migrations. Your Job will execute `alembic upgrade head` which will invoke this logic.
-
-*   **File:** `backend/alembic.ini`
-    *   **Summary:** Standard Alembic configuration with script location, logging, and post-write hooks for black and ruff formatting.
-    *   **Recommendation:** The Job MUST run with the working directory set to `/app` (the backend directory) so that Alembic can find this .ini file at the default location.
-    *   **Key Configuration:** `script_location = %(here)s/alembic` and `prepend_sys_path = .` mean Alembic expects to run from the backend root with the alembic/ directory present.
+*   **File:** `infrastructure/helm/sovd-webapp/templates/secrets.yaml`
+    *   **Summary:** This file already contains a partial ExternalSecret implementation (lines 29-60) that is conditionally enabled when `externalSecrets.enabled` is true.
+    *   **Recommendation:** You SHOULD update this existing file rather than creating a new `externalsecret.yaml`. The ExternalSecret is already defined here but needs corrections to the property mappings.
+    *   **Critical Issue:** The `property` fields in the remoteRef sections (lines 51, 55, 59) do not match the secret structure created by `infrastructure_setup.md`. Update them to match the JSON structure.
 
 *   **File:** `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml`
-    *   **Summary:** The main backend deployment template that defines how pods are deployed, including environment variables, secrets, and health checks.
-    *   **Recommendation:** Your migration Job MUST use the same database connection pattern. Notice lines 52-58 show how to inject DATABASE_PASSWORD from Secrets and construct DATABASE_URL using the helper function.
-    *   **Key Pattern to Reuse:**
-        ```yaml
-        - name: DATABASE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "sovd-webapp.fullname" . }}-secrets
-              key: database-password
-        - name: DATABASE_URL
-          value: {{ include "sovd-webapp.databaseUrl" . | quote }}
-        ```
-    *   **CRITICAL:** The backend image is referenced using `{{ include "sovd-webapp.backend.image" . }}` helper function. You MUST use the same image for the migration Job.
-
-*   **File:** `infrastructure/helm/sovd-webapp/templates/_helpers.tpl`
-    *   **Summary:** Contains Helm template helper functions for generating names, labels, and configuration values.
-    *   **Recommendation:** You MUST use these helpers in your migration-job.yaml:
-        - `{{ include "sovd-webapp.fullname" . }}-migration` for the Job name
-        - `{{ include "sovd-webapp.backend.image" . }}` for the container image
-        - `{{ include "sovd-webapp.databaseUrl" . }}` for constructing the DATABASE_URL
-        - `{{ include "sovd-webapp.labels" . }}` for standard labels
-    *   **Critical Helper Functions:**
-        - Line 54-58: `sovd-webapp.backend.labels` - Use this for consistent labeling
-        - The databaseUrl helper: `postgresql+asyncpg://%s:$(DATABASE_PASSWORD)@%s:%s/%s` with values from .Values.config.database
-
-*   **File:** `backend/alembic/versions/001_initial_schema.py`
-    *   **Summary:** The initial database migration that creates all tables, indexes, and constraints.
-    *   **Recommendation:** Your test script (`test_migration.sh`) can verify this migration by checking that tables exist after upgrade and are removed after downgrade.
-    *   **Testing Strategy:** Use `psql` commands to query `information_schema.tables` to verify the migration worked.
+    *   **Summary:** This file defines the backend Deployment and already references secrets from Kubernetes Secrets (lines 52-76).
+    *   **Recommendation:** You MUST modify this file to simplify environment variable loading. Instead of constructing DATABASE_URL and REDIS_URL using helpers and password injection, load them directly from the K8s Secret as complete URLs (since ExternalSecret will sync complete URLs from AWS Secrets Manager).
+    *   **Current Pattern (lines 52-69):** Loads `DATABASE_PASSWORD` from secret, then constructs URL using helper. This is overly complex when ExternalSecret can provide the complete URL.
+    *   **New Pattern:** Load `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` directly from secret keys without URL construction.
 
 *   **File:** `infrastructure/helm/sovd-webapp/values.yaml`
-    *   **Summary:** Default Helm values including database configuration, resource limits, and deployment settings.
-    *   **Recommendation:** The database configuration is in `.Values.config.database` with fields: host, port, name, user. Your Job template should use these same values.
-    *   **Resource Requirements:** Notice backend pods request `memory: 256Mi, cpu: 250m`. Your migration Job should use similar or slightly lower resources since it's a one-time task.
+    *   **Summary:** Contains the `externalSecrets` configuration block (lines 370-378) with default values.
+    *   **Recommendation:** You SHOULD create a `values-production.yaml` file that sets `externalSecrets.enabled: true` and configures the secret keys for production environment. Do NOT modify the default values.yaml for this.
 
-*   **File:** `backend/Dockerfile.prod`
-    *   **Summary:** Multi-stage production Dockerfile that builds a minimal Python 3.11 image with non-root user execution.
-    *   **Recommendation:** Your migration Job will use this same image. The working directory in the image is `/app`, and the non-root user is `appuser` (UID 1001).
-    *   **CRITICAL:** The Job must run as the same user (runAsUser: 1001) and have the PYTHONPATH set to /app. The image already has all dependencies including Alembic installed.
+*   **File:** `infrastructure/terraform/modules/iam/main.tf`
+    *   **Summary:** Defines the IAM role and Secrets Manager policy for IRSA. This is already provisioned by task I5.T7.
+    *   **Recommendation:** You MUST reference the existing IAM role ARN (output from Terraform) in the ServiceAccount annotation. DO NOT create a new IAM role. The role ARN should be: `arn:aws:iam::{account_id}:role/sovd-{environment}-service-account-role`.
 
-*   **File:** `.github/workflows/ci-cd.yml`
-    *   **Summary:** Existing CI/CD pipeline with jobs for linting, testing, building, and deployment.
-    *   **Recommendation:** You need to add a new job or step to run migration tests. Based on the existing structure, add it in the integration test section (after unit tests, before E2E tests).
-    *   **Existing Pattern:** Jobs use `working-directory: ./backend` and run commands like `pytest`. You should add a step that runs `bash scripts/test_migration.sh` in a similar pattern.
+*   **File:** `docs/runbooks/infrastructure_setup.md`
+    *   **Summary:** Comprehensive guide for infrastructure provisioning, including detailed steps for creating AWS secrets and installing External Secrets Operator.
+    *   **Recommendation:** You SHOULD reference this guide when writing `secrets_management.md`. Many procedures are already documented here. Your new runbook should focus specifically on secrets management operations (creation, rotation, troubleshooting) without duplicating infrastructure setup content.
 
-*   **File:** `infrastructure/helm/sovd-webapp/templates/secrets.yaml`
-    *   **Summary:** Defines how secrets are managed, with support for both static values and External Secrets Operator.
-    *   **Recommendation:** Your Job MUST reference the same secret name: `{{ include "sovd-webapp.fullname" . }}-secrets` and the same key `database-password`.
-    *   **Note:** The file shows the pattern for future External Secrets integration (lines 29-60), but for now, your Job will use the basic Kubernetes Secret approach (lines 1-28).
+*   **File:** `backend/app/config.py`
+    *   **Summary:** Pydantic Settings class that loads configuration from environment variables. It expects `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` as environment variables.
+    *   **Recommendation:** Your ExternalSecret configuration MUST populate these exact environment variable names. The backend code expects these specific names and will not work with different variable names.
+
+*   **File:** `infrastructure/helm/sovd-webapp/templates/_helpers.tpl`
+    *   **Summary:** Contains Helm helper functions for generating database URLs and other configuration.
+    *   **Recommendation:** The `sovd-webapp.databaseUrl` helper is currently used to construct DATABASE_URL from components. When using ExternalSecret, you will NO LONGER need this helper for DATABASE_URL construction. However, keep the helper for backwards compatibility with non-ExternalSecret deployments.
 
 ### Implementation Tips & Notes
 
-*   **Tip:** Kubernetes Jobs with Helm pre-upgrade hooks MUST include these specific annotations:
-    ```yaml
-    annotations:
-      "helm.sh/hook": pre-upgrade
-      "helm.sh/hook-weight": "-5"
-      "helm.sh/hook-delete-policy": before-hook-creation
-    ```
-    The `hook-weight` ensures the migration runs before other pre-upgrade hooks, and `hook-delete-policy` ensures old Job pods are cleaned up.
+*   **Tip:** The `secretstore.yaml` template does NOT currently exist. You MUST create it from scratch. However, there is a detailed example in `infrastructure_setup.md` (lines 465-537) that you can use as a reference.
 
-*   **Tip:** The migration Job should use `restartPolicy: OnFailure` and `backoffLimit: 3` as specified in acceptance criteria. This allows retries for transient database connection failures but eventually fails the deployment if the migration truly cannot succeed.
+*   **Tip:** The ExternalSecret already exists in `secrets.yaml` but is incomplete. Focus on fixing the `property` mappings in the `remoteRef` sections to match the actual AWS secret structure.
 
-*   **Tip:** Your `test_migration.sh` script should:
-    1. Set `DATABASE_URL` environment variable (read from env or use default localhost)
-    2. Run `alembic upgrade head`
-    3. Use `psql` to verify tables exist (query `pg_tables` or count tables)
-    4. Run `alembic downgrade -1`
-    5. Verify tables are removed (for the initial migration, all should be gone after downgrade base)
-    6. Exit with non-zero code if any step fails
+*   **Note:** The AWS Secrets Manager secrets store JSON objects, but the secret keys in Kubernetes need to be extracted from specific JSON properties. Use the `property` field in ExternalSecret to extract the correct field.
 
-*   **Warning:** Alembic requires write access to the alembic/versions/ directory to create new migrations, but the migration Job only needs READ access since it's just running existing migrations. However, the production Docker image uses `readOnlyRootFilesystem: false` in the backend-deployment.yaml (line 81), so this shouldn't be an issue.
+*   **Warning:** The current ExternalSecret configuration maps all secrets to a single Kubernetes Secret (`{{ include "sovd-webapp.fullname" . }}-secrets`). This means you cannot have separate ExternalSecret resources for database, JWT, and Redis secrets - they all must merge into one K8s Secret. This is correct and matches the backend deployment expectations.
 
-*   **Note:** The CI pipeline integration should run the migration test in the existing "Backend Integration Tests" job or create a new "Migration Tests" job that runs between unit tests and E2E tests. It should use the same docker-compose setup that's likely used for integration tests.
+*   **Critical:** When creating `create_aws_secrets.sh`, you MUST follow the exact secret structure documented in `infrastructure_setup.md` (lines 438-458). The script should:
+  - Create `sovd/{environment}/database` with JSON: `{"DATABASE_URL": "postgresql://..."}`
+  - Create `sovd/{environment}/jwt` with JSON: `{"JWT_SECRET": "..."}`
+  - Create `sovd/{environment}/redis` with JSON: `{"REDIS_URL": "redis://..."}`
 
-*   **Note:** For the runbook documentation (`database_migrations.md`), structure it with these sections:
-    1. **Overview** - Brief description of the migration strategy
-    2. **Creating Migrations** - Step-by-step guide using `alembic revision --autogenerate`
-    3. **Testing Migrations Locally** - Using `test_migration.sh` and manual verification
-    4. **Testing in Staging** - How CI automatically tests migrations
-    5. **Production Deployment** - How Helm pre-upgrade hook works
-    6. **Rollback Procedures** - Using `alembic downgrade` and `helm rollback`
-    7. **Troubleshooting** - Common issues (connection failures, migration conflicts, data migration errors)
-    8. **Migration Conflicts** - How to resolve when multiple developers create migrations simultaneously
+*   **Best Practice:** The `create_aws_secrets.sh` script should:
+  1. Accept environment as a parameter (production, staging)
+  2. Read credentials from Terraform outputs where possible
+  3. Generate secure random values for JWT_SECRET
+  4. Include error handling for existing secrets
+  5. Provide clear output messages
 
-*   **Critical Security Note:** Never commit the actual DATABASE_URL with credentials to Git. The Job template should construct it from Secret values, and the test script should read from environment variables with safe defaults for local testing.
+*   **Security:** Ensure the script uses `--force-overwrite-replica-secret` flag when updating existing secrets to handle rotation scenarios.
 
-*   **Compatibility Note:** The Alembic env.py uses SQLAlchemy 2.0 async patterns with `asyncio.run()`. Make sure your documentation mentions that all migrations must be compatible with async SQLAlchemy and that developers should test both upgrade and downgrade paths.
+*   **Testing Approach:** Document in `secrets_management.md` how to verify the ExternalSecret sync:
+  ```bash
+  kubectl get externalsecrets -n production
+  kubectl describe externalsecret {name} -n production
+  kubectl get secret {name} -n production -o yaml
+  ```
 
-*   **Performance Note:** Database migrations can take time, especially with large datasets. The Helm hook mechanism will wait for the Job to complete before proceeding with the deployment. Consider adding a `activeDeadlineSeconds: 600` (10 minutes) to the Job spec to prevent hanging indefinitely if a migration gets stuck.
+*   **Secret Rotation:** The ExternalSecret refreshInterval is set to 1 hour. Document that secret rotation requires updating the AWS Secrets Manager secret, then waiting up to 1 hour for automatic sync (or forcing sync by deleting the K8s Secret).
 
-*   **Tip:** For the CI integration, add a step in the existing "backend-integration" job (or create a new "migration-test" job). The step should:
-    1. Start docker-compose services (db and redis)
-    2. Wait for database to be ready
-    3. Run `scripts/test_migration.sh`
-    4. Capture exit code and fail the job if migration test fails
-    5. Stop docker-compose services
+*   **Namespace Considerations:** The SecretStore and ExternalSecret must be created in the same namespace as the application (`production`). The ServiceAccount annotation for IRSA must match the namespace in the IAM role trust policy.
 
-*   **Best Practice:** The migration Job should have appropriate resource limits to prevent runaway migrations from consuming all cluster resources:
-    ```yaml
-    resources:
-      requests:
-        memory: "128Mi"
-        cpu: "100m"
-      limits:
-        memory: "256Mi"
-        cpu: "250m"
-    ```
+### Secret Structure Alignment - CRITICAL
 
-*   **Best Practice:** Include detailed logging in the migration Job by setting environment variable `PYTHONUNBUFFERED=1` to ensure Python output is not buffered and appears in real-time in `kubectl logs`.
+**You MUST ensure these structures align:**
+
+**AWS Secrets Manager (created by script):**
+```json
+// sovd/production/database
+{
+  "DATABASE_URL": "postgresql://sovd_admin:password@rds-endpoint:5432/sovd_production"
+}
+
+// sovd/production/jwt
+{
+  "JWT_SECRET": "generated-random-secret"
+}
+
+// sovd/production/redis
+{
+  "REDIS_URL": "redis://redis-endpoint:6379"
+}
+```
+
+**ExternalSecret mapping (in secrets.yaml):**
+```yaml
+data:
+  - secretKey: database-url  # Maps to DATABASE_URL env var
+    remoteRef:
+      key: sovd/production/database
+      property: DATABASE_URL  # Extract DATABASE_URL from JSON
+
+  - secretKey: jwt-secret  # Maps to JWT_SECRET env var
+    remoteRef:
+      key: sovd/production/jwt
+      property: JWT_SECRET
+
+  - secretKey: redis-url  # Maps to REDIS_URL env var
+    remoteRef:
+      key: sovd/production/redis
+      property: REDIS_URL
+```
+
+**Backend deployment usage (MUST UPDATE):**
+```yaml
+env:
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: sovd-webapp-secrets
+        key: database-url
+
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: sovd-webapp-secrets
+        key: jwt-secret
+
+  - name: REDIS_URL
+    valueFrom:
+      secretKeyRef:
+        name: sovd-webapp-secrets
+        key: redis-url
+```
+
+**CRITICAL:** You MUST update backend-deployment.yaml to use the new secret keys (`database-url`, `jwt-secret`, `redis-url`) instead of the old pattern (loading `database-password` and constructing URL with helper). The ExternalSecret provides complete URLs, not individual password components.
+
+### Documentation Structure for secrets_management.md
+
+Your documentation should include:
+
+1. **Overview** - Purpose of secrets management with AWS Secrets Manager
+2. **Architecture** - Diagram/explanation of External Secrets Operator flow
+3. **Prerequisites** - Terraform outputs, AWS CLI, kubectl, helm
+4. **Initial Setup** - Installing External Secrets Operator (reference infrastructure_setup.md)
+5. **Creating Secrets** - Using create_aws_secrets.sh script
+6. **Configuring External Secrets** - SecretStore and ExternalSecret setup
+7. **Verification** - How to verify secrets are syncing correctly
+8. **Secret Rotation** - How to rotate secrets and force sync
+9. **Troubleshooting** - Common issues (IRSA permissions, sync failures, etc.)
+10. **Security Best Practices** - Least privilege, audit logging, encryption
+
+### Files You Should NOT Modify
+
+- `infrastructure/terraform/modules/iam/main.tf` - IAM role already exists (from I5.T7)
+- `backend/app/config.py` - Already expects correct environment variables
+- `infrastructure/helm/sovd-webapp/values.yaml` - Only create values-production.yaml overlay
+- `infrastructure/helm/sovd-webapp/templates/_helpers.tpl` - Keep database URL helper for backwards compatibility
+
+### Files You MUST Create
+
+1. `infrastructure/helm/sovd-webapp/templates/secretstore.yaml` - New file
+2. `scripts/create_aws_secrets.sh` - New file
+3. `docs/runbooks/secrets_management.md` - New file
+4. `infrastructure/helm/sovd-webapp/values-production.yaml` - New file (enable externalSecrets)
+
+### Files You MUST Modify
+
+1. `infrastructure/helm/sovd-webapp/templates/secrets.yaml` - Fix ExternalSecret property mappings (lines 47-59)
+2. `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml` - Update env vars to load complete URLs from secrets (lines 51-80)
 
 ---
 
-## Final Recommendations for the Coder Agent
+## Strategic Execution Plan
 
-1. **Start with migration-job.yaml:** This is the core deliverable. Model it closely after backend-deployment.yaml but as a Job resource instead of Deployment.
+**Phase 1: Create SecretStore Template**
+- Create new file `templates/secretstore.yaml`
+- Use IRSA authentication with service account reference
+- Set AWS region to us-east-1
+- Conditionally enable based on `externalSecrets.enabled` flag
 
-2. **Use Helm helpers consistently:** Don't hardcode values - use the existing helper functions for names, images, and URLs.
+**Phase 2: Fix ExternalSecret Configuration**
+- Update `templates/secrets.yaml` ExternalSecret block (lines 29-60)
+- Correct property mappings to match AWS secret JSON structure
+- Change secret keys to: `database-url`, `jwt-secret`, `redis-url`
+- Ensure target secret name matches backend deployment expectations
+- Set 1 hour refresh interval
 
-3. **Test locally first:** Before relying on Kubernetes, create the test_migration.sh script and verify it works with docker-compose locally.
+**Phase 3: Update Backend Deployment**
+- Modify `backend-deployment.yaml` environment variable section (lines 51-80)
+- Remove DATABASE_PASSWORD loading and URL construction
+- Add direct loading of DATABASE_URL, REDIS_URL from secret keys
+- Keep JWT_SECRET loading pattern (already correct)
+- Remove dependency on databaseUrl and redisUrl helpers
 
-4. **Documentation is critical:** The database_migrations.md runbook will be the primary reference for developers. Make it detailed, clear, and include examples.
+**Phase 4: Create AWS Secrets Script**
+- Write `scripts/create_aws_secrets.sh`
+- Accept environment parameter (production/staging)
+- Extract RDS/Redis endpoints from Terraform outputs
+- Generate secure random JWT secret (openssl rand -base64 32)
+- Create all three AWS Secrets Manager secrets with correct JSON structure
+- Include error handling and --force-overwrite-replica-secret for updates
+- Provide clear output messages
 
-5. **CI integration last:** Add the CI step after you've verified the test script works locally. This ensures the CI job won't fail unnecessarily.
+**Phase 5: Create Production Values Override**
+- Create `values-production.yaml`
+- Enable External Secrets (`externalSecrets.enabled: true`)
+- Configure correct secret keys for production
+- Set service account annotation with IAM role ARN placeholder (to be filled from Terraform output)
+- Override other production-specific values if needed
 
-6. **Consider edge cases:** What happens if a migration fails halfway? What if the database is locked? Document these scenarios in the troubleshooting section.
+**Phase 6: Documentation**
+- Create comprehensive `secrets_management.md` runbook
+- Include setup, verification, rotation, and troubleshooting procedures
+- Reference infrastructure_setup.md where appropriate
+- Add security best practices section
+- Include examples of verifying ExternalSecret sync
 
-7. **Version compatibility:** Ensure the migration strategy works with the existing Alembic setup (I1.T8) and doesn't require changes to env.py or alembic.ini.
+---
 
-8. **Security first:** Never expose database credentials. Always use Secret references and environment variable substitution.
+## Validation Checklist
 
-9. **Idempotency:** Alembic migrations are naturally idempotent (running `alembic upgrade head` multiple times is safe), but document this behavior.
+Before marking the task complete, verify:
 
-10. **Testing the Job:** The acceptance criteria require testing in local Kubernetes (minikube/kind). Include a section in the runbook explaining how to test the Helm hook locally before deploying to staging/production.
+- [ ] `helm template` command renders SecretStore and ExternalSecret without errors
+- [ ] SecretStore points to AWS Secrets Manager with correct region (us-east-1)
+- [ ] ExternalSecret property mappings match AWS secret JSON structure exactly
+- [ ] Backend deployment loads DATABASE_URL, REDIS_URL, JWT_SECRET directly from secrets
+- [ ] No URL construction helpers used for database/redis (simplified approach)
+- [ ] `create_aws_secrets.sh` creates all three secrets with correct JSON structure
+- [ ] Script accepts environment parameter and reads from Terraform outputs
+- [ ] Script generates secure random JWT_SECRET
+- [ ] Documentation includes all required sections (10 sections listed above)
+- [ ] No secrets are hardcoded in Git (all use placeholders or references)
+- [ ] ServiceAccount annotation includes correct IAM role ARN reference pattern
+- [ ] values-production.yaml enables externalSecrets and configures properly
+- [ ] All acceptance criteria from task specification are met
+
+---
+
+## Additional Context: ServiceAccount Configuration
+
+**IMPORTANT:** The ServiceAccount for the backend deployment MUST have the IRSA annotation to assume the IAM role:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sovd-webapp-production-sa
+  namespace: production
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/sovd-production-service-account-role
+```
+
+This annotation is what allows the SecretStore to authenticate to AWS Secrets Manager using IRSA. Verify that:
+1. The ServiceAccount is created by Helm (check `_helpers.tpl` for serviceAccountName reference)
+2. The annotation is added in values-production.yaml under `serviceAccount.annotations`
+3. The IAM role ARN matches the Terraform output from task I5.T7
