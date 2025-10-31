@@ -1,0 +1,51 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your actual values
+# DO NOT commit terraform.tfvars to version control
+
+# AWS Configuration
+aws_region  = "us-east-1"
+environment = "production" # or "staging"
+
+# VPC Configuration
+vpc_cidr             = "10.0.0.0/16"
+availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.11.0/24", "10.0.12.0/24"]
+
+# NAT Gateway Configuration
+# Production: Use 3 NAT Gateways (one per AZ) for high availability
+# Staging: Use 1 NAT Gateway to save costs (~$35/month vs ~$100/month)
+enable_nat_gateway = true
+single_nat_gateway = false # Set to true for staging
+
+# RDS Configuration
+rds_instance_class          = "db.t3.large"   # Production: db.t3.large, Staging: db.t3.medium
+rds_allocated_storage       = 100             # Initial storage in GB
+rds_max_allocated_storage   = 500             # Max storage for autoscaling
+rds_database_name           = "sovd_production" # or "sovd_staging"
+rds_master_username         = "sovd_admin"
+rds_backup_retention_period = 7               # Production: 7 days, Staging: 1 day
+rds_multi_az                = true            # Production: true, Staging: false
+rds_deletion_protection     = true            # Production: true, Staging: false
+
+# ElastiCache Configuration
+elasticache_node_type         = "cache.t3.medium" # Production: cache.t3.medium, Staging: cache.t3.small
+elasticache_num_cache_nodes   = 1                 # Set to 2+ for automatic failover
+elasticache_automatic_failover = false            # Requires num_cache_nodes >= 2
+
+# EKS Configuration
+eks_cluster_version    = "1.28"
+eks_node_instance_type = "t3.large"   # Production: t3.large, Staging: t3.medium
+eks_node_desired_size  = 3
+eks_node_min_size      = 3
+eks_node_max_size      = 6            # Production: 6, Staging: 4
+
+# Example Staging Configuration (cost-optimized)
+# environment            = "staging"
+# single_nat_gateway     = true
+# rds_instance_class     = "db.t3.medium"
+# rds_multi_az           = false
+# rds_backup_retention_period = 1
+# rds_deletion_protection = false
+# elasticache_node_type  = "cache.t3.small"
+# eks_node_instance_type = "t3.medium"
