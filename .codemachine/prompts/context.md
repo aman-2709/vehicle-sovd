@@ -10,25 +10,28 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T7",
+  "task_id": "I5.T8",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Create infrastructure provisioning scripts. Option 1 (Terraform - preferred): modules for VPC, EKS, RDS, ElastiCache, ALB, Route53, S3, IAM. Option 2: CloudFormation or AWS CLI scripts. Document in infrastructure_setup.md: prerequisites, provisioning steps, verification, teardown, cost estimates ($500-800/month). Optional for MVP; can use existing cluster.",
+  "description": "Establish production database migration strategy using Alembic. Create migration workflow: 1) Developers create migrations locally using `alembic revision --autogenerate`, 2) Review generated migration for correctness (manual verification), 3) Test migration on local database (`alembic upgrade head`, verify schema, `alembic downgrade -1`, verify rollback), 4) Commit migration file to version control, 5) CI pipeline runs migration in staging environment automatically, 6) Production migration runs as Kubernetes Job before application deployment (Helm pre-upgrade hook). Implement Kubernetes Job manifest `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`: runs Alembic upgrade command, uses same backend image, has access to database credentials from Secrets, runs as pre-upgrade hook (ensures migrations complete before new pods start). Create migration testing script `scripts/test_migration.sh`: applies migration, seeds test data, runs basic queries, rolls back. Document migration best practices in `docs/runbooks/database_migrations.md`: how to create migration, testing checklist, rollback procedures, handling migration conflicts.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.9, 3.8.",
+  "inputs": "Architecture Blueprint Section 3.9 (Deployment - Database Scaling); Alembic documentation; Kubernetes Job patterns.",
   "target_files": [
-    "infrastructure/terraform/main.tf",
-    "infrastructure/terraform/variables.tf",
-    "infrastructure/terraform/outputs.tf",
-    "infrastructure/terraform/modules/vpc/main.tf",
-    "infrastructure/terraform/modules/eks/main.tf",
-    "infrastructure/terraform/modules/rds/main.tf",
-    "docs/runbooks/infrastructure_setup.md"
+    "infrastructure/helm/sovd-webapp/templates/migration-job.yaml",
+    "scripts/test_migration.sh",
+    "docs/runbooks/database_migrations.md",
+    ".github/workflows/ci-cd.yml"
   ],
-  "input_files": [],
-  "deliverables": "Infrastructure as Code; provisioning documentation; cost estimates.",
-  "acceptance_criteria": "If Terraform: plan shows all resources; apply provisions VPC (3 public+3 private subnets, AZs), EKS (3 nodes, t3.large), RDS Multi-AZ, ElastiCache, ALB (HTTPS); infrastructure_setup.md: prerequisites, steps, verification, teardown; Cost ~$500-800/month documented; Alternative: manual setup steps detailed",
-  "dependencies": ["I5.T2"],
+  "input_files": [
+    "backend/alembic/env.py",
+    "backend/alembic.ini"
+  ],
+  "deliverables": "Kubernetes migration Job with Helm hook; migration testing script; documentation; CI integration.",
+  "acceptance_criteria": "`migration-job.yaml` defines Kubernetes Job with Alembic upgrade command; Job runs as Helm pre-upgrade hook (annotation: `\"helm.sh/hook\": pre-upgrade`); Job has access to database URL from Secret; Job uses `restartPolicy: OnFailure` and `backoffLimit: 3`; `test_migration.sh` applies latest migration, verifies schema, rolls back successfully; CI pipeline runs migration test in integration test stage; `database_migrations.md` includes: migration creation steps, testing checklist, rollback procedure, conflict resolution; Migration workflow documented: local development → staging → production; Helm upgrade in staging/production waits for migration Job to complete before deploying pods; Test migration Job in local Kubernetes cluster (minikube or kind) successfully",
+  "dependencies": [
+    "I1.T8",
+    "I5.T2"
+  ],
   "parallelizable": true,
   "done": false
 }
@@ -40,127 +43,174 @@ This is the full specification of the task you must complete.
 
 The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Deployment Architecture (from docs/runbooks/deployment.md)
+### Context: deployment-strategy (from 05_Operational_Architecture.md)
 
 ```markdown
-## Production Deployment
+#### Deployment Strategy
 
-Production deployment uses Kubernetes (AWS EKS) with Helm charts.
+**Production Environment (AWS EKS)**
 
-### Prerequisites
-- AWS CLI configured: `aws configure`
-- kubectl configured for staging cluster: `aws eks update-kubeconfig --region us-east-1 --name sovd-staging-cluster`
-- Helm 3 installed
-- Docker images pushed to ECR
+**Orchestration:** Kubernetes (EKS)
 
-Key Infrastructure Components:
-- **AWS EKS Cluster**: Kubernetes cluster named `sovd-production-cluster` in `us-east-1`
-- **ECR**: Docker image registry for backend and frontend images
-- **RDS**: PostgreSQL database (Multi-AZ for production)
-  - Production endpoint: `sovd-production.c9akciq32.us-east-1.rds.amazonaws.com`
-  - Database name: `sovd_production`
-  - User: `sovd_admin`
-- **ElastiCache**: Redis cache
-  - Production endpoint: `sovd-production.abc123.ng.0001.use1.cache.amazonaws.com`
-- **AWS ALB**: Application Load Balancer via Ingress Controller
-  - TLS termination with ACM certificate
-- **AWS Secrets Manager**: For database credentials, JWT secrets, Redis passwords
-- **External Secrets Operator**: Syncs secrets from AWS to Kubernetes
+**Infrastructure as Code:** Terraform (or AWS CloudFormation)
 
-Production Configuration:
-- Backend replicas: 5
-- Frontend replicas: 3
-- HPA: Backend scales from 5 to 20 pods based on 70% CPU
-- Instance types: t3.large worker nodes
-- Multi-AZ deployment for high availability
+**Architecture:**
+- **Compute**: EKS cluster (3 worker nodes, t3.large, across 3 AZs)
+- **Database**: RDS for PostgreSQL (db.t3.medium, Multi-AZ)
+- **Cache**: ElastiCache for Redis (cache.t3.small, cluster mode)
+- **Load Balancer**: Application Load Balancer (ALB)
+- **Networking**: VPC with public and private subnets
+- **Storage**: EBS volumes for database; S3 for backups and logs
+- **Secrets**: AWS Secrets Manager
+- **DNS**: Route 53 for domain management
+- **TLS Certificates**: AWS Certificate Manager (ACM)
+
+**Kubernetes Resources:**
+- **Namespaces**: `production`, `staging`
+- **Deployments**:
+  - `frontend-deployment` (3 replicas)
+  - `backend-deployment` (3 replicas)
+  - `vehicle-connector-deployment` (2 replicas)
+- **Services**:
+  - `frontend-service` (ClusterIP, ALB Ingress)
+  - `backend-service` (ClusterIP)
+  - `vehicle-connector-service` (ClusterIP)
+- **Ingress**: ALB Ingress Controller for external access
+- **ConfigMaps**: Non-sensitive configuration
+- **Secrets**: Kubernetes Secrets (synced from AWS Secrets Manager via External Secrets Operator)
+
+**Helm Chart Structure:**
+```
+sovd-helm-chart/
+├── Chart.yaml
+├── values.yaml (defaults)
+├── values-production.yaml (overrides)
+├── templates/
+│   ├── frontend-deployment.yaml
+│   ├── backend-deployment.yaml
+│   ├── vehicle-connector-deployment.yaml
+│   ├── services.yaml
+│   ├── ingress.yaml
+│   ├── configmap.yaml
+│   └── secrets.yaml
 ```
 
-### Context: Production Helm Values (from infrastructure/helm/sovd-webapp/values-production.yaml)
-
-```yaml
-global:
-  namespace: production
-  domain: sovd.production.com
-
-backend:
-  replicaCount: 5
-  image:
-    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/sovd-backend
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
-
-config:
-  database:
-    host: "sovd-production.c9akciq32.us-east-1.rds.amazonaws.com"
-    port: "5432"
-    name: "sovd_production"
-    user: "sovd_admin"
-
-  redis:
-    host: "sovd-production.abc123.ng.0001.use1.cache.amazonaws.com"
-    port: "6379"
-
-ingress:
-  enabled: true
-  className: "alb"
-  annotations:
-    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:123456789012:certificate/your-cert-id"
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-
-serviceAccount:
-  create: true
-  annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/sovd-webapp-production"
-  name: "sovd-webapp-production-sa"
+**Deployment Command:**
+```bash
+helm upgrade --install sovd-webapp ./sovd-helm-chart \
+  -f values-production.yaml \
+  -n production
 ```
 
-### Context: Application Configuration (from backend/app/config.py)
+**CI/CD Pipeline (GitHub Actions)**
 
-```python
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+**Workflow Stages:**
 
-    # Database configuration
-    DATABASE_URL: str
+1. **Lint & Format Check**
+   - Frontend: ESLint, Prettier
+   - Backend: Ruff, Black, mypy
 
-    # Redis configuration
-    REDIS_URL: str
+2. **Unit Tests**
+   - Frontend: Vitest (coverage threshold 80%)
+   - Backend: pytest (coverage threshold 80%)
 
-    # JWT authentication configuration
-    JWT_SECRET: str
-    JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRATION_MINUTES: int = 15
+3. **Build Docker Images**
+   - Build frontend and backend images
+   - Tag with commit SHA and `latest`
 
-    # gRPC vehicle communication configuration
-    VEHICLE_ENDPOINT_URL: str = "localhost:50051"
-    VEHICLE_USE_TLS: bool = False
-    VEHICLE_GRPC_TIMEOUT: int = 30
+4. **Integration Tests**
+   - Spin up services with docker-compose
+   - Run API integration tests (pytest + httpx)
+   - Run E2E tests (Playwright)
+
+5. **Security Scans**
+   - `npm audit` (frontend dependencies)
+   - `pip-audit` (backend dependencies)
+   - Trivy (Docker image vulnerabilities)
+
+6. **Push Images**
+   - Push to AWS ECR (Elastic Container Registry)
+
+7. **Deploy to Staging**
+   - Update Kubernetes deployment with new image
+   - Run smoke tests
+
+8. **Manual Approval Gate**
+   - Require approval for production deploy
+
+9. **Deploy to Production**
+   - Blue-green deployment strategy
+   - Gradual rollout (10%, 50%, 100%)
+   - Automatic rollback if error rate spikes
 ```
 
-### Context: Project Technology Stack (from README.md)
+### Context: database-schema-validation (from 03_Verification_and_Glossary.md)
 
 ```markdown
-## Technology Stack
+#### Database Schema Validation
 
-### Infrastructure
-- **Database:** PostgreSQL 15+
-- **Cache/Messaging:** Redis 7
-- **Vehicle Communication:** gRPC (primary), WebSocket (fallback)
-- **API Gateway:** Nginx (production)
-- **Containerization:** Docker, Docker Compose (local), Kubernetes/Helm (production)
-- **CI/CD:** GitHub Actions
-- **Monitoring:** Prometheus + Grafana, structlog
-- **Tracing:** OpenTelemetry + Jaeger
+**SQL DDL Scripts**
+*   **Validation**: Execute SQL script against clean PostgreSQL instance, verify no errors
+*   **Tool**: psql or pgAdmin
+*   **Execution**: `scripts/init_db.sh` runs DDL, reports errors
+*   **Acceptance**: All tables, indexes, constraints created successfully
 
-### Cloud Platform
-- **Primary:** AWS (EKS, RDS, ElastiCache, ALB, Route53, S3, Secrets Manager)
-- **Region:** us-east-1
-- **Multi-AZ:** Production deployments use 3 Availability Zones
+**Alembic Migrations**
+*   **Validation**: Migration applies (`alembic upgrade head`) and rolls back (`alembic downgrade -1`) without errors
+*   **Execution**: CI pipeline runs migration tests in integration stage
+*   **Acceptance**: Schema after migration matches expected state, no data loss on rollback
+```
+
+### Context: continuous-deployment (from 03_Verification_and_Glossary.md)
+
+```markdown
+#### Continuous Deployment
+
+**Staging Environment**
+*   **Trigger**: Automatic on merge to develop branch
+*   **Target**: Kubernetes staging namespace
+*   **Database**: Shared staging RDS instance (separate from production)
+*   **Secrets**: AWS Secrets Manager staging secrets
+*   **Monitoring**: Prometheus/Grafana available for debugging
+
+**Production Environment**
+*   **Trigger**: Manual approval after merge to main branch
+*   **Target**: Kubernetes production namespace
+*   **Deployment Strategy**: Rolling update (zero-downtime) or canary (gradual rollout)
+*   **Database Migrations**: Automated via Kubernetes Job (Helm pre-upgrade hook)
+*   **Smoke Tests**: Automated health checks, sample API calls
+*   **Rollback**: Automatic on smoke test failure, manual via `helm rollback` if needed
+*   **Monitoring**: Real-time alerts on error rate, response time anomalies
+```
+
+### Context: task-i5-t8 (from 02_Iteration_I5.md)
+
+```markdown
+*   **Task 5.8: Implement Database Migration Strategy for Production**
+    *   **Task ID:** `I5.T8`
+    *   **Description:** Establish production database migration strategy using Alembic. Create migration workflow: 1) Developers create migrations locally using `alembic revision --autogenerate`, 2) Review generated migration for correctness (manual verification), 3) Test migration on local database (`alembic upgrade head`, verify schema, `alembic downgrade -1`, verify rollback), 4) Commit migration file to version control, 5) CI pipeline runs migration in staging environment automatically, 6) Production migration runs as Kubernetes Job before application deployment (Helm pre-upgrade hook). Implement Kubernetes Job manifest `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`: runs Alembic upgrade command, uses same backend image, has access to database credentials from Secrets, runs as pre-upgrade hook (ensures migrations complete before new pods start). Create migration testing script `scripts/test_migration.sh`: applies migration, seeds test data, runs basic queries, rolls back. Document migration best practices in `docs/runbooks/database_migrations.md`: how to create migration, testing checklist, rollback procedures, handling migration conflicts.
+    *   **Agent Type Hint:** `BackendAgent` or `DatabaseAgent`
+    *   **Inputs:** Architecture Blueprint Section 3.9 (Deployment - Database Scaling); Alembic documentation; Kubernetes Job patterns.
+    *   **Input Files:** [`backend/alembic/env.py`, `backend/alembic.ini`]
+    *   **Target Files:**
+        *   `infrastructure/helm/sovd-webapp/templates/migration-job.yaml`
+        *   `scripts/test_migration.sh`
+        *   `docs/runbooks/database_migrations.md`
+        *   Updates to `.github/workflows/ci-cd.yml` (add migration testing step)
+    *   **Deliverables:** Kubernetes migration Job with Helm hook; migration testing script; documentation; CI integration.
+    *   **Acceptance Criteria:**
+        *   `migration-job.yaml` defines Kubernetes Job with Alembic upgrade command
+        *   Job runs as Helm pre-upgrade hook (annotation: `"helm.sh/hook": pre-upgrade`)
+        *   Job has access to database URL from Secret
+        *   Job uses `restartPolicy: OnFailure` and `backoffLimit: 3`
+        *   `test_migration.sh` applies latest migration, verifies schema, rolls back successfully
+        *   CI pipeline runs migration test in integration test stage
+        *   `database_migrations.md` includes: migration creation steps, testing checklist, rollback procedure, conflict resolution
+        *   Migration workflow documented: local development → staging → production
+        *   Helm upgrade in staging/production waits for migration Job to complete before deploying pods
+        *   Test migration Job in local Kubernetes cluster (minikube or kind) successfully
+    *   **Dependencies:** `I1.T8` (Alembic setup), `I5.T2` (Helm chart)
+    *   **Parallelizable:** Yes (database operations independent of app features)
 ```
 
 ---
@@ -171,195 +221,148 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **Directory:** `infrastructure/terraform/`
-    *   **Summary:** This directory currently exists but is **empty**. You will be creating all Terraform infrastructure code from scratch.
-    *   **Recommendation:** You MUST create a modular Terraform structure with separate modules for each major AWS service (VPC, EKS, RDS, ElastiCache, etc.).
+*   **File:** `backend/alembic/env.py`
+    *   **Summary:** This file configures Alembic to work with SQLAlchemy 2.0's async engine using asyncpg driver. It reads the DATABASE_URL from environment variables and supports both offline (SQL generation) and online (database execution) migration modes.
+    *   **Recommendation:** Your Kubernetes Job MUST set the `DATABASE_URL` environment variable in the exact same format that this file expects: `postgresql+asyncpg://user:pass@host:port/database`. The env.py file reads from `os.getenv("DATABASE_URL")` on line 40.
+    *   **Key Implementation Detail:** The env.py uses `asyncio.run(run_async_migrations())` for online migrations and `async_engine_from_config()` with `NullPool` to avoid connection pooling during migrations. Your Job will execute `alembic upgrade head` which will invoke this logic.
 
-*   **Directory:** `infrastructure/helm/sovd-webapp/`
-    *   **Summary:** Complete Helm chart already exists with deployments, services, ingress, HPA, and ConfigMaps/Secrets.
-    *   **Files Present:**
-        - `Chart.yaml` - Helm chart metadata
-        - `values.yaml` - Default values for local/dev
-        - `values-production.yaml` - Production-specific overrides with real AWS resource references
-        - `templates/backend-deployment.yaml` - Backend deployment with 5 replicas in production
-        - `templates/frontend-deployment.yaml` - Frontend deployment with 3 replicas
-        - `templates/ingress.yaml` - AWS ALB Ingress configuration with TLS
-        - `templates/hpa.yaml` - Horizontal Pod Autoscaler (5-20 backend pods, 3-8 frontend pods)
-        - `templates/configmap.yaml` - Non-sensitive configuration
-        - `templates/secrets.yaml` - Secrets (should use External Secrets Operator in production)
-    *   **Recommendation:** Your Terraform code MUST provision infrastructure that matches the expectations in `values-production.yaml`. Key mappings:
-        - RDS endpoint → `config.database.host` value
-        - ElastiCache endpoint → `config.redis.host` value
-        - ACM certificate ARN → `ingress.annotations.alb.ingress.kubernetes.io/certificate-arn`
-        - IAM role ARN → `serviceAccount.annotations.eks.amazonaws.com/role-arn`
+*   **File:** `backend/alembic.ini`
+    *   **Summary:** Standard Alembic configuration with script location, logging, and post-write hooks for black and ruff formatting.
+    *   **Recommendation:** The Job MUST run with the working directory set to `/app` (the backend directory) so that Alembic can find this .ini file at the default location.
+    *   **Key Configuration:** `script_location = %(here)s/alembic` and `prepend_sys_path = .` mean Alembic expects to run from the backend root with the alembic/ directory present.
 
-*   **File:** `docs/runbooks/deployment.md`
-    *   **Summary:** Comprehensive deployment runbook documenting local, staging, and production deployment procedures. Contains specific AWS resource references.
-    *   **Key Information Extracted:**
-        - Cluster naming: `sovd-staging-cluster`, `sovd-production-cluster`
-        - ECR repository naming: `sovd-backend`, `sovd-frontend`
-        - AWS region: `us-east-1`
-        - Database configuration: PostgreSQL, Multi-AZ, database name `sovd_production`
-        - ElastiCache configuration: Redis 7
-        - Secrets in AWS Secrets Manager: `sovd/production/database`, `sovd/production/jwt`, `sovd/production/redis`
-    *   **Recommendation:** Your infrastructure_setup.md documentation SHOULD reference and be consistent with the deployment runbook. The Terraform outputs should generate values that can be directly copied into the Helm values file.
+*   **File:** `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml`
+    *   **Summary:** The main backend deployment template that defines how pods are deployed, including environment variables, secrets, and health checks.
+    *   **Recommendation:** Your migration Job MUST use the same database connection pattern. Notice lines 52-58 show how to inject DATABASE_PASSWORD from Secrets and construct DATABASE_URL using the helper function.
+    *   **Key Pattern to Reuse:**
+        ```yaml
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-secrets
+              key: database-password
+        - name: DATABASE_URL
+          value: {{ include "sovd-webapp.databaseUrl" . | quote }}
+        ```
+    *   **CRITICAL:** The backend image is referenced using `{{ include "sovd-webapp.backend.image" . }}` helper function. You MUST use the same image for the migration Job.
 
-*   **File:** `backend/app/config.py`
-    *   **Summary:** Application configuration showing all required environment variables and connection settings.
-    *   **Recommendation:** Your Terraform RDS module MUST output a connection string in the format expected by `DATABASE_URL` (PostgreSQL connection string). Similarly, ElastiCache must output Redis URL format expected by `REDIS_URL`.
+*   **File:** `infrastructure/helm/sovd-webapp/templates/_helpers.tpl`
+    *   **Summary:** Contains Helm template helper functions for generating names, labels, and configuration values.
+    *   **Recommendation:** You MUST use these helpers in your migration-job.yaml:
+        - `{{ include "sovd-webapp.fullname" . }}-migration` for the Job name
+        - `{{ include "sovd-webapp.backend.image" . }}` for the container image
+        - `{{ include "sovd-webapp.databaseUrl" . }}` for constructing the DATABASE_URL
+        - `{{ include "sovd-webapp.labels" . }}` for standard labels
+    *   **Critical Helper Functions:**
+        - Line 54-58: `sovd-webapp.backend.labels` - Use this for consistent labeling
+        - The databaseUrl helper: `postgresql+asyncpg://%s:$(DATABASE_PASSWORD)@%s:%s/%s` with values from .Values.config.database
 
-*   **File:** `infrastructure/helm/sovd-webapp/README.md`
-    *   **Summary:** Helm chart documentation with detailed installation, upgrade, and troubleshooting guidance.
-    *   **Key Requirements:**
-        - ECR image pull secrets required
-        - External Secrets Operator integration for production secrets
-        - AWS ALB Ingress Controller must be installed
-        - Metrics server required for HPA
-    *   **Recommendation:** Your Terraform EKS module SHOULD provision the cluster with necessary add-ons (AWS ALB Ingress Controller, External Secrets Operator, Metrics Server) OR document manual installation steps in infrastructure_setup.md.
+*   **File:** `backend/alembic/versions/001_initial_schema.py`
+    *   **Summary:** The initial database migration that creates all tables, indexes, and constraints.
+    *   **Recommendation:** Your test script (`test_migration.sh`) can verify this migration by checking that tables exist after upgrade and are removed after downgrade.
+    *   **Testing Strategy:** Use `psql` commands to query `information_schema.tables` to verify the migration worked.
+
+*   **File:** `infrastructure/helm/sovd-webapp/values.yaml`
+    *   **Summary:** Default Helm values including database configuration, resource limits, and deployment settings.
+    *   **Recommendation:** The database configuration is in `.Values.config.database` with fields: host, port, name, user. Your Job template should use these same values.
+    *   **Resource Requirements:** Notice backend pods request `memory: 256Mi, cpu: 250m`. Your migration Job should use similar or slightly lower resources since it's a one-time task.
+
+*   **File:** `backend/Dockerfile.prod`
+    *   **Summary:** Multi-stage production Dockerfile that builds a minimal Python 3.11 image with non-root user execution.
+    *   **Recommendation:** Your migration Job will use this same image. The working directory in the image is `/app`, and the non-root user is `appuser` (UID 1001).
+    *   **CRITICAL:** The Job must run as the same user (runAsUser: 1001) and have the PYTHONPATH set to /app. The image already has all dependencies including Alembic installed.
+
+*   **File:** `.github/workflows/ci-cd.yml`
+    *   **Summary:** Existing CI/CD pipeline with jobs for linting, testing, building, and deployment.
+    *   **Recommendation:** You need to add a new job or step to run migration tests. Based on the existing structure, add it in the integration test section (after unit tests, before E2E tests).
+    *   **Existing Pattern:** Jobs use `working-directory: ./backend` and run commands like `pytest`. You should add a step that runs `bash scripts/test_migration.sh` in a similar pattern.
+
+*   **File:** `infrastructure/helm/sovd-webapp/templates/secrets.yaml`
+    *   **Summary:** Defines how secrets are managed, with support for both static values and External Secrets Operator.
+    *   **Recommendation:** Your Job MUST reference the same secret name: `{{ include "sovd-webapp.fullname" . }}-secrets` and the same key `database-password`.
+    *   **Note:** The file shows the pattern for future External Secrets integration (lines 29-60), but for now, your Job will use the basic Kubernetes Secret approach (lines 1-28).
 
 ### Implementation Tips & Notes
 
-*   **Tip:** The task description marks this as **"Optional for MVP; can use existing cluster"**. This means you have two valid approaches:
-    1. **Full Terraform (Preferred):** Create complete Terraform modules for all infrastructure from scratch
-    2. **Hybrid/Documentation:** Document how to use an existing EKS cluster and only provision RDS, ElastiCache, and supporting resources with Terraform
+*   **Tip:** Kubernetes Jobs with Helm pre-upgrade hooks MUST include these specific annotations:
+    ```yaml
+    annotations:
+      "helm.sh/hook": pre-upgrade
+      "helm.sh/hook-weight": "-5"
+      "helm.sh/hook-delete-policy": before-hook-creation
+    ```
+    The `hook-weight` ensures the migration runs before other pre-upgrade hooks, and `hook-delete-policy` ensures old Job pods are cleaned up.
 
-    **Recommendation:** I suggest the hybrid approach as more practical for this task, focusing Terraform on stateful resources (RDS, ElastiCache, S3, Secrets Manager) and documenting EKS cluster prerequisites.
+*   **Tip:** The migration Job should use `restartPolicy: OnFailure` and `backoffLimit: 3` as specified in acceptance criteria. This allows retries for transient database connection failures but eventually fails the deployment if the migration truly cannot succeed.
 
-*   **Note:** The `values-production.yaml` file contains **placeholder AWS account IDs** (`123456789012`). Your Terraform code should use variables for the AWS account ID and output the real ARNs/endpoints that need to be updated in this file.
+*   **Tip:** Your `test_migration.sh` script should:
+    1. Set `DATABASE_URL` environment variable (read from env or use default localhost)
+    2. Run `alembic upgrade head`
+    3. Use `psql` to verify tables exist (query `pg_tables` or count tables)
+    4. Run `alembic downgrade -1`
+    5. Verify tables are removed (for the initial migration, all should be gone after downgrade base)
+    6. Exit with non-zero code if any step fails
 
-*   **Warning:** Cost estimation is a **critical acceptance criterion**. You MUST document estimated monthly costs for:
-    - EKS cluster (control plane: ~$75/month, 3x t3.large workers: ~$270/month)
-    - RDS Multi-AZ PostgreSQL (db.t3.large or similar: ~$200/month)
-    - ElastiCache Redis (cache.t3.medium: ~$80/month)
-    - ALB (~$25/month + data transfer)
-    - Total: $500-800/month range as specified
+*   **Warning:** Alembic requires write access to the alembic/versions/ directory to create new migrations, but the migration Job only needs READ access since it's just running existing migrations. However, the production Docker image uses `readOnlyRootFilesystem: false` in the backend-deployment.yaml (line 81), so this shouldn't be an issue.
 
-*   **Tip:** The existing Helm chart expects **External Secrets Operator** for production secrets management. Your infrastructure_setup.md SHOULD include:
-    1. How to install External Secrets Operator on the cluster
-    2. How to create secrets in AWS Secrets Manager (naming: `sovd/production/database`, etc.)
-    3. How to configure SecretStore and ExternalSecret resources
+*   **Note:** The CI pipeline integration should run the migration test in the existing "Backend Integration Tests" job or create a new "Migration Tests" job that runs between unit tests and E2E tests. It should use the same docker-compose setup that's likely used for integration tests.
 
-*   **Note:** The deployment runbook references **ECR repositories** for Docker images. Your Terraform SHOULD create:
-    - ECR repository: `sovd-backend`
-    - ECR repository: `sovd-frontend`
-    - ECR lifecycle policies (retain last 10 images, auto-delete untagged)
+*   **Note:** For the runbook documentation (`database_migrations.md`), structure it with these sections:
+    1. **Overview** - Brief description of the migration strategy
+    2. **Creating Migrations** - Step-by-step guide using `alembic revision --autogenerate`
+    3. **Testing Migrations Locally** - Using `test_migration.sh` and manual verification
+    4. **Testing in Staging** - How CI automatically tests migrations
+    5. **Production Deployment** - How Helm pre-upgrade hook works
+    6. **Rollback Procedures** - Using `alembic downgrade` and `helm rollback`
+    7. **Troubleshooting** - Common issues (connection failures, migration conflicts, data migration errors)
+    8. **Migration Conflicts** - How to resolve when multiple developers create migrations simultaneously
 
-*   **Warning:** The Helm chart configures **IRSA (IAM Roles for Service Accounts)** via the annotation `eks.amazonaws.com/role-arn`. Your Terraform MUST:
-    1. Create an IAM role for the service account
-    2. Attach policies for Secrets Manager read access
-    3. Configure the OIDC provider trust relationship
-    4. Output the role ARN for use in Helm values
+*   **Critical Security Note:** Never commit the actual DATABASE_URL with credentials to Git. The Job template should construct it from Secret values, and the test script should read from environment variables with safe defaults for local testing.
 
-*   **Tip:** For the **VPC module**, the acceptance criteria specify "3 public+3 private subnets, AZs". The standard AWS best practice is:
-    - 3 Availability Zones (us-east-1a, us-east-1b, us-east-1c)
-    - 3 public subnets (one per AZ) for ALB and NAT gateways
-    - 3 private subnets (one per AZ) for EKS worker nodes, RDS, ElastiCache
-    - NAT Gateway in each public subnet (or single NAT for cost savings)
-    - Internet Gateway for public subnet routing
-    - VPC CIDR: 10.0.0.0/16 (or similar RFC1918 range)
+*   **Compatibility Note:** The Alembic env.py uses SQLAlchemy 2.0 async patterns with `asyncio.run()`. Make sure your documentation mentions that all migrations must be compatible with async SQLAlchemy and that developers should test both upgrade and downgrade paths.
 
-*   **Tip:** For the **RDS module**, key configurations:
-    - Engine: PostgreSQL 15.x
-    - Instance class: db.t3.large (or db.t3.medium for staging)
-    - Multi-AZ: `true` for production
-    - Storage: 100GB gp3, autoscaling enabled
-    - Backup retention: 7 days production, 1 day staging
-    - Database name: `sovd_production` (or parameterized)
-    - Master username: `sovd_admin` (or parameterized)
-    - Master password: Store in Secrets Manager, reference in RDS config
-    - Security group: Allow ingress from EKS worker node security group on port 5432
+*   **Performance Note:** Database migrations can take time, especially with large datasets. The Helm hook mechanism will wait for the Job to complete before proceeding with the deployment. Consider adding a `activeDeadlineSeconds: 600` (10 minutes) to the Job spec to prevent hanging indefinitely if a migration gets stuck.
 
-*   **Tip:** For the **ElastiCache module**, key configurations:
-    - Engine: Redis 7.x
-    - Node type: cache.t3.medium (or cache.t3.small for staging)
-    - Number of cache nodes: 1 (or 2 with read replica for production)
-    - Automatic failover: Enable for production
-    - Security group: Allow ingress from EKS worker nodes on port 6379
+*   **Tip:** For the CI integration, add a step in the existing "backend-integration" job (or create a new "migration-test" job). The step should:
+    1. Start docker-compose services (db and redis)
+    2. Wait for database to be ready
+    3. Run `scripts/test_migration.sh`
+    4. Capture exit code and fail the job if migration test fails
+    5. Stop docker-compose services
 
-*   **Note:** The project includes **Prometheus and Grafana** for monitoring (already in docker-compose.yml for local dev). For production on EKS, you SHOULD document in infrastructure_setup.md how to:
-    - Deploy Prometheus via Helm (kube-prometheus-stack)
-    - Configure ServiceMonitor for backend `/metrics` endpoint
-    - Deploy Grafana dashboards (existing dashboards in `infrastructure/docker/grafana/`)
+*   **Best Practice:** The migration Job should have appropriate resource limits to prevent runaway migrations from consuming all cluster resources:
+    ```yaml
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "250m"
+    ```
 
-*   **Critical:** The **infrastructure_setup.md** document is a key deliverable. It MUST include:
-    1. **Prerequisites:** AWS CLI, Terraform 1.5+, kubectl, Helm 3, AWS account, permissions required
-    2. **Initial Setup:** Clone repo, configure AWS credentials, update variables.tf
-    3. **Provisioning Steps:**
-        - `terraform init`
-        - `terraform plan` (review output)
-        - `terraform apply` (confirm and wait ~20 minutes)
-        - Capture outputs (RDS endpoint, ElastiCache endpoint, ECR URLs, IAM role ARN)
-    4. **Post-Provisioning:**
-        - Update Helm `values-production.yaml` with Terraform outputs
-        - Install External Secrets Operator
-        - Create secrets in AWS Secrets Manager
-        - Deploy Helm chart
-    5. **Verification:**
-        - Check all resources in AWS Console
-        - Verify kubectl can access cluster
-        - Test database connectivity
-        - Test Redis connectivity
-    6. **Teardown:**
-        - `helm uninstall` first
-        - `terraform destroy` (confirm, takes ~15 minutes)
-        - Verify all resources deleted in AWS Console
-    7. **Cost Estimates:** Breakdown by service, monthly totals for staging and production
-
-*   **Best Practice:** Use Terraform **workspaces** or separate state files for staging vs production environments. Document this in infrastructure_setup.md.
-
-*   **Best Practice:** Include a **terraform.tfvars.example** file with all required variables and example values (but DO NOT commit real credentials).
-
-### Acceptance Criteria Checklist
-
-Based on the task acceptance criteria, ensure your implementation includes:
-
-- [ ] **Terraform main.tf** with provider configuration, backend (S3 + DynamoDB for state locking), and module invocations
-- [ ] **Terraform variables.tf** with all configurable parameters (region, environment, instance types, etc.)
-- [ ] **Terraform outputs.tf** with all critical outputs (VPC ID, subnet IDs, RDS endpoint, ElastiCache endpoint, EKS cluster name, ECR repository URLs, IAM role ARN)
-- [ ] **VPC Module** (infrastructure/terraform/modules/vpc/main.tf): 3 public + 3 private subnets across 3 AZs
-- [ ] **EKS Module** (infrastructure/terraform/modules/eks/main.tf): Cluster with 3 t3.large worker nodes, OIDC provider, node IAM role
-- [ ] **RDS Module** (infrastructure/terraform/modules/rds/main.tf): PostgreSQL 15, Multi-AZ, security group, subnet group
-- [ ] **ElastiCache Module** (infrastructure/terraform/modules/elasticache/main.tf or similar): Redis 7, subnet group, security group
-- [ ] **ALB Module or Documented** (can be created by Ingress Controller, document this)
-- [ ] **Route53 Module or Documented** (optional, document manual DNS setup as alternative)
-- [ ] **S3 Module** (for Terraform state backend, logs, or backups)
-- [ ] **IAM Module** (service account role, policies for Secrets Manager, ECR, etc.)
-- [ ] **Infrastructure Setup Documentation** (docs/runbooks/infrastructure_setup.md) with all 7 sections listed above
-- [ ] **Cost Estimates** documented: $500-800/month total, breakdown by service
-
-### Alternative Approach (If Full Terraform is Too Complex)
-
-If full Terraform modules are overly complex for this iteration, the task description allows for:
-> "Alternative: manual setup steps detailed"
-
-In this case, you COULD:
-1. Create **simplified Terraform** for core stateful resources (RDS, ElastiCache only)
-2. Document **manual AWS Console steps** for EKS cluster creation in infrastructure_setup.md
-3. Use **eksctl** (AWS EKS CLI tool) for cluster creation and document the commands
-4. Focus on making the documentation **extremely detailed and reproducible**
-
-This approach still satisfies the acceptance criteria by providing "manual setup steps detailed" as an alternative.
+*   **Best Practice:** Include detailed logging in the migration Job by setting environment variable `PYTHONUNBUFFERED=1` to ensure Python output is not buffered and appears in real-time in `kubectl logs`.
 
 ---
 
 ## Final Recommendations for the Coder Agent
 
-1. **Start with the documentation:** Create `docs/runbooks/infrastructure_setup.md` first with the full structure, then fill in details as you create Terraform modules.
+1. **Start with migration-job.yaml:** This is the core deliverable. Model it closely after backend-deployment.yaml but as a Job resource instead of Deployment.
 
-2. **Use modular Terraform:** Each AWS service should be a separate module under `infrastructure/terraform/modules/`. This makes the code reusable and testable.
+2. **Use Helm helpers consistently:** Don't hardcode values - use the existing helper functions for names, images, and URLs.
 
-3. **Output everything:** Your `outputs.tf` should output every value needed in the Helm `values-production.yaml` file. Make it easy to copy-paste.
+3. **Test locally first:** Before relying on Kubernetes, create the test_migration.sh script and verify it works with docker-compose locally.
 
-4. **Cost calculator:** Use the [AWS Pricing Calculator](https://calculator.aws) to generate detailed cost estimates for the documentation.
+4. **Documentation is critical:** The database_migrations.md runbook will be the primary reference for developers. Make it detailed, clear, and include examples.
 
-5. **Test plan:** Include `terraform plan` output examples in the documentation showing what resources will be created.
+5. **CI integration last:** Add the CI step after you've verified the test script works locally. This ensures the CI job won't fail unnecessarily.
 
-6. **Security:** Never hardcode secrets. Use AWS Secrets Manager references and Terraform data sources where possible.
+6. **Consider edge cases:** What happens if a migration fails halfway? What if the database is locked? Document these scenarios in the troubleshooting section.
 
-7. **State management:** Configure S3 backend for Terraform state with DynamoDB locking in `main.tf`.
+7. **Version compatibility:** Ensure the migration strategy works with the existing Alembic setup (I1.T8) and doesn't require changes to env.py or alembic.ini.
 
-8. **Tagging strategy:** Tag ALL resources with `Environment`, `Application`, `ManagedBy` tags for cost tracking and resource management.
+8. **Security first:** Never expose database credentials. Always use Secret references and environment variable substitution.
 
-9. **Dependencies:** The task depends on I5.T2 (Helm chart creation), which is done. Ensure your infrastructure matches what the Helm chart expects.
+9. **Idempotency:** Alembic migrations are naturally idempotent (running `alembic upgrade head` multiple times is safe), but document this behavior.
 
-10. **Optional vs Required:** Since the task is marked "Optional for MVP", prioritize creating excellent documentation that allows both automated (Terraform) AND manual approaches. This gives users flexibility.
+10. **Testing the Job:** The acceptance criteria require testing in local Kubernetes (minikube/kind). Include a section in the runbook explaining how to test the Helm hook locally before deploying to staging/production.

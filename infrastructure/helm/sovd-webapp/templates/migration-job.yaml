@@ -1,0 +1,115 @@
+{{- if .Values.backend.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sovd-webapp.fullname" . }}-migration
+  labels:
+    {{- include "sovd-webapp.backend.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    # Helm hooks to run this Job before deployment
+    "helm.sh/hook": pre-upgrade,pre-install
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # Number of times to retry the Job if it fails
+  backoffLimit: 3
+  # Maximum time for the Job to complete (10 minutes)
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "sovd-webapp.backend.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+      annotations:
+        # Force recreation on every Helm upgrade to ensure latest migrations run
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+    spec:
+      # Restart policy for failed Jobs
+      restartPolicy: OnFailure
+      {{- with .Values.backend.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sovd-webapp.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      containers:
+      - name: alembic-migration
+        securityContext:
+          {{- toYaml .Values.backend.securityContext | nindent 12 }}
+        image: {{ include "sovd-webapp.backend.image" . }}
+        imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+        # Run Alembic upgrade command
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Starting database migration..."
+            echo "Database host: {{ .Values.config.database.host }}"
+            echo "Database name: {{ .Values.config.database.name }}"
+
+            # Change to backend directory where alembic.ini is located
+            cd /app
+
+            # Run Alembic upgrade
+            echo "Running: alembic upgrade head"
+            alembic upgrade head
+
+            MIGRATION_EXIT_CODE=$?
+
+            if [ $MIGRATION_EXIT_CODE -eq 0 ]; then
+              echo "✓ Database migration completed successfully"
+
+              # Show current migration version
+              echo "Current migration revision:"
+              alembic current
+
+              exit 0
+            else
+              echo "✗ Database migration failed with exit code $MIGRATION_EXIT_CODE"
+              exit $MIGRATION_EXIT_CODE
+            fi
+        env:
+        # Database configuration
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-secrets
+              key: database-password
+        - name: DATABASE_URL
+          value: {{ include "sovd-webapp.databaseUrl" . | quote }}
+
+        # Python configuration
+        - name: PYTHONUNBUFFERED
+          value: "1"
+
+        # Application configuration (for logging)
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-config
+              key: LOG_LEVEL
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-config
+              key: ENVIRONMENT
+
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
