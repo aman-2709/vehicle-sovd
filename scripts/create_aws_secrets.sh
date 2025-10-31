@@ -65,7 +65,8 @@ get_terraform_output() {
     local default_value=$2
 
     if [ -d "$TERRAFORM_DIR/environments/$ENVIRONMENT" ]; then
-        local value=$(cd "$TERRAFORM_DIR/environments/$ENVIRONMENT" && terraform output -raw "$output_name" 2>/dev/null || echo "")
+        local value
+        value=$(cd "$TERRAFORM_DIR/environments/$ENVIRONMENT" && terraform output -raw "$output_name" 2>/dev/null || echo "")
         if [ -n "$value" ]; then
             echo "$value"
         else
@@ -87,10 +88,10 @@ DB_NAME=$(get_terraform_output "rds_database_name" "sovd_${ENVIRONMENT}")
 if [ -z "$DB_ENDPOINT" ]; then
     echo -e "${YELLOW}Warning: RDS endpoint not found in Terraform outputs${NC}"
     echo "Please provide database details manually:"
-    read -p "Database endpoint (host:port): " DB_ENDPOINT
-    read -p "Database username [$DB_USERNAME]: " input_username
+    read -r -p "Database endpoint (host:port): " DB_ENDPOINT
+    read -r -p "Database username [$DB_USERNAME]: " input_username
     DB_USERNAME="${input_username:-$DB_USERNAME}"
-    read -p "Database name [$DB_NAME]: " input_dbname
+    read -r -p "Database name [$DB_NAME]: " input_dbname
     DB_NAME="${input_dbname:-$DB_NAME}"
 fi
 
@@ -106,7 +107,7 @@ REDIS_ENDPOINT=$(get_terraform_output "redis_endpoint" "")
 
 if [ -z "$REDIS_ENDPOINT" ]; then
     echo -e "${YELLOW}Warning: Redis endpoint not found in Terraform outputs${NC}"
-    read -p "Redis endpoint (host:port): " REDIS_ENDPOINT
+    read -r -p "Redis endpoint (host:port): " REDIS_ENDPOINT
 fi
 
 # Redis URLs for ElastiCache don't typically use passwords (encryption in-transit via TLS)

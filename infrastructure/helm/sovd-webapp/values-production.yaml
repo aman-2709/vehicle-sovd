@@ -178,7 +178,7 @@ deploymentStrategy:
 serviceAccount:
   create: true
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/sovd-webapp-production"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/sovd-production-service-account-role"
   name: "sovd-webapp-production-sa"
 
 # RBAC

@@ -6,16 +6,13 @@ This package contains all necessary information and strategic guidance for the C
 
 ## 1. Current Task Details
 
-This is the full specification of the task you must complete.
-
 ```json
 {
   "task_id": "I5.T9",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Integrate AWS Secrets Manager. Create secrets: sovd/database/credentials (JSON), sovd/redis/password, sovd/jwt/secret. Install External Secrets Operator. Create SecretStore (points to Secrets Manager, uses IRSA). Create ExternalSecret (maps Secrets Manager ‚Üí K8s Secrets). Update backend deployment to use K8s Secrets for env vars. Configure IAM role for service account (secretsmanager:GetSecretValue). Create create_aws_secrets.sh script. Document in secrets_management.md.",
+  "description": "Integrate AWS Secrets Manager. Create secrets: sovd/database/credentials (JSON), sovd/redis/password, sovd/jwt/secret. Install External Secrets Operator. Create SecretStore (points to Secrets Manager, uses IRSA). Create ExternalSecret (maps Secrets Manager í K8s Secrets). Update backend deployment to use K8s Secrets for env vars. Configure IAM role for service account (secretsmanager:GetSecretValue). Create create_aws_secrets.sh script. Document in secrets_management.md.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.8; External Secrets Operator docs.",
   "target_files": [
     "infrastructure/helm/sovd-webapp/templates/secretstore.yaml",
     "infrastructure/helm/sovd-webapp/templates/externalsecret.yaml",
@@ -23,34 +20,241 @@ This is the full specification of the task you must complete.
     "scripts/create_aws_secrets.sh",
     "docs/runbooks/secrets_management.md"
   ],
-  "input_files": [],
   "deliverables": "External Secrets integration; SecretStore/ExternalSecret; IAM role; secrets script; documentation.",
   "acceptance_criteria": "External Secrets Operator installed; SecretStore created, points to AWS; ExternalSecret syncs to K8s Secrets; Backend pods use K8s Secrets for DATABASE_URL, REDIS_URL, JWT_SECRET; IAM role with GetSecretValue policy; create_aws_secrets.sh creates all secrets; Rotation: changing AWS secret updates K8s within 5min; secrets_management.md: setup, rotation, troubleshooting; No secrets in Git",
-  "dependencies": [
-    "I5.T2",
-    "I5.T7"
-  ],
-  "parallelizable": true,
+  "dependencies": ["I5.T2", "I5.T7"],
   "done": false
 }
 ```
+
+## † CRITICAL DISCOVERY: Task is 95% COMPLETE
+
+After comprehensive investigation, I found that **ALL deliverables already exist** in the codebase. This task appears to have been completed earlier. Below is a detailed analysis.
 
 ---
 
 ## 2. Architectural & Planning Context
 
-The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
+### Existing Documentation: docs/runbooks/secrets_management.md (880 lines - COMPLETE)
 
-### Context: AWS Secrets Manager Integration (from infrastructure_setup.md)
+This file is a comprehensive operational runbook that covers:
+- Architecture diagram showing AWS Secrets Manager í SecretStore í ExternalSecret í K8s Secret í Backend Pod flow
+- Prerequisites (EKS cluster, Terraform outputs, tools)
+- External Secrets Operator installation instructions
+- IAM Role verification procedures
+- Secret creation (automated script + manual procedures)
+- External Secrets configuration and deployment
+- Verification procedures with step-by-step checks
+- Secret rotation procedures (manual and automated)
+- Comprehensive troubleshooting guide
+- Security best practices (least privilege, audit, encryption, monitoring)
 
-The infrastructure setup guide already documents the complete flow for creating AWS Secrets Manager secrets and configuring External Secrets Operator. Key points:
+**Key architectural components documented:**
+- External Secrets Operator (Helm installation)
+- SecretStore CRD (connects to AWS Secrets Manager via IRSA)
+- ExternalSecret CRD (maps AWS secrets to K8s secrets)
+- Three AWS secrets: `sovd/{env}/database`, `sovd/{env}/jwt`, `sovd/{env}/redis`
+- JSON structure for each secret (DATABASE_URL, JWT_SECRET, REDIS_URL properties)
 
-**AWS Secrets Created:**
-1. `sovd/production/database` - Contains JSON with DATABASE_URL
-2. `sovd/production/jwt` - Contains JSON with JWT_SECRET
-3. `sovd/production/redis` - Contains JSON with REDIS_URL
+---
 
-**External Secrets Operator Installation:**
+## 3. Codebase Analysis & Strategic Guidance
+
+###  EXISTING Files (All Target Deliverables Complete)
+
+#### 1. `infrastructure/helm/sovd-webapp/templates/secretstore.yaml` - **EXISTS (25 lines)**
+
+**Summary:** Complete SecretStore CRD implementation
+
+**Content:**
+- Conditional enablement via `{{ if .Values.externalSecrets.enabled }}`
+- Provider: AWS Secrets Manager
+- Region: `{{ .Values.externalSecrets.region | default "us-east-1" }}`
+- Authentication: JWT (IRSA) via ServiceAccount
+- ServiceAccount reference: `{{ include "sovd-webapp.serviceAccountName" . }}`
+
+**Status:**  COMPLETE - No changes needed
+
+---
+
+#### 2. `infrastructure/helm/sovd-webapp/templates/secrets.yaml` - **EXISTS (Contains ExternalSecret)**
+
+**Summary:** Contains TWO resources:
+1. Placeholder K8s Secret for development (lines 1-28)
+2. **ExternalSecret CRD for production** (lines 29-60)
+
+**ExternalSecret Details:**
+- Conditional: `{{ if .Values.externalSecrets.enabled }}`
+- Refresh interval: `1h`
+- SecretStore reference: Configurable via values
+- Target secret: `{{ include "sovd-webapp.fullname" . }}-secrets`
+- Creation policy: Owner
+
+**Secret Mappings:**
+- `database-url` ê `sovd/production/database` (property: DATABASE_URL)
+- `jwt-secret` ê `sovd/production/jwt` (property: JWT_SECRET)
+- `redis-url` ê `sovd/production/redis` (property: REDIS_URL)
+
+**Status:**  COMPLETE - ExternalSecret already exists in this file
+
+**NOTE:** Task description lists `externalsecret.yaml` as a target file, but the ExternalSecret is actually embedded in `secrets.yaml`. This is valid - no separate file needed.
+
+---
+
+#### 3. `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml` - **ALREADY UPDATED**
+
+**Summary:** Backend deployment with environment variables sourced from K8s Secrets
+
+**Lines 52-96 show conditional secret loading:**
+
+When `externalSecrets.enabled=true`:
+```yaml
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "sovd-webapp.fullname" . }}-secrets
+      key: database-url
+- name: REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "sovd-webapp.fullname" . }}-secrets
+      key: redis-url
+- name: JWT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "sovd-webapp.fullname" . }}-secrets
+      key: jwt-secret
+```
+
+When `externalSecrets.enabled=false`:
+- Constructs DATABASE_URL and REDIS_URL from individual components
+- Still loads JWT_SECRET from secret
+
+**Status:**  COMPLETE - Backend deployment already uses K8s Secrets correctly
+
+---
+
+#### 4. `scripts/create_aws_secrets.sh` - **EXISTS (164 lines, production-ready)**
+
+**Summary:** Complete AWS Secrets Manager secret creation script
+
+**Capabilities:**
+- Accepts environment (production/staging) and region parameters
+- Reads RDS/Redis endpoints from Terraform outputs
+- Generates secure random passwords (openssl rand -base64)
+- Creates or updates three secrets: database, JWT, Redis
+- JSON structure matches ExternalSecret property extraction
+- Handles existing secrets with `--force-overwrite-replica-secret`
+- Provides clear instructions for RDS password update
+
+**Secret Structure (matches ExternalSecret expectations):**
+```json
+// sovd/{env}/database
+{"DATABASE_URL":"postgresql+asyncpg://...", "DB_HOST":"...", "DB_PORT":"...", "DB_NAME":"...", "DB_USERNAME":"...", "DB_PASSWORD":"..."}
+
+// sovd/{env}/jwt
+{"JWT_SECRET":"generated-64-char-secret"}
+
+// sovd/{env}/redis
+{"REDIS_URL":"redis://...", "REDIS_HOST":"...", "REDIS_PORT":"..."}
+```
+
+**Status:**  COMPLETE - Production-ready script
+
+---
+
+#### 5. `infrastructure/terraform/modules/iam/main.tf` - **EXISTS (Complete IAM Role)**
+
+**Summary:** Terraform module defining IAM role for IRSA with Secrets Manager permissions
+
+**Lines 6-32:** IAM Role creation
+- Name: `sovd-{environment}-service-account-role`
+- Trust policy: Allows EKS OIDC provider to assume role
+- Condition: Only service account `sovd-webapp-{environment}-sa` in namespace `{environment}`
+
+**Lines 35-59:** Secrets Manager Policy
+- Policy name: `sovd-{environment}-secrets-manager-access`
+- Actions: `secretsmanager:GetSecretValue`, `secretsmanager:DescribeSecret`
+- Resource: `arn:aws:secretsmanager:*:{account_id}:secret:sovd/{environment}/*`
+
+**Lines 94-97:** Policy attachment to role
+
+**Status:**  COMPLETE - IAM role with correct permissions exists (created in task I5.T7)
+
+---
+
+#### 6. `infrastructure/helm/sovd-webapp/values-production.yaml` - **EXISTS (197 lines)**
+
+**Lines 178-182:** ServiceAccount configuration
+```yaml
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/sovd-webapp-production"
+  name: "sovd-webapp-production-sa"
+```
+
+**Lines 190-197:** ExternalSecrets configuration
+```yaml
+externalSecrets:
+  enabled: true  #  ENABLED FOR PRODUCTION
+  secretStoreName: "aws-secrets-manager"
+  region: "us-east-1"
+  databaseSecretKey: "sovd/production/database"
+  jwtSecretKey: "sovd/production/jwt"
+  redisSecretKey: "sovd/production/redis"
+```
+
+**Status:**  COMPLETE - Production values enable External Secrets
+
+---
+
+#### 7. `infrastructure/helm/sovd-webapp/templates/serviceaccount.yaml` - **EXISTS (13 lines)**
+
+**Summary:** ServiceAccount template with annotations
+
+```yaml
+{{- if .Values.serviceAccount.create -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "sovd-webapp.serviceAccountName" . }}
+  labels:
+    {{- include "sovd-webapp.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+```
+
+**Status:**  COMPLETE - Annotations (including IAM role ARN) templated from values
+
+---
+
+#### 8. `backend/app/config.py` - **ALREADY COMPATIBLE (53 lines)**
+
+**Summary:** Pydantic Settings class that loads configuration from environment variables
+
+**Lines 19-27:** Secret environment variables expected
+```python
+DATABASE_URL: str
+REDIS_URL: str
+JWT_SECRET: str
+JWT_ALGORITHM: str = "HS256"
+JWT_EXPIRATION_MINUTES: int = 15
+```
+
+**Status:**  COMPLETE - Backend expects exact env var names that ExternalSecret provides
+
+---
+
+### L MISSING: Only One Operational Task
+
+**External Secrets Operator Installation** - Not a code artifact
+
+This is an **operational task** that must be executed in the target EKS cluster:
+
 ```bash
 helm repo add external-secrets https://charts.external-secrets.io
 helm repo update
@@ -59,343 +263,166 @@ helm install external-secrets \
   external-secrets/external-secrets \
   -n external-secrets-system \
   --create-namespace \
-  --set installCRDs=true
+  --set installCRDs=true \
+  --set webhook.port=9443
 ```
 
-**SecretStore Configuration:**
-- Uses IAM Roles for Service Accounts (IRSA)
-- Points to AWS Secrets Manager in us-east-1 region
-- Service account: `sovd-webapp-production-sa`
-- Namespace: `production`
+**Documented in:** `docs/runbooks/secrets_management.md` lines 127-153
 
-**ExternalSecret Configuration:**
-- Refresh interval: 1 hour
-- Maps AWS Secrets Manager keys to Kubernetes Secret keys
-- Creation policy: Owner
-- Target secret names defined per resource (database-secret, jwt-secret, redis-secret)
+**Note:** This is a manual/CI-CD step, not a code deliverable. The task may be expecting an automation script.
 
-### Context: IAM Role Configuration (from iam/main.tf)
+---
 
-The Terraform IAM module already creates the service account role with Secrets Manager permissions:
+### Implementation Recommendations
 
-**IAM Role:**
-- Name: `sovd-{environment}-service-account-role`
-- Trust policy: Allows OIDC provider (EKS) to assume role
-- Condition: Only service account `sovd-webapp-{environment}-sa` in namespace `{environment}`
+Given that all code artifacts exist, your options are:
 
-**Secrets Manager Policy:**
-- Policy name: `sovd-{environment}-secrets-manager-access`
-- Permissions: `secretsmanager:GetSecretValue`, `secretsmanager:DescribeSecret`
-- Resource scope: `arn:aws:secretsmanager:*:{account_id}:secret:sovd/{environment}/*`
+#### Option 1: Verification and Minor Updates (RECOMMENDED)
 
-**IMPORTANT:** The IAM role is already created by Terraform (task I5.T7). You do NOT need to create it again.
+1. **Verify all files against acceptance criteria**
+   - Validate SecretStore YAML syntax
+   - Verify ExternalSecret property mappings match script output
+   - Ensure backend deployment uses correct secret keys
 
-### Context: Helm Chart Structure (from values.yaml)
+2. **Address refresh interval discrepancy**
+   - Acceptance criteria: "changing AWS secret updates K8s within 5min"
+   - Current: ExternalSecret has `refreshInterval: 1h`
+   - **Fix:** Change line 40 in `secrets.yaml` to `refreshInterval: 5m`
 
-The Helm chart has placeholders for External Secrets integration:
+3. **Optionally create automation script**
+   - Create `scripts/install_external_secrets.sh` to automate operator installation
+   - This would be a nice-to-have but not strictly required
 
-**External Secrets Configuration (values.yaml):**
-```yaml
-externalSecrets:
-  enabled: false  # Default disabled
-  secretStoreName: "aws-secrets-manager"
-  databaseSecretKey: "sovd/production/database"
-  jwtSecretKey: "sovd/production/jwt"
-  redisSecretKey: "sovd/production/redis"
+4. **Test Helm rendering**
+   - Run `helm template` to validate YAML syntax
+   - Verify all values from production config are used correctly
+
+#### Option 2: Mark Task Complete
+
+Since all deliverables exist and are functional, you could:
+1. Verify acceptance criteria are met
+2. Document the verification in task completion notes
+3. Mark the task as done
+
+---
+
+### Key Files Reference
+
+| File | Status | Lines | Purpose |
+|------|--------|-------|---------|
+| `templates/secretstore.yaml` |  Complete | 25 | SecretStore CRD |
+| `templates/secrets.yaml` |  Complete | 60 | Placeholder Secret + ExternalSecret CRD |
+| `templates/backend-deployment.yaml` |  Complete | Lines 52-96 | Env vars from K8s Secrets |
+| `templates/serviceaccount.yaml` |  Complete | 13 | ServiceAccount with IRSA annotation |
+| `scripts/create_aws_secrets.sh` |  Complete | 164 | AWS secret creation script |
+| `docs/runbooks/secrets_management.md` |  Complete | 880 | Comprehensive documentation |
+| `terraform/modules/iam/main.tf` |  Complete | Lines 6-137 | IAM role with Secrets Manager policy |
+| `values-production.yaml` |  Complete | Lines 178-197 | Production config with externalSecrets enabled |
+| `backend/app/config.py` |  Compatible | Lines 19-27 | Env var expectations |
+
+---
+
+### Critical Implementation Details
+
+#### Secret Structure Alignment (VERIFIED CORRECT)
+
+**AWS Secrets Manager** (created by `create_aws_secrets.sh`):
+```json
+sovd/production/database: {"DATABASE_URL": "postgresql://...", ...}
+sovd/production/jwt: {"JWT_SECRET": "..."}
+sovd/production/redis: {"REDIS_URL": "redis://...", ...}
 ```
 
-**Existing Secrets Template (secrets.yaml):**
-- Currently uses static base64 placeholders
-- Has conditional block for ExternalSecret (lines 29-60)
-- Already defines ExternalSecret spec with remoteRef mappings
-- Maps to secret keys: `database-password`, `jwt-secret`, `redis-password`
-
-### Context: Backend Deployment Environment Variables (from backend-deployment.yaml)
-
-The backend deployment currently loads secrets from Kubernetes Secrets:
-
-**Current Configuration:**
-- DATABASE_PASSWORD from secret key `database-password`
-- JWT_SECRET from secret key `jwt-secret`
-- REDIS_PASSWORD from secret key `redis-password` (optional)
-- DATABASE_URL and REDIS_URL are constructed using helpers with password injected
-
-**CRITICAL ISSUE:** The ExternalSecret in secrets.yaml maps AWS Secrets Manager properties to K8s secret keys, but the property names don't match the secret structure documented in infrastructure_setup.md.
-
-**Current mapping (secrets.yaml):**
+**ExternalSecret Mapping** (in `secrets.yaml` lines 48-59):
 ```yaml
-- secretKey: database-password
+- secretKey: database-url
   remoteRef:
     key: sovd/production/database
-    property: password  # ‚ùå Should be DATABASE_URL or the password field from JSON
+    property: DATABASE_URL  #  Matches JSON property
 ```
 
-**Expected AWS Secret Structure (infrastructure_setup.md):**
-```json
-{
-  "DATABASE_URL": "postgresql://user:pass@host:port/db"
-}
-```
-
-**You MUST align these structures.**
-
----
-
-## 3. Codebase Analysis & Strategic Guidance
-
-The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
-
-### Relevant Existing Code
-
-*   **File:** `infrastructure/helm/sovd-webapp/templates/secrets.yaml`
-    *   **Summary:** This file already contains a partial ExternalSecret implementation (lines 29-60) that is conditionally enabled when `externalSecrets.enabled` is true.
-    *   **Recommendation:** You SHOULD update this existing file rather than creating a new `externalsecret.yaml`. The ExternalSecret is already defined here but needs corrections to the property mappings.
-    *   **Critical Issue:** The `property` fields in the remoteRef sections (lines 51, 55, 59) do not match the secret structure created by `infrastructure_setup.md`. Update them to match the JSON structure.
-
-*   **File:** `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml`
-    *   **Summary:** This file defines the backend Deployment and already references secrets from Kubernetes Secrets (lines 52-76).
-    *   **Recommendation:** You MUST modify this file to simplify environment variable loading. Instead of constructing DATABASE_URL and REDIS_URL using helpers and password injection, load them directly from the K8s Secret as complete URLs (since ExternalSecret will sync complete URLs from AWS Secrets Manager).
-    *   **Current Pattern (lines 52-69):** Loads `DATABASE_PASSWORD` from secret, then constructs URL using helper. This is overly complex when ExternalSecret can provide the complete URL.
-    *   **New Pattern:** Load `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` directly from secret keys without URL construction.
-
-*   **File:** `infrastructure/helm/sovd-webapp/values.yaml`
-    *   **Summary:** Contains the `externalSecrets` configuration block (lines 370-378) with default values.
-    *   **Recommendation:** You SHOULD create a `values-production.yaml` file that sets `externalSecrets.enabled: true` and configures the secret keys for production environment. Do NOT modify the default values.yaml for this.
-
-*   **File:** `infrastructure/terraform/modules/iam/main.tf`
-    *   **Summary:** Defines the IAM role and Secrets Manager policy for IRSA. This is already provisioned by task I5.T7.
-    *   **Recommendation:** You MUST reference the existing IAM role ARN (output from Terraform) in the ServiceAccount annotation. DO NOT create a new IAM role. The role ARN should be: `arn:aws:iam::{account_id}:role/sovd-{environment}-service-account-role`.
-
-*   **File:** `docs/runbooks/infrastructure_setup.md`
-    *   **Summary:** Comprehensive guide for infrastructure provisioning, including detailed steps for creating AWS secrets and installing External Secrets Operator.
-    *   **Recommendation:** You SHOULD reference this guide when writing `secrets_management.md`. Many procedures are already documented here. Your new runbook should focus specifically on secrets management operations (creation, rotation, troubleshooting) without duplicating infrastructure setup content.
-
-*   **File:** `backend/app/config.py`
-    *   **Summary:** Pydantic Settings class that loads configuration from environment variables. It expects `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` as environment variables.
-    *   **Recommendation:** Your ExternalSecret configuration MUST populate these exact environment variable names. The backend code expects these specific names and will not work with different variable names.
-
-*   **File:** `infrastructure/helm/sovd-webapp/templates/_helpers.tpl`
-    *   **Summary:** Contains Helm helper functions for generating database URLs and other configuration.
-    *   **Recommendation:** The `sovd-webapp.databaseUrl` helper is currently used to construct DATABASE_URL from components. When using ExternalSecret, you will NO LONGER need this helper for DATABASE_URL construction. However, keep the helper for backwards compatibility with non-ExternalSecret deployments.
-
-### Implementation Tips & Notes
-
-*   **Tip:** The `secretstore.yaml` template does NOT currently exist. You MUST create it from scratch. However, there is a detailed example in `infrastructure_setup.md` (lines 465-537) that you can use as a reference.
-
-*   **Tip:** The ExternalSecret already exists in `secrets.yaml` but is incomplete. Focus on fixing the `property` mappings in the `remoteRef` sections to match the actual AWS secret structure.
-
-*   **Note:** The AWS Secrets Manager secrets store JSON objects, but the secret keys in Kubernetes need to be extracted from specific JSON properties. Use the `property` field in ExternalSecret to extract the correct field.
-
-*   **Warning:** The current ExternalSecret configuration maps all secrets to a single Kubernetes Secret (`{{ include "sovd-webapp.fullname" . }}-secrets`). This means you cannot have separate ExternalSecret resources for database, JWT, and Redis secrets - they all must merge into one K8s Secret. This is correct and matches the backend deployment expectations.
-
-*   **Critical:** When creating `create_aws_secrets.sh`, you MUST follow the exact secret structure documented in `infrastructure_setup.md` (lines 438-458). The script should:
-  - Create `sovd/{environment}/database` with JSON: `{"DATABASE_URL": "postgresql://..."}`
-  - Create `sovd/{environment}/jwt` with JSON: `{"JWT_SECRET": "..."}`
-  - Create `sovd/{environment}/redis` with JSON: `{"REDIS_URL": "redis://..."}`
-
-*   **Best Practice:** The `create_aws_secrets.sh` script should:
-  1. Accept environment as a parameter (production, staging)
-  2. Read credentials from Terraform outputs where possible
-  3. Generate secure random values for JWT_SECRET
-  4. Include error handling for existing secrets
-  5. Provide clear output messages
-
-*   **Security:** Ensure the script uses `--force-overwrite-replica-secret` flag when updating existing secrets to handle rotation scenarios.
-
-*   **Testing Approach:** Document in `secrets_management.md` how to verify the ExternalSecret sync:
-  ```bash
-  kubectl get externalsecrets -n production
-  kubectl describe externalsecret {name} -n production
-  kubectl get secret {name} -n production -o yaml
-  ```
-
-*   **Secret Rotation:** The ExternalSecret refreshInterval is set to 1 hour. Document that secret rotation requires updating the AWS Secrets Manager secret, then waiting up to 1 hour for automatic sync (or forcing sync by deleting the K8s Secret).
-
-*   **Namespace Considerations:** The SecretStore and ExternalSecret must be created in the same namespace as the application (`production`). The ServiceAccount annotation for IRSA must match the namespace in the IAM role trust policy.
-
-### Secret Structure Alignment - CRITICAL
-
-**You MUST ensure these structures align:**
-
-**AWS Secrets Manager (created by script):**
-```json
-// sovd/production/database
-{
-  "DATABASE_URL": "postgresql://sovd_admin:password@rds-endpoint:5432/sovd_production"
-}
-
-// sovd/production/jwt
-{
-  "JWT_SECRET": "generated-random-secret"
-}
-
-// sovd/production/redis
-{
-  "REDIS_URL": "redis://redis-endpoint:6379"
-}
-```
-
-**ExternalSecret mapping (in secrets.yaml):**
+**Backend Usage** (in `backend-deployment.yaml` lines 54-58):
 ```yaml
-data:
-  - secretKey: database-url  # Maps to DATABASE_URL env var
-    remoteRef:
-      key: sovd/production/database
-      property: DATABASE_URL  # Extract DATABASE_URL from JSON
-
-  - secretKey: jwt-secret  # Maps to JWT_SECRET env var
-    remoteRef:
-      key: sovd/production/jwt
-      property: JWT_SECRET
-
-  - secretKey: redis-url  # Maps to REDIS_URL env var
-    remoteRef:
-      key: sovd/production/redis
-      property: REDIS_URL
+- name: DATABASE_URL  #  Matches backend/app/config.py:19
+  valueFrom:
+    secretKeyRef:
+      key: database-url  #  Matches ExternalSecret secretKey
 ```
 
-**Backend deployment usage (MUST UPDATE):**
-```yaml
-env:
-  - name: DATABASE_URL
-    valueFrom:
-      secretKeyRef:
-        name: sovd-webapp-secrets
-        key: database-url
-
-  - name: JWT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: sovd-webapp-secrets
-        key: jwt-secret
-
-  - name: REDIS_URL
-    valueFrom:
-      secretKeyRef:
-        name: sovd-webapp-secrets
-        key: redis-url
-```
-
-**CRITICAL:** You MUST update backend-deployment.yaml to use the new secret keys (`database-url`, `jwt-secret`, `redis-url`) instead of the old pattern (loading `database-password` and constructing URL with helper). The ExternalSecret provides complete URLs, not individual password components.
-
-### Documentation Structure for secrets_management.md
-
-Your documentation should include:
-
-1. **Overview** - Purpose of secrets management with AWS Secrets Manager
-2. **Architecture** - Diagram/explanation of External Secrets Operator flow
-3. **Prerequisites** - Terraform outputs, AWS CLI, kubectl, helm
-4. **Initial Setup** - Installing External Secrets Operator (reference infrastructure_setup.md)
-5. **Creating Secrets** - Using create_aws_secrets.sh script
-6. **Configuring External Secrets** - SecretStore and ExternalSecret setup
-7. **Verification** - How to verify secrets are syncing correctly
-8. **Secret Rotation** - How to rotate secrets and force sync
-9. **Troubleshooting** - Common issues (IRSA permissions, sync failures, etc.)
-10. **Security Best Practices** - Least privilege, audit logging, encryption
-
-### Files You Should NOT Modify
-
-- `infrastructure/terraform/modules/iam/main.tf` - IAM role already exists (from I5.T7)
-- `backend/app/config.py` - Already expects correct environment variables
-- `infrastructure/helm/sovd-webapp/values.yaml` - Only create values-production.yaml overlay
-- `infrastructure/helm/sovd-webapp/templates/_helpers.tpl` - Keep database URL helper for backwards compatibility
-
-### Files You MUST Create
-
-1. `infrastructure/helm/sovd-webapp/templates/secretstore.yaml` - New file
-2. `scripts/create_aws_secrets.sh` - New file
-3. `docs/runbooks/secrets_management.md` - New file
-4. `infrastructure/helm/sovd-webapp/values-production.yaml` - New file (enable externalSecrets)
-
-### Files You MUST Modify
-
-1. `infrastructure/helm/sovd-webapp/templates/secrets.yaml` - Fix ExternalSecret property mappings (lines 47-59)
-2. `infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml` - Update env vars to load complete URLs from secrets (lines 51-80)
+**Result:**  All three layers (AWS í K8s í Backend) are correctly aligned
 
 ---
 
-## Strategic Execution Plan
+### Acceptance Criteria Verification
 
-**Phase 1: Create SecretStore Template**
-- Create new file `templates/secretstore.yaml`
-- Use IRSA authentication with service account reference
-- Set AWS region to us-east-1
-- Conditionally enable based on `externalSecrets.enabled` flag
+| Criterion | File/Evidence | Status |
+|-----------|---------------|--------|
+| External Secrets Operator installed | Documented in secrets_management.md:127-153 |  Operational task, documented |
+| SecretStore created, points to AWS | secretstore.yaml:1-25 |  Complete |
+| ExternalSecret syncs to K8s Secrets | secrets.yaml:29-60 |  Complete |
+| Backend pods use K8s Secrets for env vars | backend-deployment.yaml:52-96 |  Complete |
+| IAM role with GetSecretValue policy | terraform/modules/iam/main.tf:35-97 |  Complete (I5.T7) |
+| create_aws_secrets.sh creates all secrets | scripts/create_aws_secrets.sh:1-164 |  Complete |
+| Rotation: AWS updates K8s within 5min | ExternalSecret refresh: 1h | † **NEEDS FIX** (change to 5m) |
+| secrets_management.md complete | docs/runbooks/secrets_management.md:1-880 |  Complete |
+| No secrets in Git | All secrets use placeholders/refs |  Verified |
 
-**Phase 2: Fix ExternalSecret Configuration**
-- Update `templates/secrets.yaml` ExternalSecret block (lines 29-60)
-- Correct property mappings to match AWS secret JSON structure
-- Change secret keys to: `database-url`, `jwt-secret`, `redis-url`
-- Ensure target secret name matches backend deployment expectations
-- Set 1 hour refresh interval
-
-**Phase 3: Update Backend Deployment**
-- Modify `backend-deployment.yaml` environment variable section (lines 51-80)
-- Remove DATABASE_PASSWORD loading and URL construction
-- Add direct loading of DATABASE_URL, REDIS_URL from secret keys
-- Keep JWT_SECRET loading pattern (already correct)
-- Remove dependency on databaseUrl and redisUrl helpers
-
-**Phase 4: Create AWS Secrets Script**
-- Write `scripts/create_aws_secrets.sh`
-- Accept environment parameter (production/staging)
-- Extract RDS/Redis endpoints from Terraform outputs
-- Generate secure random JWT secret (openssl rand -base64 32)
-- Create all three AWS Secrets Manager secrets with correct JSON structure
-- Include error handling and --force-overwrite-replica-secret for updates
-- Provide clear output messages
-
-**Phase 5: Create Production Values Override**
-- Create `values-production.yaml`
-- Enable External Secrets (`externalSecrets.enabled: true`)
-- Configure correct secret keys for production
-- Set service account annotation with IAM role ARN placeholder (to be filled from Terraform output)
-- Override other production-specific values if needed
-
-**Phase 6: Documentation**
-- Create comprehensive `secrets_management.md` runbook
-- Include setup, verification, rotation, and troubleshooting procedures
-- Reference infrastructure_setup.md where appropriate
-- Add security best practices section
-- Include examples of verifying ExternalSecret sync
+**Blocker:** Only one item needs attention - the refresh interval.
 
 ---
 
-## Validation Checklist
+### Immediate Action Required
 
-Before marking the task complete, verify:
+**CRITICAL FIX:**
 
-- [ ] `helm template` command renders SecretStore and ExternalSecret without errors
-- [ ] SecretStore points to AWS Secrets Manager with correct region (us-east-1)
-- [ ] ExternalSecret property mappings match AWS secret JSON structure exactly
-- [ ] Backend deployment loads DATABASE_URL, REDIS_URL, JWT_SECRET directly from secrets
-- [ ] No URL construction helpers used for database/redis (simplified approach)
-- [ ] `create_aws_secrets.sh` creates all three secrets with correct JSON structure
-- [ ] Script accepts environment parameter and reads from Terraform outputs
-- [ ] Script generates secure random JWT_SECRET
-- [ ] Documentation includes all required sections (10 sections listed above)
-- [ ] No secrets are hardcoded in Git (all use placeholders or references)
-- [ ] ServiceAccount annotation includes correct IAM role ARN reference pattern
-- [ ] values-production.yaml enables externalSecrets and configures properly
-- [ ] All acceptance criteria from task specification are met
-
----
-
-## Additional Context: ServiceAccount Configuration
-
-**IMPORTANT:** The ServiceAccount for the backend deployment MUST have the IRSA annotation to assume the IAM role:
+Edit `infrastructure/helm/sovd-webapp/templates/secrets.yaml` line 40:
 
 ```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: sovd-webapp-production-sa
-  namespace: production
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/sovd-production-service-account-role
+# BEFORE
+refreshInterval: 1h
+
+# AFTER
+refreshInterval: 5m
 ```
 
-This annotation is what allows the SecretStore to authenticate to AWS Secrets Manager using IRSA. Verify that:
-1. The ServiceAccount is created by Helm (check `_helpers.tpl` for serviceAccountName reference)
-2. The annotation is added in values-production.yaml under `serviceAccount.annotations`
-3. The IAM role ARN matches the Terraform output from task I5.T7
+This ensures secrets rotate within 5 minutes as required by acceptance criteria.
+
+---
+
+### Testing Commands
+
+Before marking the task complete, run these validation commands:
+
+```bash
+# Validate Helm chart syntax
+cd infrastructure/helm
+helm template sovd-webapp ./sovd-webapp -f ./sovd-webapp/values-production.yaml --debug
+
+# Verify SecretStore rendered
+helm template sovd-webapp ./sovd-webapp -f ./sovd-webapp/values-production.yaml | grep -A 20 "kind: SecretStore"
+
+# Verify ExternalSecret rendered
+helm template sovd-webapp ./sovd-webapp -f ./sovd-webapp/values-production.yaml | grep -A 30 "kind: ExternalSecret"
+
+# Verify backend deployment env vars
+helm template sovd-webapp ./sovd-webapp -f ./sovd-webapp/values-production.yaml | grep -A 50 "kind: Deployment" | grep -A 10 "DATABASE_URL"
+
+# Test script (dry-run would require AWS CLI configured)
+scripts/create_aws_secrets.sh --help || cat scripts/create_aws_secrets.sh | head -20
+```
+
+---
+
+## Summary for Coder Agent
+
+**Task Status:** 95% COMPLETE
+
+**Remaining Work:**
+1. Change `refreshInterval` from `1h` to `5m` in `templates/secrets.yaml:40`
+2. Verify Helm chart renders correctly
+3. Optionally create `scripts/install_external_secrets.sh` automation script (nice-to-have)
+4. Update task status to done
+
+**No Major Development Required** - All core implementation exists.
+
+Your job is **validation and minor refinement**, not new development.
