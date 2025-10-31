@@ -10,22 +10,24 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T3",
+  "task_id": "I5.T4",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Implement CI/CD pipeline in .github/workflows/ci-cd.yml. Stages: 1) Lint (parallel: backend+frontend), 2) Unit tests (parallel, fail <80%), 3) Integration tests (docker-compose), 4) E2E tests, 5) Security scans (parallel: pip-audit, npm audit, Bandit, Trivy), 6) Build images (tag SHA+latest), 7) Push to registry, 8) Deploy staging (on develop), 9) Deploy production (on main, manual approval, smoke tests, rollback). Cache dependencies. Add smoke test script. Add README badges.",
-  "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.9; GitHub Actions docs.",
+  "description": "Create deployment diagram (PlantUML) showing AWS EKS: VPC (public/private subnets, 3 AZs), ALB, EKS (3 nodes, pods), RDS Multi-AZ, ElastiCache, NAT, Route53, Secrets Manager, CloudWatch, S3. Show connections with protocols. Create CI/CD pipeline diagram (Mermaid) showing GitHub Actions workflow stages.",
+  "agent_type_hint": "DiagrammingAgent",
+  "inputs": "Architecture Blueprint Section 3.9; Helm chart, CI/CD from I5.T2/T3.",
   "target_files": [
-    ".github/workflows/ci-cd.yml",
-    "scripts/smoke_tests.sh",
-    "README.md"
+    "docs/diagrams/deployment_diagram.puml",
+    "docs/diagrams/ci_cd_pipeline.md"
   ],
   "input_files": [],
-  "deliverables": "Complete CI/CD workflow; smoke tests; README badges; deployment automation.",
-  "acceptance_criteria": "Pipeline triggers on push/PR; Lint/unit tests parallel; Integration/E2E run with docker-compose; Security scans fail on critical; Images built+pushed; Staging auto-deploys on develop; Production manual approval on main; Smoke tests verify endpoints; Caching works; Badges in README; Pipeline <15min",
-  "dependencies": ["I5.T1", "I5.T2", "I3.T9"],
-  "parallelizable": false,
+  "deliverables": "PlantUML deployment diagram; Mermaid CI/CD diagram.",
+  "acceptance_criteria": "deployment_diagram.puml compiles; Shows all components from Blueprint 3.9; VPC structure clear; EKS across 3 AZs; Connections labeled; ci_cd_pipeline.md renders as Mermaid; Matches actual pipeline stages; Both committed",
+  "dependencies": [
+    "I5.T2",
+    "I5.T3"
+  ],
+  "parallelizable": true,
   "done": false
 }
 ```
@@ -34,246 +36,92 @@ This is the full specification of the task you must complete.
 
 ## 2. Architectural & Planning Context
 
-The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
+The following are the relevant sections that provide guidance for creating these diagrams. While the full architecture blueprint files were not found in the repository (they may be in external documentation), the existing implementation files provide all the necessary information.
 
-### Context: cicd-pipeline (from 05_Operational_Architecture.md)
+### Context: Production Deployment Infrastructure (from Helm Chart)
 
-```markdown
-**CI/CD Pipeline (GitHub Actions)**
+**Source**: `infrastructure/helm/sovd-webapp/values.yaml` (I5.T2 deliverable)
 
-**Workflow Stages:**
+The Helm chart reveals the complete Kubernetes deployment structure:
 
-1. **Lint & Format Check**
-   - Frontend: ESLint, Prettier
-   - Backend: Ruff, Black, mypy
+**Backend Service Configuration**:
+- 3 replicas with pod anti-affinity for high availability
+- Resources: 256Mi/250m CPU (requests), 512Mi/500m CPU (limits)
+- Health checks: `/health/live` (liveness), `/health/ready` (readiness with DB/Redis checks)
+- Pod runs as non-root user (1001) with dropped capabilities
 
-2. **Unit Tests**
-   - Frontend: Vitest (coverage threshold 80%)
-   - Backend: pytest (coverage threshold 80%)
+**Frontend Service Configuration**:
+- 3 replicas with pod anti-affinity
+- Resources: 64Mi/100m CPU (requests), 128Mi/200m CPU (limits)
+- Nginx-based static file serving
 
-3. **Build Docker Images**
-   - Build frontend and backend images
-   - Tag with commit SHA and `latest`
+**Horizontal Pod Autoscaler (HPA)**:
+- Backend: 3-10 replicas, target CPU 70%, scale up/down policies
+- Frontend: 2-5 replicas, target CPU 70%
 
-4. **Integration Tests**
-   - Spin up services with docker-compose
-   - Run API integration tests (pytest + httpx)
-   - Run E2E tests (Playwright)
+**Ingress (AWS ALB)**:
+- Internet-facing Application Load Balancer
+- HTTP (80) and HTTPS (443) listeners
+- Path-based routing: `/api` and `/ws` → backend, `/` → frontend
+- Target type: IP (for direct pod access)
 
-5. **Security Scans**
-   - `npm audit` (frontend dependencies)
-   - `pip-audit` (backend dependencies)
-   - Trivy (Docker image vulnerabilities)
+**External Services**:
+- PostgreSQL: RDS Multi-AZ deployment (from config section)
+- Redis: ElastiCache (from config section)
+- Secrets: AWS Secrets Manager (via External Secrets Operator)
 
-6. **Push Images**
-   - Push to AWS ECR (Elastic Container Registry)
+### Context: CI/CD Pipeline (from GitHub Actions Workflow)
 
-7. **Deploy to Staging**
-   - Update Kubernetes deployment with new image
-   - Run smoke tests
+**Source**: `.github/workflows/ci-cd.yml` (I5.T3 deliverable)
 
-8. **Manual Approval Gate**
-   - Require approval for production deploy
+The CI/CD pipeline consists of the following stages:
 
-9. **Deploy to Production**
-   - Blue-green deployment strategy
-   - Gradual rollout (10%, 50%, 100%)
-   - Automatic rollback if error rate spikes
+**Stage 1: Parallel Linting**
+- `frontend-lint`: ESLint + Prettier (Node.js 18)
+- `backend-lint`: Ruff + Black + mypy (Python 3.11)
 
-**GitHub Actions Workflow File:**
-```yaml
-name: CI/CD Pipeline
+**Stage 2: Parallel Testing**
+- `frontend-test`: Vitest with 80% coverage requirement
+- `backend-test`: pytest with PostgreSQL/Redis services, 80% coverage requirement
+- `frontend-lighthouse`: Lighthouse CI performance testing (score >90)
 
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+**Stage 3: Integration Tests**
+- `integration-tests`: docker-compose orchestration, backend integration test suite
+- Depends on: frontend-test, backend-test
 
-jobs:
-  lint-and-test:
-    # ... (lint, test, build stages)
+**Stage 4: E2E Tests**
+- `e2e-tests`: Playwright tests with full stack (chromium + firefox)
+- Depends on: integration-tests
 
-  deploy-staging:
-    needs: lint-and-test
-    if: github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to Staging
-        run: |
-          helm upgrade --install sovd-webapp ./helm \
-            -f values-staging.yaml -n staging
+**Stage 5: Security Scans (Parallel)**
+- `backend-security`: Bandit + pip-audit
+- `frontend-security`: npm audit + ESLint security rules
 
-  deploy-production:
-    needs: lint-and-test
-    if: github.ref == 'refs/heads/main'
-    environment: production  # Manual approval
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to Production
-        run: |
-          helm upgrade --install sovd-webapp ./helm \
-            -f values-production.yaml -n production
-```
-```
+**Stage 6: Docker Image Builds (Parallel)**
+- `build-backend-image`: Multi-stage Dockerfile.prod, push to GitHub Container Registry
+- `build-frontend-image`: Multi-stage Dockerfile.prod with Nginx
+- Both tag with SHA + latest
+- Depends on: tests, security scans, integration tests, E2E tests
 
-### Context: task-i5-t3 (from 02_Iteration_I5.md)
+**Stage 7: Container Security Scans**
+- `trivy-scan-backend`: Scan backend image for CRITICAL/HIGH vulnerabilities
+- `trivy-scan-frontend`: Scan frontend image
+- Uploads SARIF to GitHub Security tab
 
-```markdown
-*   **Task 5.3: Create GitHub Actions CI/CD Pipeline**
-    *   **Task ID:** `I5.T3`
-    *   **Description:** Implement comprehensive CI/CD pipeline in `.github/workflows/ci-cd.yml`. Pipeline stages: 1) **Lint & Format Check** (parallel jobs): backend linting (ruff, black --check, mypy), frontend linting (eslint, prettier --check), 2) **Unit Tests** (parallel): backend unit tests with coverage, frontend unit tests with coverage, fail if coverage <80%, 3) **Integration Tests**: start services with docker-compose, run backend integration tests, run frontend integration tests, 4) **E2E Tests**: start full stack, run Playwright E2E tests, 5) **Security Scans** (parallel): pip-audit (backend), npm audit (frontend), Bandit security scan, Docker image scan with Trivy, 6) **Build Docker Images**: build backend and frontend production images, tag with commit SHA and `latest`, 7) **Push Images**: push to container registry (GitHub Container Registry or AWS ECR) - requires authentication setup, 8) **Deploy to Staging** (on push to `develop` branch): deploy Helm chart to staging namespace with staging values, run smoke tests, 9) **Deploy to Production** (on push to `main` branch): manual approval gate (GitHub environment protection), deploy Helm chart to production namespace, gradual rollout (use Helm or custom script), run smoke tests, automatic rollback on failure. Configure caching for dependencies (pip cache, npm cache) to speed up builds. Add status badges to README.
-    *   **Agent Type Hint:** `BackendAgent` + `DevOpsAgent`
-    *   **Inputs:** Architecture Blueprint Section 3.9 (CI/CD Pipeline); GitHub Actions documentation.
-    *   **Input Files:** []
-    *   **Target Files:**
-        *   `.github/workflows/ci-cd.yml`
-        *   `scripts/smoke_tests.sh` (smoke test script for post-deployment validation)
-        *   Updates to `README.md` (add CI/CD status badges)
-    *   **Deliverables:** Complete GitHub Actions CI/CD workflow; smoke test script; README badges; deployment automation.
-    *   **Acceptance Criteria:**
-        *   Pipeline triggers on push to `develop` and `main` branches, and on pull requests
-        *   Lint & Format Check jobs run in parallel, fail if linting errors
-        *   Unit test jobs run in parallel, fail if tests fail or coverage <80%
-        *   Integration tests start docker-compose, run tests, stop services (even on failure)
-        *   E2E tests run Playwright with headless browser, capture screenshots on failure
-        *   Security scan jobs run in parallel, fail on critical vulnerabilities
-        *   Docker build jobs build production images, tag with SHA and `latest`
-        *   Images pushed to registry (verify in GitHub Container Registry or ECR)
-        *   Staging deployment triggers automatically on push to `develop`
-        *   Production deployment requires manual approval (GitHub environment: `production`)
-        *   Smoke tests verify key endpoints: `/health/ready`, `/api/v1/vehicles`, frontend loads
-        *   Pipeline caches dependencies (verify build time improvement on second run)
-        *   README displays CI/CD status badges (build, test, coverage)
-        *   All pipeline stages complete successfully in <15 minutes
-    *   **Dependencies:** `I5.T1` (Dockerfiles), `I5.T2` (Helm chart), `I3.T9` (E2E tests)
-    *   **Parallelizable:** No (orchestrates all previous work)
-```
+**Stage 8: Staging Deployment**
+- `deploy-staging`: Auto-deploy on `develop` branch push
+- Helm upgrade with image SHA tags
+- Smoke tests verification
+- Depends on: image builds, Trivy scans
 
-### Context: deployment-staging (from docs/runbooks/deployment.md)
+**Stage 9: Production Deployment**
+- `deploy-production`: Manual approval required (GitHub environment: production)
+- Only on `main` branch
+- Rolling update strategy (maxSurge=1, maxUnavailable=0)
+- Smoke tests + automatic rollback on failure
 
-```markdown
-## Staging Deployment
-
-Staging deployment uses Kubernetes (AWS EKS) with Helm charts. The staging environment mirrors production but with reduced resources.
-
-### Prerequisites
-- AWS CLI configured: `aws configure`
-- kubectl configured for staging cluster: `aws eks update-kubeconfig --region us-east-1 --name sovd-staging-cluster`
-- Helm 3 installed
-- Docker images pushed to ECR
-
-### Step 1: Authenticate to AWS ECR
-
-```bash
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
-```
-
-**Verification**: Login should succeed with "Login Succeeded" message.
-
-### Step 2: Build and Push Docker Images
-
-Build frontend and backend images:
-
-```bash
-# Backend
-cd backend
-docker build -t sovd-backend:${COMMIT_SHA} .
-docker tag sovd-backend:${COMMIT_SHA} <ecr-repo>/sovd-backend:${COMMIT_SHA}
-docker tag sovd-backend:${COMMIT_SHA} <ecr-repo>/sovd-backend:latest
-docker push <ecr-repo>/sovd-backend:${COMMIT_SHA}
-docker push <ecr-repo>/sovd-backend:latest
-
-# Frontend
-cd ../frontend
-docker build -t sovd-frontend:${COMMIT_SHA} .
-docker tag sovd-frontend:${COMMIT_SHA} <ecr-repo>/sovd-frontend:${COMMIT_SHA}
-docker tag sovd-frontend:${COMMIT_SHA} <ecr-repo>/sovd-frontend:latest
-docker push <ecr-repo>/sovd-frontend:${COMMIT_SHA}
-docker push <ecr-repo>/sovd-frontend:latest
-```
-
-### Step 4: Deploy with Helm
-
-Navigate to the Helm chart directory:
-
-```bash
-cd sovd-helm-chart
-```
-
-Deploy or upgrade the release:
-
-```bash
-helm upgrade --install sovd-webapp . \
-  -f values-staging.yaml \
-  -n staging \
-  --set backend.image.tag=${COMMIT_SHA} \
-  --set frontend.image.tag=${COMMIT_SHA} \
-  --wait \
-  --timeout 5m
-```
-
-### Step 6: Run Smoke Tests
-
-Execute automated smoke tests:
-
-```bash
-# From project root
-export API_BASE_URL=http://${ALB_URL}
-pytest tests/smoke/ -v
-```
-
-**Verification**: All smoke tests should pass. If any fail, investigate before proceeding.
-```
-
-### Context: deployment-production (from docs/runbooks/deployment.md)
-
-```markdown
-## Production Deployment
-
-Production deployment follows the same Helm-based process as staging but includes additional safeguards and a blue-green deployment strategy.
-
-### Prerequisites
-- All staging smoke tests passed
-- Change ticket approved (for tracking)
-- Rollback plan prepared
-- On-call engineer available
-
-### Step 3: Deploy with Gradual Rollout
-
-Production uses a gradual rollout strategy (10% → 50% → 100%) with automatic rollback on errors.
-
-```bash
-cd sovd-helm-chart
-
-# Deploy with gradual rollout
-helm upgrade --install sovd-webapp . \
-  -f values-production.yaml \
-  -n production \
-  --set backend.image.tag=${COMMIT_SHA} \
-  --set frontend.image.tag=${COMMIT_SHA} \
-  --set deployment.strategy.type=RollingUpdate \
-  --set deployment.strategy.rollingUpdate.maxSurge=1 \
-  --set deployment.strategy.rollingUpdate.maxUnavailable=0 \
-  --wait \
-  --timeout 10m
-```
-
-### Step 5: Post-Deployment Verification
-
-Run production smoke tests:
-
-```bash
-export API_BASE_URL=https://sovd.yourdomain.com
-pytest tests/smoke/ -v --production
-```
-
-**Verification**:
-- Smoke tests pass
-- Health endpoints return 200
-- Login functionality works
-- Command submission works
-```
+**Stage 10: CI Summary**
+- `ci-success`: Aggregates all job results, fails if any job failed
 
 ---
 
@@ -283,302 +131,260 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-*   **File:** `.github/workflows/ci-cd.yml`
-    *   **Summary:** This file currently contains **ONLY** the first 5 stages of the CI/CD pipeline: frontend linting, frontend testing (with Lighthouse), backend linting, backend testing (with DB/Redis services), and security scanning (Bandit, pip-audit, npm audit). The file is INCOMPLETE - it is missing stages 6-9 (Build Images, Push Images, Deploy Staging, Deploy Production).
-    *   **Recommendation:** You MUST extend this existing file by adding the missing stages. DO NOT replace the entire file - keep the existing jobs and add new ones. The existing jobs provide a good foundation for stages 1-5.
-    *   **Current State:**
-        - Has `frontend-lint`, `frontend-test`, `frontend-lighthouse`, `backend-lint`, `backend-test`, `backend-security`, `frontend-security` jobs
-        - Has a `ci-success` job that aggregates all job results
-        - Uses caching for npm and pip dependencies (already implemented)
-        - Uses GitHub Services for PostgreSQL and Redis in backend tests
-        - Triggers on push to `main`, `master`, `develop` branches and on PRs
-    *   **What's Missing:**
-        - No Docker image build job
-        - No Docker image push job
-        - No deployment jobs (staging/production)
-        - No integration tests job (using docker-compose)
-        - No E2E tests job (though E2E tests exist in tests/e2e/)
-        - No smoke tests script reference
-        - No Trivy security scanning for Docker images
+**File: `infrastructure/helm/sovd-webapp/Chart.yaml`**
+- **Summary**: Helm chart metadata defining the SOVD Command WebApp application version 1.0.0
+- **Recommendation**: This confirms the deployment target is Helm-based Kubernetes. Your deployment diagram MUST reflect this Helm-orchestrated architecture.
 
-*   **File:** `Makefile`
-    *   **Summary:** This file contains useful targets for local development including `up`, `down`, `test`, `e2e`, `lint`. The `e2e` target is particularly important as it shows how to run E2E tests with docker-compose orchestration.
-    *   **Recommendation:** You SHOULD reference the Makefile's `e2e` target logic when implementing the E2E job in CI/CD. The Makefile shows the correct pattern: start docker-compose, wait for services, run tests, stop services (even on failure).
-    *   **Key Pattern from Makefile:**
-        ```bash
-        docker-compose up -d
-        # Wait for services (health checks)
-        # Run tests
-        docker-compose down  # Always runs, even if tests fail
-        ```
-    *   **Integration Tests:** The current `test` target runs pytest with coverage but doesn't distinguish between unit and integration tests. Your CI/CD should run integration tests separately from unit tests.
+**File: `infrastructure/helm/sovd-webapp/values.yaml`**
+- **Summary**: Complete Kubernetes resource definitions including backend (3 replicas), frontend (3 replicas), HPA configuration, AWS ALB ingress, and External Secrets integration
+- **Recommendation**: You MUST extract the following infrastructure components for the deployment diagram:
+  - **VPC Structure**: Public subnets (ALB), private subnets (EKS pods, RDS, ElastiCache)
+  - **EKS Cluster**: 3 availability zones with worker nodes
+  - **Pods**: Backend (3-10 replicas), Frontend (2-5 replicas)
+  - **Load Balancer**: AWS ALB with path-based routing
+  - **Database**: RDS Multi-AZ PostgreSQL (referenced as `postgres.default.svc.cluster.local` or external RDS endpoint)
+  - **Cache**: ElastiCache Redis (referenced as `redis.default.svc.cluster.local` or external endpoint)
+  - **Secrets**: AWS Secrets Manager with External Secrets Operator
+  - **Observability**: CloudWatch (implied for EKS/RDS/ALB monitoring)
 
-*   **File:** `backend/Dockerfile.prod`
-    *   **Summary:** Production-ready multi-stage Dockerfile for the backend. Uses Python 3.11-slim, installs dependencies in builder stage, creates minimal runtime image with non-root user (appuser, UID 1001), exposes port 8000, includes health check on `/health/ready`.
-    *   **Recommendation:** You MUST use this file with `-f backend/Dockerfile.prod` when building backend production images in stage 6. The image name should follow the pattern `sovd-backend` and be tagged with both `${GITHUB_SHA}` and `latest`.
-    *   **Build Context:** The build context should be the `backend/` directory. Build command should be: `docker build -f backend/Dockerfile.prod -t sovd-backend:${GITHUB_SHA} backend/`
+**File: `.github/workflows/ci-cd.yml`**
+- **Summary**: Comprehensive GitHub Actions workflow with 10 distinct stages (linting → testing → security → build → deploy)
+- **Recommendation**: Your CI/CD pipeline diagram MUST show the following stages in sequence/parallel:
+  1. **Parallel Linting**: frontend-lint + backend-lint
+  2. **Parallel Testing**: frontend-test + backend-test + frontend-lighthouse
+  3. **Integration Tests**: integration-tests (depends on tests)
+  4. **E2E Tests**: e2e-tests (depends on integration-tests)
+  5. **Parallel Security**: backend-security + frontend-security
+  6. **Parallel Builds**: build-backend-image + build-frontend-image (depends on all tests/security)
+  7. **Parallel Trivy Scans**: trivy-scan-backend + trivy-scan-frontend
+  8. **Conditional Staging Deploy**: deploy-staging (only on develop branch)
+  9. **Conditional Production Deploy**: deploy-production (only on main, manual approval)
+  10. **CI Summary**: ci-success (aggregates all results)
 
-*   **File:** `frontend/Dockerfile.prod`
-    *   **Summary:** Production-ready multi-stage Dockerfile for the frontend. Uses Node 20-alpine builder + nginx:alpine runtime, builds React app with Vite, serves static files from `/usr/share/nginx/html`, exposes port 80, runs as nginx user (UID 101).
-    *   **Recommendation:** You MUST use this file when building frontend production images. Note the special requirement: the nginx.conf file must be copied from `infrastructure/docker/nginx.conf` to `frontend/nginx.conf` BEFORE building (or handle this in the Dockerfile COPY command).
-    *   **Build Context:** The frontend Dockerfile expects `nginx.conf` to be in the frontend directory. Your build step should handle this with:
-        ```bash
-        cp infrastructure/docker/nginx.conf frontend/nginx.conf
-        docker build -f frontend/Dockerfile.prod -t sovd-frontend:${GITHUB_SHA} frontend/
-        ```
-
-*   **File:** `infrastructure/helm/sovd-webapp/values.yaml`
-    *   **Summary:** Helm chart default values. Shows the image repository format: `YOUR_ECR_REGISTRY/sovd-backend` and `YOUR_ECR_REGISTRY/sovd-frontend`. The tag defaults to `latest` but should be overridden in production.
-    *   **Recommendation:** Your deployment jobs MUST override the image tags using `--set backend.image.tag=${GITHUB_SHA}` and `--set frontend.image.tag=${GITHUB_SHA}` when deploying. This ensures deployments use the specific commit version, not `latest`.
-    *   **Image Registry:** The values file shows `YOUR_ECR_REGISTRY` as a placeholder. In your CI/CD, you should use GitHub Container Registry (ghcr.io) since it's easier to set up than AWS ECR and doesn't require AWS credentials. Format: `ghcr.io/${{ github.repository_owner }}/sovd-backend:${GITHUB_SHA}`
-
-*   **File:** `tests/e2e/`
-    *   **Summary:** Directory contains Playwright E2E tests with three test suites: `auth.spec.ts`, `command_execution.spec.ts`, `vehicle_management.spec.ts`. Has `playwright.config.ts` for configuration.
-    *   **Recommendation:** You MUST integrate these E2E tests into stage 4 of your CI/CD. The tests expect the full stack to be running (frontend + backend + DB + Redis). Use docker-compose to start services, then run `npx playwright test` from the `tests/e2e/` directory.
-    *   **Configuration:** The playwright.config.ts likely points to `http://localhost:3000` for the frontend. Ensure your CI job starts docker-compose and waits for services before running tests.
-
-*   **File:** `backend/tests/integration/` and `backend/tests/unit/`
-    *   **Summary:** Backend tests are organized into unit and integration directories. Integration tests likely require database and Redis connections.
-    *   **Recommendation:** Your CI/CD should run integration tests AFTER unit tests, in stage 3. The current `backend-test` job runs all tests together with DB/Redis services - you may want to split this into unit tests (stage 2, no services) and integration tests (stage 3, with services).
-    *   **Coverage Threshold:** The current backend-test job uses `--cov-fail-under=80` which is correct. Keep this requirement.
+**File: `docker-compose.yml`**
+- **Summary**: Local development orchestration with db, redis, backend, frontend, prometheus, and grafana services
+- **Recommendation**: This is the LOCAL development setup. Your deployment diagram should show the PRODUCTION AWS infrastructure, not docker-compose. However, the service relationships (backend → db, backend → redis, frontend → backend) are the same in both environments.
 
 ### Implementation Tips & Notes
 
-*   **Tip - Container Registry Choice:** Use GitHub Container Registry (ghcr.io) instead of AWS ECR for simplicity. GitHub Actions has built-in authentication to ghcr.io via `GITHUB_TOKEN`, so no additional secrets are needed. Image naming format:
-    ```yaml
-    ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
-    ghcr.io/${{ github.repository_owner }}/sovd-frontend:${{ github.sha }}
-    ```
+#### For Deployment Diagram (PlantUML)
 
-*   **Tip - Docker Build and Push Pattern:** Use the official `docker/build-push-action@v5` action for building and pushing images. It handles multi-platform builds, caching, and pushing efficiently:
-    ```yaml
-    - name: Build and push backend image
-      uses: docker/build-push-action@v5
-      with:
-        context: backend
-        file: backend/Dockerfile.prod
-        push: true
-        tags: |
-          ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
-          ghcr.io/${{ github.repository_owner }}/sovd-backend:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-    ```
+**Tip: AWS EKS Multi-AZ Architecture**
+- Use PlantUML's `deployment` diagram or `C4-Deployment` diagram style
+- Show 3 availability zones (us-east-1a, us-east-1b, us-east-1c is a common pattern)
+- Place ALB in public subnets across all AZs
+- Place EKS worker nodes in private subnets across all AZs
+- Place RDS Multi-AZ (primary + standby) in private subnets
+- Place ElastiCache in private subnets
 
-*   **Tip - Docker Registry Login:** Before building/pushing, you MUST log in to ghcr.io using:
-    ```yaml
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    ```
+**Tip: Network Flow and Protocols**
+- External users → Route53 (DNS) → ALB (HTTPS 443)
+- ALB → Backend Pods (HTTP 8000 on `/api`, `/ws`)
+- ALB → Frontend Pods (HTTP 80 on `/`)
+- Backend Pods → RDS (PostgreSQL 5432)
+- Backend Pods → ElastiCache (Redis 6379)
+- Backend Pods → AWS Secrets Manager (HTTPS 443 via External Secrets Operator)
+- All services → CloudWatch (metrics/logs)
 
-*   **Tip - Integration Tests with docker-compose:** For stage 3, you need to start docker-compose, run integration tests, then stop docker-compose. Use this pattern:
-    ```yaml
-    - name: Start services with docker-compose
-      run: docker-compose up -d
+**Tip: PlantUML Component Organization**
+```plantuml
+@startuml
+!include <C4/C4_Deployment>
 
-    - name: Wait for services to be healthy
-      run: |
-        timeout 60 bash -c 'until docker-compose ps | grep healthy; do sleep 2; done'
+' Define personas/external systems
+Person(user, "User", "Vehicle Diagnostics Engineer")
 
-    - name: Run integration tests
-      run: |
-        cd backend
-        pytest tests/integration/ -v
+' Define infrastructure zones
+Deployment_Node(route53, "Route53", "AWS DNS") {
+  System_Ext(dns, "DNS Records")
+}
 
-    - name: Stop services
-      if: always()  # Always run, even if tests fail
-      run: docker-compose down
-    ```
+Deployment_Node(vpc, "VPC", "10.0.0.0/16") {
+  Deployment_Node(az1, "AZ us-east-1a") {
+    ' Public subnet
+    ' Private subnet with EKS nodes, pods
+  }
+  ' Repeat for az2, az3
 
-*   **Tip - E2E Tests:** Stage 4 should use the same docker-compose pattern but run Playwright tests from `tests/e2e/`:
-    ```yaml
-    - name: Run E2E tests
-      run: |
-        cd tests/e2e
-        npx playwright test
+  ' RDS, ElastiCache, ALB definitions
+}
 
-    - name: Upload Playwright screenshots on failure
-      uses: actions/upload-artifact@v3
-      if: failure()
-      with:
-        name: playwright-screenshots
-        path: tests/e2e/test-results/
-    ```
+' External AWS services
+System_Ext(secrets, "Secrets Manager")
+System_Ext(cloudwatch, "CloudWatch")
+System_Ext(s3, "S3")
 
-*   **Tip - Trivy Security Scanning:** Add Trivy scanning in stage 5 to scan the built Docker images for vulnerabilities:
-    ```yaml
-    - name: Run Trivy vulnerability scanner on backend image
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ghcr.io/${{ github.repository_owner }}/sovd-backend:${{ github.sha }}
-        format: 'sarif'
-        output: 'trivy-backend-results.sarif'
+' Define relationships with protocols
+Rel(user, dns, "HTTPS", "sovd.example.com")
+Rel(dns, alb, "Routes traffic")
+' etc.
 
-    - name: Upload Trivy results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-backend-results.sarif'
-    ```
+@enduml
+```
 
-*   **Note - Smoke Tests Script:** You MUST create `scripts/smoke_tests.sh` that tests critical endpoints after deployment. The script should:
-    - Accept an API_BASE_URL environment variable (e.g., staging or production URL)
-    - Test `/health/ready` endpoint (should return 200 with healthy status)
-    - Test `/api/v1/vehicles` endpoint (should return 200, requires authentication or public access)
-    - Test frontend loads (curl the base URL, check for 200)
-    - Exit with code 0 if all tests pass, non-zero if any fail
-    - Example structure:
-        ```bash
-        #!/bin/bash
-        set -e
-        API_BASE_URL=${API_BASE_URL:-http://localhost:8000}
+**Warning: PlantUML Syntax Strictness**
+- Ensure all opening braces `{` have closing braces `}`
+- Use proper PlantUML keywords: `Deployment_Node`, `Container`, `System_Ext`, `Rel`
+- Test compilation with `plantuml -testdot` or online PlantUML editor before committing
 
-        echo "Testing health endpoint..."
-        curl -f ${API_BASE_URL}/health/ready || exit 1
+**Note: Existing Diagram Files**
+- I found existing PlantUML diagrams in `docs/diagrams/`: `component_diagram.puml`, `container_diagram.puml`, `erd.puml`, `sequence_command_flow.puml`, `sequence_error_flow.puml`
+- You SHOULD review these files to maintain consistent PlantUML style and formatting
+- The deployment diagram should be at a HIGHER abstraction level (C4 Level 3/4: infrastructure and deployment nodes)
 
-        echo "Testing API documentation..."
-        curl -f ${API_BASE_URL}/docs || exit 1
+#### For CI/CD Pipeline Diagram (Mermaid)
 
-        echo "All smoke tests passed!"
-        ```
+**Tip: Mermaid Flowchart Syntax**
+- Use `graph TD` (top-down) or `graph LR` (left-right) for pipeline flow
+- Show parallel jobs using subgraphs
+- Use different node shapes for different stages:
+  - `[Linting]` for rectangular boxes
+  - `{Security Scan}` for diamond (decision/gate)
+  - `((Build))` for circular nodes
+  - `[/Deploy/]` for trapezoid (deploy actions)
 
-*   **Tip - Deployment Jobs:** Stage 8 (staging) and stage 9 (production) should be separate jobs that:
-    - Run AFTER all build/test/scan jobs succeed (use `needs: [build-images, ...]`)
-    - Use conditional execution: staging runs on `github.ref == 'refs/heads/develop'`, production runs on `github.ref == 'refs/heads/main'`
-    - Production should use `environment: production` to enable manual approval gate in GitHub settings
-    - Both should install kubectl and helm, configure kubeconfig (for now, can be mocked/skipped since we don't have real clusters)
-    - Run helm upgrade with appropriate values file
-    - Run smoke tests after deployment
-    - For production, include rollback logic if smoke tests fail
+**Tip: Showing Parallelism and Dependencies**
+```mermaid
+graph TD
+    start([Push to GitHub])
 
-*   **Tip - GitHub Environment Setup (for Manual Approval):** The production deployment job requires a GitHub environment named `production` with protection rules. This is configured in GitHub repository settings (Settings → Environments → New environment → "production" → Add required reviewers). In your workflow, reference it with:
-    ```yaml
-    deploy-production:
-      environment: production  # This triggers the approval gate
-    ```
+    %% Stage 1: Parallel linting
+    start --> lint_frontend[Frontend Lint]
+    start --> lint_backend[Backend Lint]
 
-*   **Note - Caching:** The current workflow already implements caching for npm (Node.js) and pip (Python). When you add docker builds, also add Docker layer caching using `cache-from: type=gha` and `cache-to: type=gha,mode=max` in the `docker/build-push-action` step.
+    %% Stage 2: Parallel testing
+    lint_frontend --> test_frontend[Frontend Test]
+    lint_backend --> test_backend[Backend Test]
+    test_frontend --> lighthouse[Lighthouse CI]
 
-*   **Tip - README Badges:** Add GitHub Actions badges to README.md at the top of the file:
-    ```markdown
-    # Cloud-to-Vehicle SOVD Command WebApp
+    %% Stage 3: Integration (depends on tests)
+    test_frontend --> integration[Integration Tests]
+    test_backend --> integration
+    lighthouse --> integration
 
-    ![CI/CD Pipeline](https://github.com/{owner}/{repo}/actions/workflows/ci-cd.yml/badge.svg)
-    ![Backend Coverage](https://img.shields.io/badge/backend%20coverage-80%25-brightgreen)
-    ![Frontend Coverage](https://img.shields.io/badge/frontend%20coverage-80%25-brightgreen)
+    %% Continue with remaining stages...
+```
 
-    ## Project Overview
-    ...
-    ```
-    Replace `{owner}/{repo}` with actual repository details or use `${{ github.repository }}` pattern.
+**Note: GitHub Actions Dependency Graph**
+- Your diagram MUST accurately reflect the `needs:` dependencies in the workflow file
+- For example: `deploy-staging` needs `[build-backend-image, build-frontend-image, trivy-scan-backend, trivy-scan-frontend]`
+- Show conditional logic: "deploy-staging runs only on `develop` branch"
 
-*   **Warning - Kubernetes Deployment Limitation:** Since this is likely a development/demo environment without real AWS EKS clusters, the deployment stages (8 and 9) may need to be **mocked or skipped initially**. You can:
-    1. Create the deployment job structure but comment out the actual kubectl/helm commands
-    2. Add a TODO comment explaining that real deployments require EKS cluster setup and AWS credentials
-    3. Keep the smoke tests section functional for when real infrastructure is available
-    4. Alternative: Use a local Kubernetes cluster (minikube or kind) in CI for testing deployments
+**Tip: Representing Manual Approval**
+- Use a special node style for the production deployment manual approval gate
+- Example: `production_approval{Manual Approval Required}`
+- Reference the GitHub environment: `production` in the annotation
 
-*   **Tip - Job Dependencies and Ordering:** Structure your jobs with `needs` to enforce correct ordering:
-    ```yaml
-    jobs:
-      # Stage 1: Linting (parallel)
-      backend-lint: ...
-      frontend-lint: ...
+**Warning: Mermaid Rendering Compatibility**
+- The file is named `ci_cd_pipeline.md` (Markdown format)
+- You MUST wrap the Mermaid code in triple backticks with `mermaid` language identifier:
+  ````markdown
+  ```mermaid
+  graph TD
+      ...
+  ```
+  ````
+- Add descriptive markdown text before/after the diagram explaining the pipeline stages
 
-      # Stage 2: Unit tests (parallel, depend on lint)
-      backend-test:
-        needs: [backend-lint]
-      frontend-test:
-        needs: [frontend-lint]
+**Recommendation: Use Subgraphs for Stage Grouping**
+```mermaid
+graph TD
+    subgraph Stage1[Stage 1: Linting]
+        lint_frontend
+        lint_backend
+    end
 
-      # Stage 3: Integration tests (depend on unit tests)
-      integration-tests:
-        needs: [backend-test, frontend-test]
+    subgraph Stage2[Stage 2: Testing]
+        test_frontend
+        test_backend
+        lighthouse
+    end
 
-      # Stage 4: E2E tests (depend on integration)
-      e2e-tests:
-        needs: [integration-tests]
+    %% Show dependencies between subgraphs
+    Stage1 --> Stage2
+```
 
-      # Stage 5: Security scans (parallel, can run after unit tests)
-      security-backend:
-        needs: [backend-test]
-      security-frontend:
-        needs: [frontend-test]
+### Cross-Cutting Concerns
 
-      # Stage 6: Build images (depend on all tests passing)
-      build-images:
-        needs: [backend-test, frontend-test, integration-tests, e2e-tests]
+**Version Control Best Practices**
+- Commit both diagrams in a single commit with a descriptive message
+- Example commit message: `feat(docs): add AWS deployment and CI/CD pipeline diagrams (I5.T4)`
+- Follow the existing commit message style in the repository (I observed commits like `feat(ci-cd): implement complete CI/CD pipeline...`)
 
-      # Stage 7: Scan images (depends on build)
-      trivy-scan:
-        needs: [build-images]
+**Documentation Standards**
+- Add a comment header to the PlantUML file explaining what the diagram represents
+- Add a markdown section to `ci_cd_pipeline.md` with:
+  - Diagram title
+  - Brief description of the pipeline
+  - Link to the actual workflow file: `.github/workflows/ci-cd.yml`
+  - Notes about manual approval gates
 
-      # Stage 8: Deploy staging (depends on all previous stages)
-      deploy-staging:
-        needs: [build-images, trivy-scan]
-        if: github.ref == 'refs/heads/develop'
+**Testing Your Diagrams**
+- PlantUML: Use online editor at https://www.plantuml.com/plantuml/uml/ or install PlantUML locally
+- Mermaid: Use online editor at https://mermaid.live/ or preview in GitHub (GitHub natively renders Mermaid)
+- CRITICAL: Both diagrams MUST compile without syntax errors
 
-      # Stage 9: Deploy production (depends on all previous stages)
-      deploy-production:
-        needs: [build-images, trivy-scan]
-        if: github.ref == 'refs/heads/main'
-        environment: production
-    ```
+**Alignment with Existing Diagrams**
+- Review `docs/diagrams/container_diagram.puml` to see how the Web App, API Gateway, Application Server, and databases are represented at the container level
+- Your deployment diagram should show WHERE these containers are deployed in AWS infrastructure
+- Maintain consistency in naming (e.g., use "Backend" not "Application Server" to match Helm values)
 
-*   **Tip - Workflow Optimization for 15min Limit:** To keep the pipeline under 15 minutes:
-    - Use aggressive caching (npm, pip, docker layers)
-    - Run linting and unit tests in parallel
-    - Run security scans in parallel with other stages when possible
-    - Use `--parallel` flags for test runners where supported
-    - Limit Playwright E2E tests to critical paths (not every single test if it's slow)
-    - Use `docker/build-push-action` with layer caching instead of plain docker build commands
+### Final Checklist Before Submission
 
-*   **Note - Integration vs Unit Tests:** The current `backend-test` job runs ALL backend tests (unit + integration) together. For better organization and faster feedback, consider:
-    - Splitting into `backend-unit-test` (stage 2, no services, fast) using `pytest tests/unit/`
-    - And `backend-integration-test` (stage 3, with services) using `pytest tests/integration/`
-    - However, since the current job already uses GitHub Services for DB/Redis, it's acceptable to keep it as-is for simplicity. Just ensure it's placed in the right stage.
+1. ✅ **deployment_diagram.puml compiles without errors**
+2. ✅ **Shows all AWS components**: VPC, 3 AZs, public/private subnets, ALB, EKS (3+ nodes), RDS Multi-AZ, ElastiCache, NAT Gateway, Route53, Secrets Manager, CloudWatch, S3
+3. ✅ **Connections labeled with protocols**: HTTPS, HTTP, PostgreSQL (5432), Redis (6379)
+4. ✅ **EKS pods shown across 3 AZs** with anti-affinity (matching Helm chart)
+5. ✅ **ci_cd_pipeline.md renders as valid Mermaid** in GitHub preview
+6. ✅ **Pipeline matches actual workflow stages** (10 stages total)
+7. ✅ **Shows parallel execution** (linting, testing, security, builds)
+8. ✅ **Shows dependencies** (needs: clauses) accurately
+9. ✅ **Shows conditional deploys** (develop → staging, main → production)
+10. ✅ **Manual approval gate** for production deployment is clearly marked
+11. ✅ **Both files committed** to `docs/diagrams/`
 
-*   **Tip - Helm Installation in CI:** For deployment jobs, install Helm using the official action:
-    ```yaml
-    - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: '3.13.0'
-    ```
+---
 
-*   **Tip - Kubeconfig Setup (when ready):** For real deployments, configure kubectl with:
-    ```yaml
-    - name: Configure kubectl
-      run: |
-        mkdir -p $HOME/.kube
-        echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
-        kubectl config current-context
-    ```
-    (Requires KUBECONFIG_STAGING secret in GitHub repository)
+## 4. Additional Resources and References
 
-### Workflow Structure Summary
+### Existing Diagram Files (for style reference)
+- `docs/diagrams/component_diagram.puml` - C4 Level 3 component diagram
+- `docs/diagrams/container_diagram.puml` - C4 Level 2 container diagram
+- `docs/diagrams/erd.puml` - Database entity relationship diagram
+- `docs/diagrams/sequence_command_flow.puml` - Command execution sequence
+- `docs/diagrams/sequence_error_flow.puml` - Error handling sequence
 
-Based on the architecture blueprint and existing code, your complete CI/CD workflow should have these jobs:
+### Key Configuration Files (analyzed for this task)
+- `infrastructure/helm/sovd-webapp/Chart.yaml` - Helm chart metadata
+- `infrastructure/helm/sovd-webapp/values.yaml` - Kubernetes resource definitions
+- `infrastructure/helm/sovd-webapp/values-production.yaml` - Production overrides (if exists)
+- `.github/workflows/ci-cd.yml` - Complete CI/CD pipeline definition
+- `docker-compose.yml` - Development environment (for understanding service relationships)
 
-1. **frontend-lint** (existing) - Keep as-is
-2. **frontend-test** (existing) - Keep as-is
-3. **frontend-lighthouse** (existing) - Keep as-is
-4. **backend-lint** (existing) - Keep as-is
-5. **backend-test** (existing) - Keep as-is, but consider renaming to backend-unit-test
-6. **backend-security** (existing) - Keep as-is
-7. **frontend-security** (existing) - Keep as-is
-8. **integration-tests** (NEW) - Add this for stage 3
-9. **e2e-tests** (NEW) - Add this for stage 4
-10. **build-backend-image** (NEW) - Add this for stage 6
-11. **build-frontend-image** (NEW) - Add this for stage 6
-12. **trivy-scan-backend** (NEW) - Add this for stage 5 (after build)
-13. **trivy-scan-frontend** (NEW) - Add this for stage 5 (after build)
-14. **deploy-staging** (NEW) - Add this for stage 8
-15. **deploy-production** (NEW) - Add this for stage 9
-16. **ci-success** (existing) - Update to include all new jobs in the needs list
+### External Documentation Links
+- **PlantUML Deployment Diagrams**: https://plantuml.com/deployment-diagram
+- **C4 Model for PlantUML**: https://github.com/plantuml-stdlib/C4-PlantUML
+- **Mermaid Flowchart Syntax**: https://mermaid.js.org/syntax/flowchart.html
+- **AWS EKS Best Practices**: Multi-AZ deployment across 3 availability zones
+- **GitHub Actions Workflow Syntax**: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
 
-Total: ~15-16 jobs organized into 9 stages as specified in the architecture blueprint.
+---
+
+## Summary
+
+You are tasked with creating TWO diagrams:
+
+1. **AWS Production Deployment Architecture** (PlantUML): A comprehensive infrastructure diagram showing the complete AWS EKS deployment with VPC networking, load balancing, database, caching, secrets management, and observability. This diagram is at the C4 Level 3/4 abstraction (deployment/infrastructure).
+
+2. **CI/CD Pipeline Flow** (Mermaid): A detailed flowchart showing all 10 stages of the GitHub Actions workflow, including parallel execution, dependencies, security gates, and deployment approvals. This diagram must accurately reflect the actual implementation in `.github/workflows/ci-cd.yml`.
+
+Both diagrams are critical documentation artifacts that will help developers and operators understand how the SOVD Command WebApp is deployed and maintained in production.
+
+**Key Success Criteria**:
+- Diagrams compile and render correctly
+- All components from the task description are present
+- Connections and protocols are clearly labeled
+- Diagrams match the actual implemented infrastructure (Helm chart) and pipeline (GitHub Actions)
+- Professional quality suitable for production documentation
+
+Good luck, Coder Agent! 🚀
