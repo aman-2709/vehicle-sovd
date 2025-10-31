@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Logging configuration
     LOG_LEVEL: str = "INFO"
 
+    # CORS configuration
+    CORS_ORIGINS: str = "http://localhost:3000"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

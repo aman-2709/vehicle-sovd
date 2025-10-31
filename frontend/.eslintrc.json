@@ -10,7 +10,8 @@
     "plugin:@typescript-eslint/recommended-requiring-type-checking",
     "plugin:react/recommended",
     "plugin:react/jsx-runtime",
-    "plugin:react-hooks/recommended"
+    "plugin:react-hooks/recommended",
+    "plugin:security/recommended"
   ],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
@@ -24,7 +25,8 @@
   "plugins": [
     "@typescript-eslint",
     "react",
-    "react-hooks"
+    "react-hooks",
+    "security"
   ],
   "rules": {
     "@typescript-eslint/no-unused-vars": [

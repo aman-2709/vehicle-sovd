@@ -31,6 +31,7 @@ from app.middleware.error_handling_middleware import (
 )
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.rate_limiting_middleware import limiter
+from app.middleware.security_headers_middleware import SecurityHeadersMiddleware
 from app.utils.error_codes import ErrorCode
 from app.utils.logging import configure_logging
 
@@ -138,14 +139,15 @@ async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded)
     return response
 
 # Register middleware (order matters - LIFO execution)
-# Execution order: LoggingMiddleware → CORSMiddleware → SlowAPIMiddleware → Endpoints
+# Execution order: SecurityHeadersMiddleware → LoggingMiddleware → CORSMiddleware → SlowAPIMiddleware → Endpoints
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(LoggingMiddleware)
 
 # Configure CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=settings.CORS_ORIGINS.split(","),  # Environment-configurable origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

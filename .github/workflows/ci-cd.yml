@@ -206,11 +206,76 @@ jobs:
           path: backend/htmlcov/
           retention-days: 30
 
+  # Backend security scanning job
+  backend-security:
+    name: Backend Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install security tools
+        run: |
+          pip install bandit pip-audit
+
+      - name: Run Bandit security scan
+        working-directory: ./backend
+        run: |
+          bandit -r app/ -f json -o bandit-report.json || true
+          bandit -r app/
+
+      - name: Run pip-audit
+        working-directory: ./backend
+        run: |
+          pip-audit -r requirements.txt || echo "Vulnerabilities found - review required"
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bandit-security-report
+          path: backend/bandit-report.json
+          retention-days: 30
+
+  # Frontend security scanning job
+  frontend-security:
+    name: Frontend Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run npm audit
+        working-directory: ./frontend
+        run: |
+          npm audit --audit-level=high || echo "Vulnerabilities found - review required"
+
+      - name: Run ESLint with security rules
+        working-directory: ./frontend
+        run: npm run lint
+
   # Summary job that requires all tests to pass
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [frontend-lint, frontend-test, frontend-lighthouse, backend-lint, backend-test]
+    needs: [frontend-lint, frontend-test, frontend-lighthouse, backend-lint, backend-test, backend-security, frontend-security]
     if: always()
     steps:
       - name: Check all jobs status
@@ -219,7 +284,9 @@ jobs:
              [ "${{ needs.frontend-test.result }}" != "success" ] || \
              [ "${{ needs.frontend-lighthouse.result }}" != "success" ] || \
              [ "${{ needs.backend-lint.result }}" != "success" ] || \
-             [ "${{ needs.backend-test.result }}" != "success" ]; then
+             [ "${{ needs.backend-test.result }}" != "success" ] || \
+             [ "${{ needs.backend-security.result }}" != "success" ] || \
+             [ "${{ needs.frontend-security.result }}" != "success" ]; then
             echo "One or more CI jobs failed"
             exit 1
           fi

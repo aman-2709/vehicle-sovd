@@ -4,7 +4,7 @@
  * Tests for error toast notification display, stacking, and auto-dismiss behavior.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { ErrorProvider, useError } from '../../src/context/ErrorContext';
 import ErrorToast from '../../src/components/common/ErrorToast';
@@ -33,7 +33,7 @@ describe('ErrorToast Component', () => {
     vi.useRealTimers();
   });
 
-  it('renders no toasts when there are no errors', async () => {
+  it('renders no toasts when there are no errors', () => {
     render(
       <ErrorProvider>
         <ErrorToast />
@@ -155,10 +155,10 @@ describe('ErrorToast Component', () => {
     });
   });
 
-  it('auto-dismisses error toast after 6 seconds', async () => {
+  it('auto-dismisses error toast after 6 seconds', () => {
     vi.useFakeTimers();
 
-    const { container } = render(
+    render(
       <ErrorProvider>
         <ErrorTrigger />
         <ErrorToast />
@@ -185,10 +185,10 @@ describe('ErrorToast Component', () => {
     vi.useRealTimers();
   });
 
-  it('auto-dismisses success toast after 4 seconds', async () => {
+  it('auto-dismisses success toast after 4 seconds', () => {
     vi.useFakeTimers();
 
-    const { container } = render(
+    render(
       <ErrorProvider>
         <ErrorTrigger />
         <ErrorToast />
