@@ -1,0 +1,88 @@
+# Production Dockerfile for SOVD Command WebApp - Backend
+# Multi-stage build for optimized image size and security
+#
+# This Dockerfile creates a production-ready Python 3.11 environment for the FastAPI backend.
+# Features:
+# - Multi-stage build (builder + runtime) for minimal image size
+# - Non-root user execution for security
+# - No development dependencies
+# - Optimized for production deployment
+
+# Stage 1: Builder - Install dependencies and compile packages
+FROM python:3.11-slim AS builder
+
+# Set environment variables for build
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install build dependencies required for compiling Python packages with C extensions
+# - gcc: C compiler for building native extensions
+# - python3-dev: Python headers for building extensions
+# - libpq-dev: PostgreSQL development libraries (for asyncpg)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements file and install dependencies
+# Install to user site-packages directory to make copying easier
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime - Create minimal production image
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONPATH=/app
+
+# Install only runtime dependencies (no build tools)
+# - libpq5: PostgreSQL client library (runtime only, no dev headers)
+# - curl: For health checks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+# UID 1001 ensures the user is non-root
+RUN useradd -m -u 1001 appuser && \
+    mkdir -p /app && \
+    chown -R appuser:appuser /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy installed Python packages from builder stage
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+
+# Copy application code
+COPY --chown=appuser:appuser . /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port 8000 for FastAPI application
+EXPOSE 8000
+
+# Health check to verify the application is ready
+# Uses /health/ready endpoint which checks database and Redis connectivity
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health/ready || exit 1
+
+# Start uvicorn with production configuration
+# --host 0.0.0.0: Listen on all interfaces
+# --port 8000: Listen on port 8000
+# --workers 4: Run 4 worker processes for parallel request handling
+# --loop uvloop: Use uvloop for better async performance
+# --http httptools: Use httptools for faster HTTP parsing
+# Note: --reload flag is NOT used in production
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--loop", "uvloop", "--http", "httptools"]

@@ -1,0 +1,87 @@
+# Frontend .dockerignore for SOVD Command WebApp
+# Excludes unnecessary files from Docker build context to reduce image size and build time
+
+# Dependencies (will be reinstalled in container)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output (will be rebuilt in container)
+dist/
+build/
+.cache/
+
+# Testing files
+tests/
+test/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage/
+.nyc_output/
+
+# Development and IDE files
+.env
+.env.example
+.env.local
+.env.development
+.env.production
+.env.*.local
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Docker files (don't copy Dockerfiles into image)
+Dockerfile
+Dockerfile.prod
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# Documentation and development files
+README.md
+README.*.md
+docs/
+*.md
+Makefile
+.editorconfig
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+lighthouserc.json
+
+# Type checking and linting
+.eslintrc*
+.eslintignore
+.prettierrc*
+.prettierignore
+tsconfig*.json
+
+# Bundle analysis and performance reports
+stats.html
+report.html
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db

@@ -1,0 +1,92 @@
+# Backend .dockerignore for SOVD Command WebApp
+# Excludes unnecessary files from Docker build context to reduce image size and build time
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Testing and coverage files
+tests/
+test_*.py
+*_test.py
+htmlcov/
+coverage.json
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
+.nox/
+
+# Development and IDE files
+.env
+.env.example
+.env.local
+.env.*.local
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Docker files (don't copy Dockerfiles into image)
+Dockerfile
+Dockerfile.prod
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# Documentation and development files
+README.md
+README.*.md
+docs/
+*.md
+Makefile
+.editorconfig
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# Alembic compiled files (keep .py migration files, exclude compiled)
+alembic/versions/*.pyc
+alembic/__pycache__/
+
+# Virtual environment directories
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Type checking and linting
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+dmypy.json
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
