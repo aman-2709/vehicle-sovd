@@ -10,24 +10,31 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T4",
+  "task_id": "I5.T6",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Create deployment diagram (PlantUML) showing AWS EKS: VPC (public/private subnets, 3 AZs), ALB, EKS (3 nodes, pods), RDS Multi-AZ, ElastiCache, NAT, Route53, Secrets Manager, CloudWatch, S3. Show connections with protocols. Create CI/CD pipeline diagram (Mermaid) showing GitHub Actions workflow stages.",
-  "agent_type_hint": "DiagrammingAgent",
-  "inputs": "Architecture Blueprint Section 3.9; Helm chart, CI/CD from I5.T2/T3.",
+  "description": "Replace mock vehicle connector with real gRPC client. Implement: gRPC channel creation, execute_command (create CommandRequest, call ExecuteCommand RPC, iterate streamed responses, insert to DB, publish to Redis, update status), connection management (channel pool, retry with backoff), TLS config (mutual TLS), timeout (30s deadline), error handling (map gRPC codes). Add VEHICLE_ENDPOINT_URL config. Create mock gRPC server for tests. Write integration tests.",
+  "agent_type_hint": "BackendAgent",
+  "inputs": "Architecture Blueprint Section 3.5, 3.7; protobuf from I5.T5.",
   "target_files": [
-    "docs/diagrams/deployment_diagram.puml",
-    "docs/diagrams/ci_cd_pipeline.md"
+    "backend/app/connectors/vehicle_connector.py",
+    "backend/app/config.py",
+    "backend/tests/mocks/mock_vehicle_server.py",
+    "backend/tests/integration/test_grpc_vehicle_connector.py"
   ],
-  "input_files": [],
-  "deliverables": "PlantUML deployment diagram; Mermaid CI/CD diagram.",
-  "acceptance_criteria": "deployment_diagram.puml compiles; Shows all components from Blueprint 3.9; VPC structure clear; EKS across 3 AZs; Connections labeled; ci_cd_pipeline.md renders as Mermaid; Matches actual pipeline stages; Both committed",
+  "input_files": [
+    "backend/app/generated/sovd_vehicle_service_pb2.py",
+    "backend/app/generated/sovd_vehicle_service_pb2_grpc.py",
+    "backend/app/repositories/response_repository.py"
+  ],
+  "deliverables": "Real gRPC client; TLS config; timeout/error handling; mock server; integration tests.",
+  "acceptance_criteria": "gRPC channel to endpoint from config; execute_command sends CommandRequest; Streamed responses iterated+saved+published; Status updated on final; Timeout 30s, DeadlineExceeded handled; TLS enabled (mutual, placeholder certs); Mock server simulates streaming; Tests verify: execution, streaming, timeout, errors; No errors with mock; Coverage ≥80%; No linter errors",
   "dependencies": [
-    "I5.T2",
-    "I5.T3"
+    "I5.T5",
+    "I2.T4",
+    "I3.T1"
   ],
-  "parallelizable": true,
+  "parallelizable": false,
   "done": false
 }
 ```
@@ -36,92 +43,222 @@ This is the full specification of the task you must complete.
 
 ## 2. Architectural & Planning Context
 
-The following are the relevant sections that provide guidance for creating these diagrams. While the full architecture blueprint files were not found in the repository (they may be in external documentation), the existing implementation files provide all the necessary information.
+The following are the relevant sections from the architecture and plan documents, which I found by analyzing the task description.
 
-### Context: Production Deployment Infrastructure (from Helm Chart)
+### Context: gRPC Service Definition (from grpc_schema.md)
 
-**Source**: `infrastructure/helm/sovd-webapp/values.yaml` (I5.T2 deliverable)
+```markdown
+## Service Definition
 
-The Helm chart reveals the complete Kubernetes deployment structure:
+### VehicleService
 
-**Backend Service Configuration**:
-- 3 replicas with pod anti-affinity for high availability
-- Resources: 256Mi/250m CPU (requests), 512Mi/500m CPU (limits)
-- Health checks: `/health/live` (liveness), `/health/ready` (readiness with DB/Redis checks)
-- Pod runs as non-root user (1001) with dropped capabilities
+The main gRPC service for vehicle communication.
 
-**Frontend Service Configuration**:
-- 3 replicas with pod anti-affinity
-- Resources: 64Mi/100m CPU (requests), 128Mi/200m CPU (limits)
-- Nginx-based static file serving
+```protobuf
+service VehicleService {
+  rpc ExecuteCommand(CommandRequest) returns (stream CommandResponse) {}
+}
+```
 
-**Horizontal Pod Autoscaler (HPA)**:
-- Backend: 3-10 replicas, target CPU 70%, scale up/down policies
-- Frontend: 2-5 replicas, target CPU 70%
+#### ExecuteCommand RPC
 
-**Ingress (AWS ALB)**:
-- Internet-facing Application Load Balancer
-- HTTP (80) and HTTPS (443) listeners
-- Path-based routing: `/api` and `/ws` → backend, `/` → frontend
-- Target type: IP (for direct pod access)
+Executes an SOVD command on a target vehicle with streaming response support.
 
-**External Services**:
-- PostgreSQL: RDS Multi-AZ deployment (from config section)
-- Redis: ElastiCache (from config section)
-- Secrets: AWS Secrets Manager (via External Secrets Operator)
+**Request:** `CommandRequest`
+**Response:** `stream CommandResponse` (server-streaming)
+**Pattern:** Unary request → Server-streaming response
 
-### Context: CI/CD Pipeline (from GitHub Actions Workflow)
+**Description:**
+- Client sends a single `CommandRequest` with command details
+- Server streams multiple `CommandResponse` messages back (one per response chunk)
+- Each response includes a `sequence_number` and `is_final` flag
+- The final response has `is_final=true`, indicating no more responses will be sent
 
-**Source**: `.github/workflows/ci-cd.yml` (I5.T3 deliverable)
+## Message Definitions
 
-The CI/CD pipeline consists of the following stages:
+### CommandRequest
 
-**Stage 1: Parallel Linting**
-- `frontend-lint`: ESLint + Prettier (Node.js 18)
-- `backend-lint`: Ruff + Black + mypy (Python 3.11)
+```protobuf
+message CommandRequest {
+  string command_id = 1;
+  string vehicle_id = 2;
+  string command_name = 3;
+  map<string, string> command_params = 10;
+}
+```
 
-**Stage 2: Parallel Testing**
-- `frontend-test`: Vitest with 80% coverage requirement
-- `backend-test`: pytest with PostgreSQL/Redis services, 80% coverage requirement
-- `frontend-lighthouse`: Lighthouse CI performance testing (score >90)
+**Fields:**
+- `command_id`: UUID v4 string (lowercase with hyphens). Example: `"550e8400-e29b-41d4-a716-446655440000"`
+- `vehicle_id`: UUID v4 string identifying the target vehicle
+- `command_name`: SOVD command identifier (e.g., "ReadDTC", "ClearDTC", "ReadDataByID")
+- `command_params`: Map of string keys to string values. For complex nested parameters, values should be JSON-encoded strings.
 
-**Stage 3: Integration Tests**
-- `integration-tests`: docker-compose orchestration, backend integration test suite
-- Depends on: frontend-test, backend-test
+### CommandResponse
 
-**Stage 4: E2E Tests**
-- `e2e-tests`: Playwright tests with full stack (chromium + firefox)
-- Depends on: integration-tests
+```protobuf
+message CommandResponse {
+  string command_id = 1;
+  string response_payload = 2;
+  int32 sequence_number = 3;
+  bool is_final = 10;
+  string timestamp = 11;
+}
+```
 
-**Stage 5: Security Scans (Parallel)**
-- `backend-security`: Bandit + pip-audit
-- `frontend-security`: npm audit + ESLint security rules
+**Fields:**
+- `command_id`: Command identifier matching the `CommandRequest.command_id` (UUID format)
+- `response_payload`: Response data from the vehicle (JSON-encoded string)
+- `sequence_number`: Zero-indexed sequence number for ordering response chunks (0, 1, 2, ...)
+- `is_final`: Flag indicating if this is the final response chunk. When `true`, no more responses will be sent.
+- `timestamp`: ISO 8601 timestamp when this response was generated. Example: `"2025-10-31T14:30:00.123456"`
+```
 
-**Stage 6: Docker Image Builds (Parallel)**
-- `build-backend-image`: Multi-stage Dockerfile.prod, push to GitHub Container Registry
-- `build-frontend-image`: Multi-stage Dockerfile.prod with Nginx
-- Both tag with SHA + latest
-- Depends on: tests, security scans, integration tests, E2E tests
+### Context: gRPC Client Usage Example (from grpc_schema.md)
 
-**Stage 7: Container Security Scans**
-- `trivy-scan-backend`: Scan backend image for CRITICAL/HIGH vulnerabilities
-- `trivy-scan-frontend`: Scan frontend image
-- Uploads SARIF to GitHub Security tab
+```python
+import grpc
+from app.generated import sovd_vehicle_service_pb2
+from app.generated import sovd_vehicle_service_pb2_grpc
 
-**Stage 8: Staging Deployment**
-- `deploy-staging`: Auto-deploy on `develop` branch push
-- Helm upgrade with image SHA tags
-- Smoke tests verification
-- Depends on: image builds, Trivy scans
+# Create gRPC channel
+channel = grpc.insecure_channel('vehicle.example.com:50051')
+stub = sovd_vehicle_service_pb2_grpc.VehicleServiceStub(channel)
 
-**Stage 9: Production Deployment**
-- `deploy-production`: Manual approval required (GitHub environment: production)
-- Only on `main` branch
-- Rolling update strategy (maxSurge=1, maxUnavailable=0)
-- Smoke tests + automatic rollback on failure
+# Create request
+request = sovd_vehicle_service_pb2.CommandRequest(
+    command_id="550e8400-e29b-41d4-a716-446655440000",
+    vehicle_id="123e4567-e89b-12d3-a456-426614174000",
+    command_name="ReadDTC",
+    command_params={"ecuAddress": "0x10", "dtcMask": "0xFF"}
+)
 
-**Stage 10: CI Summary**
-- `ci-success`: Aggregates all job results, fails if any job failed
+# Call streaming RPC
+response_stream = stub.ExecuteCommand(request)
+
+# Iterate over streamed responses
+for response in response_stream:
+    print(f"Chunk {response.sequence_number}:")
+    print(f"  Payload: {response.response_payload}")
+    print(f"  Final: {response.is_final}")
+    print(f"  Timestamp: {response.timestamp}")
+
+    if response.is_final:
+        print("Command execution complete!")
+        break
+```
+
+### Context: TLS Configuration (from grpc_schema.md)
+
+```markdown
+## Security
+
+### TLS Configuration
+
+Production deployments MUST use TLS:
+
+```python
+# Client
+credentials = grpc.ssl_channel_credentials(
+    root_certificates=open('ca.pem', 'rb').read()
+)
+channel = grpc.secure_channel('vehicle.example.com:50051', credentials)
+
+# Server
+server_credentials = grpc.ssl_server_credentials(
+    [(open('server-key.pem', 'rb').read(), open('server-cert.pem', 'rb').read())]
+)
+server.add_secure_port('[::]:50051', server_credentials)
+```
+
+### Mutual TLS (mTLS)
+
+For vehicle authentication, use mutual TLS with client certificates:
+
+```python
+credentials = grpc.ssl_channel_credentials(
+    root_certificates=open('ca.pem', 'rb').read(),
+    private_key=open('client-key.pem', 'rb').read(),
+    certificate_chain=open('client-cert.pem', 'rb').read()
+)
+```
+```
+
+### Context: Error Handling with gRPC Status Codes (from grpc_schema.md)
+
+```markdown
+## Error Handling
+
+### gRPC Status Codes
+
+The gRPC implementation will use standard status codes for error handling:
+
+| Status Code | When to Use |
+|-------------|-------------|
+| `OK` | Successful completion (all response chunks sent with `is_final=true`) |
+| `CANCELLED` | Client cancelled the request |
+| `INVALID_ARGUMENT` | Invalid `CommandRequest` fields (e.g., malformed UUID) |
+| `NOT_FOUND` | Vehicle not found or not connected |
+| `DEADLINE_EXCEEDED` | Command execution timeout |
+| `UNAVAILABLE` | Vehicle temporarily unavailable (will retry) |
+| `INTERNAL` | Unexpected server error |
+
+### Error Responses
+
+Errors are communicated via gRPC status codes, **not** in `CommandResponse` messages.
+
+**Client Error Handling:**
+```python
+try:
+    for response in stub.ExecuteCommand(request):
+        # Process response
+        pass
+except grpc.RpcError as e:
+    print(f"Error: {e.code()} - {e.details()}")
+```
+```
+
+### Context: Mock gRPC Server Example (from grpc_schema.md)
+
+```python
+import grpc
+from concurrent import futures
+from app.generated import sovd_vehicle_service_pb2
+from app.generated import sovd_vehicle_service_pb2_grpc
+from datetime import datetime
+
+class VehicleServiceServicer(sovd_vehicle_service_pb2_grpc.VehicleServiceServicer):
+    def ExecuteCommand(self, request, context):
+        """Execute command with streaming response."""
+        command_id = request.command_id
+
+        # Simulate multiple response chunks
+        chunks = [
+            {"dtcs": [{"code": "P0101", "status": "active"}]},
+            {"dtcs": [{"code": "P0420", "status": "pending"}]},
+        ]
+
+        for i, chunk_data in enumerate(chunks):
+            is_final = (i == len(chunks) - 1)
+
+            response = sovd_vehicle_service_pb2.CommandResponse(
+                command_id=command_id,
+                response_payload=json.dumps(chunk_data),
+                sequence_number=i,
+                is_final=is_final,
+                timestamp=datetime.utcnow().isoformat()
+            )
+
+            yield response
+
+# Create server
+server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+sovd_vehicle_service_pb2_grpc.add_VehicleServiceServicer_to_server(
+    VehicleServiceServicer(), server
+)
+server.add_insecure_port('[::]:50051')
+server.start()
+server.wait_for_termination()
+```
 
 ---
 
@@ -131,260 +268,376 @@ The following analysis is based on my direct review of the current codebase. Use
 
 ### Relevant Existing Code
 
-**File: `infrastructure/helm/sovd-webapp/Chart.yaml`**
-- **Summary**: Helm chart metadata defining the SOVD Command WebApp application version 1.0.0
-- **Recommendation**: This confirms the deployment target is Helm-based Kubernetes. Your deployment diagram MUST reflect this Helm-orchestrated architecture.
+*   **File:** `backend/app/connectors/vehicle_connector.py` (CURRENT MOCK - 634 lines)
+    *   **Summary:** This is the current MOCK vehicle connector implementation that simulates SOVD command execution with fake responses and streaming behavior. Your task is to REPLACE this with a real gRPC client implementation.
+    *   **Critical Function Signature:** The `execute_command` function (lines 315-336) has this signature:
+        ```python
+        async def execute_command(
+            command_id: uuid.UUID,
+            vehicle_id: uuid.UUID,
+            command_name: str,
+            command_params: dict[str, Any],
+        ) -> None:
+        ```
+    *   **Recommendation:** You MUST preserve this exact function signature. The command_service.py module calls this function and expects these parameters. Your gRPC implementation must match this interface.
+    *   **Key Pattern - Streaming Responses:** The mock publishes multiple response chunks sequentially (lines 445-459):
+        ```python
+        for seq_num, (payload, delay) in enumerate(chunks, start=1):
+            is_final = seq_num == len(chunks)
+            await _publish_response_chunk(
+                command_id=command_id,
+                response_payload=payload,
+                sequence_number=seq_num,
+                is_final=is_final,
+            )
+        ```
+        Your gRPC client MUST iterate over the streamed `CommandResponse` messages and call `_publish_response_chunk()` for each one.
+    *   **Key Pattern - Response Publishing:** The `_publish_response_chunk` function (lines 245-312) handles:
+        1. Inserting response into database via `response_repository.create_response()`
+        2. Publishing event to Redis Pub/Sub channel `response:{command_id}`
+        3. Logging the event
+        You SHOULD reuse this function in your gRPC implementation.
+    *   **Key Pattern - Status Updates:** The mock updates command status in three places:
+        - Line 401-406: Sets status to "in_progress" at start
+        - Line 462-472: Sets status to "completed" when done
+        - Line 550-591: Sets status to "failed" on error (in exception handler)
+        Your gRPC client MUST follow the same pattern.
+    *   **Key Pattern - Error Handling:** The mock simulates three error types (lines 354-398):
+        - Timeout (10% probability, raises `TimeoutError`)
+        - Vehicle unreachable (5% probability, raises `ConnectionError`)
+        - Malformed response (3% probability, raises `ValueError`)
+        Your gRPC client must handle real gRPC errors (`grpc.RpcError`) and map them to appropriate exceptions/status codes.
+    *   **Key Pattern - Audit Logging:** The mock logs audit events for command completion/failure (lines 508-533, 596-620). Your implementation MUST do the same.
+    *   **Key Pattern - Prometheus Metrics:** The mock updates metrics (lines 474-484, 585-591). Your implementation MUST do the same.
 
-**File: `infrastructure/helm/sovd-webapp/values.yaml`**
-- **Summary**: Complete Kubernetes resource definitions including backend (3 replicas), frontend (3 replicas), HPA configuration, AWS ALB ingress, and External Secrets integration
-- **Recommendation**: You MUST extract the following infrastructure components for the deployment diagram:
-  - **VPC Structure**: Public subnets (ALB), private subnets (EKS pods, RDS, ElastiCache)
-  - **EKS Cluster**: 3 availability zones with worker nodes
-  - **Pods**: Backend (3-10 replicas), Frontend (2-5 replicas)
-  - **Load Balancer**: AWS ALB with path-based routing
-  - **Database**: RDS Multi-AZ PostgreSQL (referenced as `postgres.default.svc.cluster.local` or external RDS endpoint)
-  - **Cache**: ElastiCache Redis (referenced as `redis.default.svc.cluster.local` or external endpoint)
-  - **Secrets**: AWS Secrets Manager with External Secrets Operator
-  - **Observability**: CloudWatch (implied for EKS/RDS/ALB monitoring)
+*   **File:** `backend/app/config.py` (46 lines)
+    *   **Summary:** Application settings using Pydantic Settings. Loads configuration from environment variables or .env file.
+    *   **Current Settings:** DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_MINUTES, LOG_LEVEL, CORS_ORIGINS
+    *   **Recommendation:** You MUST add a new setting `VEHICLE_ENDPOINT_URL` (or similar name like `GRPC_VEHICLE_ENDPOINT`) to this class. Example:
+        ```python
+        # gRPC vehicle communication
+        VEHICLE_ENDPOINT_URL: str = "localhost:50051"
+        ```
+        Make it have a sensible default for development (localhost:50051) but allow override via environment variable.
 
-**File: `.github/workflows/ci-cd.yml`**
-- **Summary**: Comprehensive GitHub Actions workflow with 10 distinct stages (linting → testing → security → build → deploy)
-- **Recommendation**: Your CI/CD pipeline diagram MUST show the following stages in sequence/parallel:
-  1. **Parallel Linting**: frontend-lint + backend-lint
-  2. **Parallel Testing**: frontend-test + backend-test + frontend-lighthouse
-  3. **Integration Tests**: integration-tests (depends on tests)
-  4. **E2E Tests**: e2e-tests (depends on integration-tests)
-  5. **Parallel Security**: backend-security + frontend-security
-  6. **Parallel Builds**: build-backend-image + build-frontend-image (depends on all tests/security)
-  7. **Parallel Trivy Scans**: trivy-scan-backend + trivy-scan-frontend
-  8. **Conditional Staging Deploy**: deploy-staging (only on develop branch)
-  9. **Conditional Production Deploy**: deploy-production (only on main, manual approval)
-  10. **CI Summary**: ci-success (aggregates all results)
+*   **File:** `backend/app/repositories/response_repository.py` (70 lines)
+    *   **Summary:** Repository for creating and retrieving command responses. Has two async functions: `create_response()` and `get_responses_by_command_id()`.
+    *   **Function Signature:**
+        ```python
+        async def create_response(
+            db: AsyncSession,
+            command_id: uuid.UUID,
+            response_payload: dict[str, Any],
+            sequence_number: int,
+            is_final: bool,
+        ) -> Response:
+        ```
+    *   **Recommendation:** Your gRPC client will call this function for each streamed response chunk. You MUST pass the sequence_number from the protobuf CommandResponse (which is 0-indexed) but note that the mock uses 1-indexed sequence numbers (line 446: `enumerate(chunks, start=1)`). The architecture allows either, but for consistency, you SHOULD use 0-indexed to match the protobuf schema.
 
-**File: `docker-compose.yml`**
-- **Summary**: Local development orchestration with db, redis, backend, frontend, prometheus, and grafana services
-- **Recommendation**: This is the LOCAL development setup. Your deployment diagram should show the PRODUCTION AWS infrastructure, not docker-compose. However, the service relationships (backend → db, backend → redis, frontend → backend) are the same in both environments.
+*   **File:** `backend/app/repositories/command_repository.py`
+    *   **Summary:** Repository for command CRUD operations. Key functions you'll need:
+        - `update_command_status(db, command_id, status, completed_at=None, error_message=None)` - Used to update command status to "in_progress", "completed", or "failed"
+        - `get_command_by_id(db, command_id)` - Used to fetch command details for audit logging
+    *   **Recommendation:** You MUST import and use these functions to update command status at the appropriate times (start, completion, error).
+
+*   **File:** `backend/app/database.py` (contains `async_session_maker`)
+    *   **Summary:** Database session management. Provides `async_session_maker` for creating async database sessions.
+    *   **Pattern:** The mock creates database sessions like this:
+        ```python
+        async with async_session_maker() as db_session:
+            await command_repository.update_command_status(...)
+        ```
+    *   **Recommendation:** You MUST use the same pattern in your gRPC client. Each database operation needs its own session context manager.
+
+*   **File:** `backend/app/generated/sovd_vehicle_service_pb2.py` (GENERATED, 2508 bytes)
+    *   **Summary:** Generated protobuf message classes from I5.T5. Contains `CommandRequest` and `CommandResponse` classes.
+    *   **Recommendation:** You MUST import this as `from app.generated import sovd_vehicle_service_pb2`. Use `sovd_vehicle_service_pb2.CommandRequest(...)` to create request messages.
+
+*   **File:** `backend/app/generated/sovd_vehicle_service_pb2_grpc.py` (GENERATED, 3711 bytes)
+    *   **Summary:** Generated gRPC service stub from I5.T5. Contains `VehicleServiceStub` class for making RPC calls.
+    *   **Recommendation:** You MUST import this as `from app.generated import sovd_vehicle_service_pb2_grpc`. Use `sovd_vehicle_service_pb2_grpc.VehicleServiceStub(channel)` to create a stub for calling `ExecuteCommand`.
+
+*   **File:** `backend/tests/unit/test_vehicle_connector.py` (existing mock tests)
+    *   **Summary:** Existing unit tests for the mock vehicle connector. Tests response generation, streaming chunks, error simulation.
+    *   **Recommendation:** You SHOULD reference these tests to understand the expected behavior patterns. However, your new integration tests (in `backend/tests/integration/test_grpc_vehicle_connector.py`) will test the REAL gRPC client against a mock gRPC server, not the mock connector.
+
+*   **File:** `backend/tests/conftest.py` (4062 bytes)
+    *   **Summary:** Pytest fixtures for testing (database setup, test client, etc.)
+    *   **Recommendation:** You SHOULD reuse existing fixtures like `test_db`, `test_client` in your integration tests. You may need to add a new fixture for starting/stopping the mock gRPC server.
 
 ### Implementation Tips & Notes
 
-#### For Deployment Diagram (PlantUML)
+*   **Tip: gRPC Channel Management**
+    The task requires "connection management (channel pool, retry with backoff)". Here's the recommended pattern:
+    ```python
+    import grpc
+    from grpc import aio  # Use async gRPC (grpc.aio)
 
-**Tip: AWS EKS Multi-AZ Architecture**
-- Use PlantUML's `deployment` diagram or `C4-Deployment` diagram style
-- Show 3 availability zones (us-east-1a, us-east-1b, us-east-1c is a common pattern)
-- Place ALB in public subnets across all AZs
-- Place EKS worker nodes in private subnets across all AZs
-- Place RDS Multi-AZ (primary + standby) in private subnets
-- Place ElastiCache in private subnets
+    # Create options for connection management
+    options = [
+        ('grpc.keepalive_time_ms', 30000),  # Send keepalive pings every 30s
+        ('grpc.keepalive_timeout_ms', 10000),  # Wait 10s for ping ack
+        ('grpc.keepalive_permit_without_calls', True),
+        ('grpc.http2.max_pings_without_data', 0),
+    ]
 
-**Tip: Network Flow and Protocols**
-- External users → Route53 (DNS) → ALB (HTTPS 443)
-- ALB → Backend Pods (HTTP 8000 on `/api`, `/ws`)
-- ALB → Frontend Pods (HTTP 80 on `/`)
-- Backend Pods → RDS (PostgreSQL 5432)
-- Backend Pods → ElastiCache (Redis 6379)
-- Backend Pods → AWS Secrets Manager (HTTPS 443 via External Secrets Operator)
-- All services → CloudWatch (metrics/logs)
+    # For production: use a channel pool (reuse channels)
+    # For MVP: a single channel is acceptable
+    channel = aio.insecure_channel(endpoint_url, options=options)
+    ```
+    You SHOULD create the channel once at module level (like a singleton) or in a dedicated connection manager class. Do NOT create a new channel for every command execution (inefficient).
 
-**Tip: PlantUML Component Organization**
-```plantuml
-@startuml
-!include <C4/C4_Deployment>
+*   **Tip: Async gRPC (grpc.aio)**
+    Since the existing `execute_command` is an `async def` function, you MUST use the async version of gRPC: `grpc.aio`.
+    ```python
+    from grpc import aio
+    from app.generated import sovd_vehicle_service_pb2_grpc
 
-' Define personas/external systems
-Person(user, "User", "Vehicle Diagnostics Engineer")
+    channel = aio.insecure_channel('localhost:50051')
+    stub = sovd_vehicle_service_pb2_grpc.VehicleServiceStub(channel)
 
-' Define infrastructure zones
-Deployment_Node(route53, "Route53", "AWS DNS") {
-  System_Ext(dns, "DNS Records")
-}
+    # Async iteration over stream
+    async for response in stub.ExecuteCommand(request):
+        # Process response
+        pass
+    ```
+    Do NOT use the synchronous `grpc` channel as it will block the async event loop.
 
-Deployment_Node(vpc, "VPC", "10.0.0.0/16") {
-  Deployment_Node(az1, "AZ us-east-1a") {
-    ' Public subnet
-    ' Private subnet with EKS nodes, pods
-  }
-  ' Repeat for az2, az3
+*   **Tip: UUID to String Conversion**
+    The protobuf schema uses `string` for command_id and vehicle_id, but Python uses `uuid.UUID` objects. You MUST convert:
+    ```python
+    request = sovd_vehicle_service_pb2.CommandRequest(
+        command_id=str(command_id),  # uuid.UUID → str
+        vehicle_id=str(vehicle_id),
+        command_name=command_name,
+        command_params=command_params
+    )
+    ```
 
-  ' RDS, ElastiCache, ALB definitions
-}
+*   **Tip: Timeout Configuration**
+    The task specifies "30s deadline". Use gRPC's built-in timeout mechanism:
+    ```python
+    try:
+        response_stream = stub.ExecuteCommand(request, timeout=30.0)
+        async for response in response_stream:
+            # Process response
+            pass
+    except aio.AioRpcError as e:
+        if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            # Handle timeout
+            raise TimeoutError("Vehicle connection timeout") from e
+    ```
 
-' External AWS services
-System_Ext(secrets, "Secrets Manager")
-System_Ext(cloudwatch, "CloudWatch")
-System_Ext(s3, "S3")
+*   **Tip: Retry Logic with Exponential Backoff**
+    For transient errors (UNAVAILABLE), implement retry logic:
+    ```python
+    import asyncio
 
-' Define relationships with protocols
-Rel(user, dns, "HTTPS", "sovd.example.com")
-Rel(dns, alb, "Routes traffic")
-' etc.
+    max_retries = 3
+    base_delay = 1.0  # Start with 1 second
 
-@enduml
-```
+    for attempt in range(max_retries):
+        try:
+            # Make gRPC call
+            async for response in stub.ExecuteCommand(request, timeout=30.0):
+                # Process response
+                pass
+            break  # Success, exit retry loop
+        except aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning("Vehicle unavailable, retrying...", attempt=attempt, delay=delay)
+                await asyncio.sleep(delay)
+            else:
+                raise  # Re-raise if not retryable or max retries exceeded
+    ```
 
-**Warning: PlantUML Syntax Strictness**
-- Ensure all opening braces `{` have closing braces `}`
-- Use proper PlantUML keywords: `Deployment_Node`, `Container`, `System_Ext`, `Rel`
-- Test compilation with `plantuml -testdot` or online PlantUML editor before committing
+*   **Tip: TLS Configuration (Placeholder for MVP)**
+    The task requires "TLS config (mutual TLS)". For MVP, you can use placeholder certificates or self-signed certs. Here's the pattern:
+    ```python
+    from pathlib import Path
 
-**Note: Existing Diagram Files**
-- I found existing PlantUML diagrams in `docs/diagrams/`: `component_diagram.puml`, `container_diagram.puml`, `erd.puml`, `sequence_command_flow.puml`, `sequence_error_flow.puml`
-- You SHOULD review these files to maintain consistent PlantUML style and formatting
-- The deployment diagram should be at a HIGHER abstraction level (C4 Level 3/4: infrastructure and deployment nodes)
+    # Check if TLS is enabled (via environment variable)
+    use_tls = settings.VEHICLE_USE_TLS if hasattr(settings, 'VEHICLE_USE_TLS') else False
 
-#### For CI/CD Pipeline Diagram (Mermaid)
+    if use_tls:
+        # Load certificates
+        cert_dir = Path(__file__).parent.parent.parent / "certs"
+        with open(cert_dir / "ca.pem", "rb") as f:
+            root_cert = f.read()
+        with open(cert_dir / "client-key.pem", "rb") as f:
+            client_key = f.read()
+        with open(cert_dir / "client-cert.pem", "rb") as f:
+            client_cert = f.read()
 
-**Tip: Mermaid Flowchart Syntax**
-- Use `graph TD` (top-down) or `graph LR` (left-right) for pipeline flow
-- Show parallel jobs using subgraphs
-- Use different node shapes for different stages:
-  - `[Linting]` for rectangular boxes
-  - `{Security Scan}` for diamond (decision/gate)
-  - `((Build))` for circular nodes
-  - `[/Deploy/]` for trapezoid (deploy actions)
+        credentials = grpc.ssl_channel_credentials(
+            root_certificates=root_cert,
+            private_key=client_key,
+            certificate_chain=client_cert
+        )
+        channel = aio.secure_channel(endpoint_url, credentials, options=options)
+    else:
+        # Development: use insecure channel
+        channel = aio.insecure_channel(endpoint_url, options=options)
+    ```
+    For this task, you SHOULD add the TLS configuration code but use `insecure_channel` by default for development. Create placeholder cert files (can be empty for now) and document that real certs are needed for production.
 
-**Tip: Showing Parallelism and Dependencies**
-```mermaid
-graph TD
-    start([Push to GitHub])
+*   **Tip: Response Payload is JSON String**
+    The protobuf `CommandResponse.response_payload` is a `string`, but the database expects `dict[str, Any]` (JSONB). You MUST parse the JSON:
+    ```python
+    import json
 
-    %% Stage 1: Parallel linting
-    start --> lint_frontend[Frontend Lint]
-    start --> lint_backend[Backend Lint]
+    for response in stub.ExecuteCommand(request):
+        response_dict = json.loads(response.response_payload)
+        await _publish_response_chunk(
+            command_id=uuid.UUID(response.command_id),
+            response_payload=response_dict,  # Pass as dict
+            sequence_number=response.sequence_number,
+            is_final=response.is_final,
+        )
+    ```
 
-    %% Stage 2: Parallel testing
-    lint_frontend --> test_frontend[Frontend Test]
-    lint_backend --> test_backend[Backend Test]
-    test_frontend --> lighthouse[Lighthouse CI]
+*   **Warning: Import Path Issues**
+    The generated gRPC code may have import issues. The Makefile should have fixed this (see I5.T5), but verify that these imports work:
+    ```python
+    from app.generated import sovd_vehicle_service_pb2
+    from app.generated import sovd_vehicle_service_pb2_grpc
+    ```
+    If you get `ModuleNotFoundError`, check that `backend/app/generated/__init__.py` exists and the import in `sovd_vehicle_service_pb2_grpc.py` is correct.
 
-    %% Stage 3: Integration (depends on tests)
-    test_frontend --> integration[Integration Tests]
-    test_backend --> integration
-    lighthouse --> integration
+*   **Warning: Sequence Number Indexing**
+    The protobuf schema uses 0-indexed sequence numbers (0, 1, 2, ...) but the mock connector uses 1-indexed (1, 2, 3, ...). You SHOULD use 0-indexed to match the protobuf schema. The database and tests should handle both, but consistency is better.
 
-    %% Continue with remaining stages...
-```
+*   **Warning: Redis Connection Management**
+    The mock creates a new Redis client for each operation and closes it (lines 265, 293, 310, 384, 395, 487, 506). This is acceptable but not optimal. For better performance, consider reusing a single Redis connection pool. However, for this task, you CAN follow the same pattern as the mock for consistency.
 
-**Note: GitHub Actions Dependency Graph**
-- Your diagram MUST accurately reflect the `needs:` dependencies in the workflow file
-- For example: `deploy-staging` needs `[build-backend-image, build-frontend-image, trivy-scan-backend, trivy-scan-frontend]`
-- Show conditional logic: "deploy-staging runs only on `develop` branch"
+*   **Critical: Mock gRPC Server for Testing**
+    You MUST create `backend/tests/mocks/mock_vehicle_server.py` with a gRPC server implementation that:
+    1. Implements `VehicleServiceServicer` from the generated code
+    2. Yields multiple `CommandResponse` messages (at least 2-3 chunks)
+    3. Uses `is_final=True` on the last response
+    4. Can simulate errors (optional but recommended)
 
-**Tip: Representing Manual Approval**
-- Use a special node style for the production deployment manual approval gate
-- Example: `production_approval{Manual Approval Required}`
-- Reference the GitHub environment: `production` in the annotation
+    Example structure:
+    ```python
+    import grpc
+    from grpc import aio
+    from concurrent import futures
+    from app.generated import sovd_vehicle_service_pb2, sovd_vehicle_service_pb2_grpc
 
-**Warning: Mermaid Rendering Compatibility**
-- The file is named `ci_cd_pipeline.md` (Markdown format)
-- You MUST wrap the Mermaid code in triple backticks with `mermaid` language identifier:
-  ````markdown
-  ```mermaid
-  graph TD
-      ...
-  ```
-  ````
-- Add descriptive markdown text before/after the diagram explaining the pipeline stages
+    class MockVehicleServicer(sovd_vehicle_service_pb2_grpc.VehicleServiceServicer):
+        async def ExecuteCommand(self, request, context):
+            # Simulate ReadDTC command with 3 chunks
+            for i in range(3):
+                yield sovd_vehicle_service_pb2.CommandResponse(
+                    command_id=request.command_id,
+                    response_payload='{"dtcs": [{"code": "P0420"}]}',
+                    sequence_number=i,
+                    is_final=(i == 2),
+                    timestamp=datetime.utcnow().isoformat()
+                )
 
-**Recommendation: Use Subgraphs for Stage Grouping**
-```mermaid
-graph TD
-    subgraph Stage1[Stage 1: Linting]
-        lint_frontend
-        lint_backend
-    end
+    async def start_mock_server(port=50051):
+        server = aio.server()
+        sovd_vehicle_service_pb2_grpc.add_VehicleServiceServicer_to_server(
+            MockVehicleServicer(), server
+        )
+        server.add_insecure_port(f'[::]:{port}')
+        await server.start()
+        return server
+    ```
 
-    subgraph Stage2[Stage 2: Testing]
-        test_frontend
-        test_backend
-        lighthouse
-    end
+*   **Critical: Integration Test Strategy**
+    Your integration tests (`backend/tests/integration/test_grpc_vehicle_connector.py`) should:
+    1. Start the mock gRPC server in a pytest fixture (setup/teardown)
+    2. Configure `VEHICLE_ENDPOINT_URL` to point to the mock server (localhost:50051)
+    3. Call the real `execute_command` function
+    4. Verify that responses are inserted into the database (check response count, sequence numbers)
+    5. Verify that status updates are correct (in_progress → completed)
+    6. Verify that Redis events are published (use Redis SUBSCRIBE or check audit logs)
+    7. Test timeout scenario (mock server delays response, verify TimeoutError raised)
+    8. Test error scenario (mock server returns gRPC error, verify status=failed)
 
-    %% Show dependencies between subgraphs
-    Stage1 --> Stage2
-```
+    Use `pytest-asyncio` for async tests and existing fixtures from `conftest.py` for database setup.
 
-### Cross-Cutting Concerns
+*   **Critical: Code Structure Recommendation**
+    I recommend structuring your implementation as follows:
 
-**Version Control Best Practices**
-- Commit both diagrams in a single commit with a descriptive message
-- Example commit message: `feat(docs): add AWS deployment and CI/CD pipeline diagrams (I5.T4)`
-- Follow the existing commit message style in the repository (I observed commits like `feat(ci-cd): implement complete CI/CD pipeline...`)
+    **Option 1: Replace the mock entirely (simpler)**
+    - Delete all mock code in `vehicle_connector.py`
+    - Replace with real gRPC client implementation
+    - Keep the `execute_command` function signature the same
 
-**Documentation Standards**
-- Add a comment header to the PlantUML file explaining what the diagram represents
-- Add a markdown section to `ci_cd_pipeline.md` with:
-  - Diagram title
-  - Brief description of the pipeline
-  - Link to the actual workflow file: `.github/workflows/ci-cd.yml`
-  - Notes about manual approval gates
+    **Option 2: Keep both implementations (more flexible)**
+    - Add a `USE_MOCK_CONNECTOR` config setting
+    - Keep the mock code in a separate function/class
+    - Add the real gRPC client as a new function/class
+    - Use an if/else to select which implementation to use
 
-**Testing Your Diagrams**
-- PlantUML: Use online editor at https://www.plantuml.com/plantuml/uml/ or install PlantUML locally
-- Mermaid: Use online editor at https://mermaid.live/ or preview in GitHub (GitHub natively renders Mermaid)
-- CRITICAL: Both diagrams MUST compile without syntax errors
+    I RECOMMEND Option 1 for this task, as the mock has served its purpose and maintaining both adds complexity. However, if you want to preserve the mock for backward compatibility or testing, Option 2 is viable.
 
-**Alignment with Existing Diagrams**
-- Review `docs/diagrams/container_diagram.puml` to see how the Web App, API Gateway, Application Server, and databases are represented at the container level
-- Your deployment diagram should show WHERE these containers are deployed in AWS infrastructure
-- Maintain consistency in naming (e.g., use "Backend" not "Application Server" to match Helm values)
+### Error Mapping Table
 
-### Final Checklist Before Submission
+Map gRPC status codes to Python exceptions and command statuses:
 
-1. ✅ **deployment_diagram.puml compiles without errors**
-2. ✅ **Shows all AWS components**: VPC, 3 AZs, public/private subnets, ALB, EKS (3+ nodes), RDS Multi-AZ, ElastiCache, NAT Gateway, Route53, Secrets Manager, CloudWatch, S3
-3. ✅ **Connections labeled with protocols**: HTTPS, HTTP, PostgreSQL (5432), Redis (6379)
-4. ✅ **EKS pods shown across 3 AZs** with anti-affinity (matching Helm chart)
-5. ✅ **ci_cd_pipeline.md renders as valid Mermaid** in GitHub preview
-6. ✅ **Pipeline matches actual workflow stages** (10 stages total)
-7. ✅ **Shows parallel execution** (linting, testing, security, builds)
-8. ✅ **Shows dependencies** (needs: clauses) accurately
-9. ✅ **Shows conditional deploys** (develop → staging, main → production)
-10. ✅ **Manual approval gate** for production deployment is clearly marked
-11. ✅ **Both files committed** to `docs/diagrams/`
+| gRPC Status Code | Python Exception | Command Status | Retry? |
+|------------------|------------------|----------------|--------|
+| `OK` | None | `completed` | No |
+| `CANCELLED` | `ConnectionError` | `failed` | No |
+| `INVALID_ARGUMENT` | `ValueError` | `failed` | No |
+| `NOT_FOUND` | `ConnectionError` | `failed` | No |
+| `DEADLINE_EXCEEDED` | `TimeoutError` | `failed` | Yes (once) |
+| `UNAVAILABLE` | `ConnectionError` | `failed` | Yes (3x with backoff) |
+| `INTERNAL` | `RuntimeError` | `failed` | No |
 
----
+Use this table in your exception handling logic.
 
-## 4. Additional Resources and References
+### Testing Checklist
 
-### Existing Diagram Files (for style reference)
-- `docs/diagrams/component_diagram.puml` - C4 Level 3 component diagram
-- `docs/diagrams/container_diagram.puml` - C4 Level 2 container diagram
-- `docs/diagrams/erd.puml` - Database entity relationship diagram
-- `docs/diagrams/sequence_command_flow.puml` - Command execution sequence
-- `docs/diagrams/sequence_error_flow.puml` - Error handling sequence
+Your integration tests MUST verify:
+- ✅ gRPC channel is created successfully
+- ✅ CommandRequest is constructed correctly (UUIDs converted to strings)
+- ✅ Streaming responses are received (at least 2 chunks)
+- ✅ Each response chunk is inserted into database (verify response records exist)
+- ✅ Sequence numbers are correct (0, 1, 2, ...)
+- ✅ Final chunk has `is_final=true`
+- ✅ Command status updates: pending → in_progress → completed
+- ✅ Redis events are published (verify event count matches chunk count + 1 status event)
+- ✅ Audit log entries are created (command_completed)
+- ✅ Prometheus metrics are updated (command counter, duration histogram)
+- ✅ Timeout scenario: 30s deadline triggers TimeoutError and status=failed
+- ✅ Error scenario: gRPC error maps to status=failed with error_message
+- ✅ Test coverage ≥ 80% for new code
+- ✅ No linter errors (ruff, black, mypy)
 
-### Key Configuration Files (analyzed for this task)
-- `infrastructure/helm/sovd-webapp/Chart.yaml` - Helm chart metadata
-- `infrastructure/helm/sovd-webapp/values.yaml` - Kubernetes resource definitions
-- `infrastructure/helm/sovd-webapp/values-production.yaml` - Production overrides (if exists)
-- `.github/workflows/ci-cd.yml` - Complete CI/CD pipeline definition
-- `docker-compose.yml` - Development environment (for understanding service relationships)
+### Directory Structure Notes
 
-### External Documentation Links
-- **PlantUML Deployment Diagrams**: https://plantuml.com/deployment-diagram
-- **C4 Model for PlantUML**: https://github.com/plantuml-stdlib/C4-PlantUML
-- **Mermaid Flowchart Syntax**: https://mermaid.js.org/syntax/flowchart.html
-- **AWS EKS Best Practices**: Multi-AZ deployment across 3 availability zones
-- **GitHub Actions Workflow Syntax**: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+You will need to create:
+- `backend/tests/mocks/` directory (doesn't exist yet)
+- `backend/tests/mocks/__init__.py` (make it a package)
+- `backend/tests/mocks/mock_vehicle_server.py` (new file)
+- `backend/tests/integration/test_grpc_vehicle_connector.py` (new file)
 
----
+The existing test infrastructure in `backend/tests/conftest.py` provides fixtures you can reuse.
 
-## Summary
+### Performance Considerations
 
-You are tasked with creating TWO diagrams:
+- **Channel reuse:** Create gRPC channel once, reuse for all commands (connection pooling)
+- **Async operations:** Use `grpc.aio` for non-blocking I/O
+- **Database sessions:** Create separate sessions for each DB operation (avoid holding sessions open during network I/O)
+- **Redis connections:** Reuse connection pool if possible (optimize later)
+- **Metrics:** Update Prometheus metrics after each command (same pattern as mock)
 
-1. **AWS Production Deployment Architecture** (PlantUML): A comprehensive infrastructure diagram showing the complete AWS EKS deployment with VPC networking, load balancing, database, caching, secrets management, and observability. This diagram is at the C4 Level 3/4 abstraction (deployment/infrastructure).
+### Final Notes
 
-2. **CI/CD Pipeline Flow** (Mermaid): A detailed flowchart showing all 10 stages of the GitHub Actions workflow, including parallel execution, dependencies, security gates, and deployment approvals. This diagram must accurately reflect the actual implementation in `.github/workflows/ci-cd.yml`.
+This is a critical task that replaces the mock with real vehicle communication. The acceptance criteria are strict (≥80% coverage, no linter errors, all features working). Take your time to:
+1. Read the existing mock implementation thoroughly
+2. Understand the flow: command submission → gRPC call → streaming responses → database insertion → Redis pub/sub → status update
+3. Implement the gRPC client step-by-step
+4. Write comprehensive tests that cover happy path, timeout, and error scenarios
+5. Run linters and fix any issues
+6. Verify that existing E2E tests still pass (they use the vehicle connector)
 
-Both diagrams are critical documentation artifacts that will help developers and operators understand how the SOVD Command WebApp is deployed and maintained in production.
+The mock vehicle server should be simple but realistic (yield 2-3 response chunks, use correct protobuf message format, support is_final flag). The integration tests should start/stop this server automatically via pytest fixtures.
 
-**Key Success Criteria**:
-- Diagrams compile and render correctly
-- All components from the task description are present
-- Connections and protocols are clearly labeled
-- Diagrams match the actual implemented infrastructure (Helm chart) and pipeline (GitHub Actions)
-- Professional quality suitable for production documentation
-
-Good luck, Coder Agent! 🚀
+Good luck! This is the foundation for real vehicle communication in the SOVD WebApp.

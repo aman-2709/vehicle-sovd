@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # CORS configuration
     CORS_ORIGINS: str = "http://localhost:3000"
 
+    # gRPC vehicle communication configuration
+    VEHICLE_ENDPOINT_URL: str = "localhost:50051"
+    VEHICLE_USE_TLS: bool = False
+    VEHICLE_GRPC_TIMEOUT: int = 30  # seconds
+    VEHICLE_MAX_RETRIES: int = 3
+    VEHICLE_RETRY_BASE_DELAY: float = 1.0  # seconds
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
