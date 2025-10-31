@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package sovd.vehicle;
+
+// Service definition for SOVD vehicle communication
+service VehicleService {
+  // Execute a command on a vehicle with streaming response support.
+  // Returns multiple CommandResponse messages for multi-chunk responses.
+  rpc ExecuteCommand(CommandRequest) returns (stream CommandResponse) {}
+}
+
+// Request message for executing a command on a vehicle
+message CommandRequest {
+  // Unique identifier for this command (UUID string format)
+  // Example: "550e8400-e29b-41d4-a716-446655440000"
+  string command_id = 1;
+
+  // Unique identifier for the target vehicle (UUID string format)
+  // Example: "123e4567-e89b-12d3-a456-426614174000"
+  string vehicle_id = 2;
+
+  // Name of the SOVD command to execute
+  // Examples: "ReadDTC", "ClearDTC", "ReadDataByID"
+  string command_name = 3;
+
+  // Command parameters as key-value pairs
+  // For complex nested parameters, values should be JSON-encoded strings
+  // Example: {"ecuAddress": "0x10", "dataId": "0x1234"}
+  // Complex example: {"params": "{\"ecuAddress\": \"0x10\", \"dtcMask\": \"0xFF\"}"}
+  map<string, string> command_params = 10;
+}
+
+// Response message for command execution (supports streaming)
+message CommandResponse {
+  // Command identifier matching the request (UUID string)
+  string command_id = 1;
+
+  // Response payload data (JSON-encoded string)
+  // Contains the actual command response data from the vehicle
+  string response_payload = 2;
+
+  // Sequence number for this response chunk (0-indexed)
+  // Allows clients to order multiple response chunks correctly
+  int32 sequence_number = 3;
+
+  // Flag indicating if this is the final response chunk
+  // When true, no more responses will be sent for this command
+  bool is_final = 10;
+
+  // Timestamp when this response was generated (ISO 8601 format)
+  // Example: "2025-10-31T14:30:00.123456"
+  string timestamp = 11;
+}

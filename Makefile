@@ -1,4 +1,4 @@
-.PHONY: up down test lint logs e2e help frontend-test frontend-coverage frontend-lint frontend-format
+.PHONY: up down test lint logs e2e help frontend-test frontend-coverage frontend-lint frontend-format proto
 
 # Default target - show help
 help:
@@ -10,6 +10,7 @@ help:
 	@echo "  make frontend-coverage  - Run frontend tests with coverage report"
 	@echo "  make frontend-lint      - Run frontend linter (ESLint)"
 	@echo "  make frontend-format    - Format frontend code (Prettier)"
+	@echo "  make proto              - Compile protobuf definitions to Python code"
 	@echo "  make e2e                - Run end-to-end tests with docker-compose (starts services, runs tests, stops services)"
 	@echo "  make lint               - Run all linters (backend and frontend)"
 	@echo "  make logs               - View logs from all services"
@@ -82,3 +83,22 @@ lint:
 # View logs from all services
 logs:
 	@docker-compose logs -f
+
+# Compile protobuf definitions to Python code
+proto:
+	@echo "Creating generated code directory..."
+	@mkdir -p backend/app/generated
+	@echo "Compiling protobuf definitions..."
+	@python -m grpc_tools.protoc \
+		-I backend/protos \
+		--python_out=backend/app/generated \
+		--grpc_python_out=backend/app/generated \
+		--pyi_out=backend/app/generated \
+		backend/protos/sovd_vehicle_service.proto
+	@echo "Creating Python package marker..."
+	@touch backend/app/generated/__init__.py
+	@echo "Fixing relative imports in generated code..."
+	@sed -i 's/^import sovd_vehicle_service_pb2/from . import sovd_vehicle_service_pb2/' backend/app/generated/sovd_vehicle_service_pb2_grpc.py
+	@echo "Protobuf compilation completed successfully!"
+	@echo "Generated files:"
+	@ls -la backend/app/generated/
