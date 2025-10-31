@@ -1,0 +1,21 @@
+apiVersion: v2
+name: sovd-webapp
+description: A Helm chart for SOVD Command WebApp - Vehicle Diagnostics Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - sovd
+  - automotive
+  - vehicle-diagnostics
+  - fastapi
+  - react
+
+maintainers:
+  - name: SOVD Team
+    email: team@sovd.example.com
+
+home: https://github.com/sovd-team/sovd-webapp
+sources:
+  - https://github.com/sovd-team/sovd-webapp

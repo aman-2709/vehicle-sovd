@@ -1,0 +1,377 @@
+# Default values for sovd-webapp
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+global:
+  # Namespace for deployment (can be overridden by --namespace flag)
+  namespace: default
+  # Base domain for the application
+  domain: sovd.example.com
+
+# Backend (FastAPI) configuration
+backend:
+  enabled: true
+  name: backend
+  replicaCount: 3
+
+  image:
+    repository: YOUR_ECR_REGISTRY/sovd-backend
+    pullPolicy: IfNotPresent
+    tag: "latest"  # Override in production with specific version
+
+  imagePullSecrets: []
+
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+    name: backend
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Liveness probe configuration
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /health/live
+      port: 8000
+    initialDelaySeconds: 40
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Readiness probe configuration (includes DB and Redis checks)
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /health/ready
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Environment variables (loaded from ConfigMap and Secrets)
+  env:
+    LOG_LEVEL: "INFO"
+    JWT_ALGORITHM: "HS256"
+    JWT_EXPIRATION_MINUTES: "15"
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity - spread replicas across nodes for HA
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - backend
+            topologyKey: kubernetes.io/hostname
+
+# Frontend (React + Nginx) configuration
+frontend:
+  enabled: true
+  name: frontend
+  replicaCount: 3
+
+  image:
+    repository: YOUR_ECR_REGISTRY/sovd-frontend
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  imagePullSecrets: []
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+    name: frontend
+
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+
+  # Health check for nginx
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+
+  nodeSelector: {}
+  tolerations: []
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - frontend
+            topologyKey: kubernetes.io/hostname
+
+# Vehicle Connector (gRPC) configuration
+vehicleConnector:
+  # Disabled by default - enable when gRPC service is implemented (I5.T6)
+  enabled: false
+  name: vehicle-connector
+  replicaCount: 2
+
+  image:
+    repository: YOUR_ECR_REGISTRY/sovd-vehicle-connector
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  imagePullSecrets: []
+
+  service:
+    type: ClusterIP
+    port: 50051
+    targetPort: 50051
+    name: vehicle-connector
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # gRPC health check (when implemented)
+  livenessProbe:
+    enabled: false
+    grpc:
+      port: 50051
+    initialDelaySeconds: 40
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: false
+    grpc:
+      port: 50051
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Horizontal Pod Autoscaler configuration
+hpa:
+  enabled: true
+  backend:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    # Scale down behavior - conservative
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 60
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 60
+
+  frontend:
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# Ingress configuration (AWS ALB)
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    # AWS ALB specific annotations
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
+    # Add certificate ARN in production values
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789:certificate/abc123
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
+
+  hosts:
+    - host: sovd.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port: 8000
+        - path: /ws
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port: 8000
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: frontend
+              port: 80
+
+  tls: []
+  # TLS configuration (uncomment in production)
+  # tls:
+  #   - secretName: sovd-tls
+  #     hosts:
+  #       - sovd.example.com
+
+# ConfigMap for non-sensitive configuration
+config:
+  # Database configuration (non-sensitive)
+  database:
+    host: "postgres.default.svc.cluster.local"  # Or RDS endpoint
+    port: "5432"
+    name: "sovd"
+    user: "sovd_user"
+
+  # Redis configuration
+  redis:
+    host: "redis.default.svc.cluster.local"  # Or ElastiCache endpoint
+    port: "6379"
+    db: "0"
+
+  # Application configuration
+  app:
+    logLevel: "INFO"
+    corsOrigins: "http://localhost:3000,https://sovd.example.com"
+    environment: "production"
+
+# Secrets configuration
+# IMPORTANT: These are placeholders. Use External Secrets Operator in production
+secrets:
+  # Database password (base64 encoded placeholder)
+  databasePassword: "cGxhY2Vob2xkZXI="  # "placeholder" in base64
+
+  # JWT secret for token signing (base64 encoded placeholder)
+  jwtSecret: "cGxhY2Vob2xkZXItand0LXNlY3JldC1jaGFuZ2UtaW4tcHJvZHVjdGlvbg=="  # placeholder
+
+  # Redis password (empty by default, some Redis setups don't require auth)
+  redisPassword: ""
+
+# Deployment strategy
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "sovd-webapp-sa"
+
+# RBAC
+rbac:
+  create: true
+
+# External Secrets Operator (disabled by default)
+# Enable in production to sync secrets from AWS Secrets Manager
+externalSecrets:
+  enabled: false
+  secretStoreName: "aws-secrets-manager"
+  databaseSecretKey: "sovd/production/database"
+  jwtSecretKey: "sovd/production/jwt"
+  redisSecretKey: "sovd/production/redis"

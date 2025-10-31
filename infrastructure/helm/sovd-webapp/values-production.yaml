@@ -1,0 +1,186 @@
+# Production overrides for sovd-webapp
+# This file contains production-specific configurations that override values.yaml
+
+global:
+  namespace: production
+  domain: sovd.production.com
+
+# Backend production configuration
+backend:
+  replicaCount: 5  # More replicas for production traffic
+
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/sovd-backend
+    tag: "v1.0.0"  # Specific version, NOT latest
+    pullPolicy: Always
+
+  imagePullSecrets:
+    - name: ecr-registry-secret
+
+  resources:
+    requests:
+      memory: "512Mi"  # Double the default
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  env:
+    LOG_LEVEL: "WARNING"  # Less verbose in production
+
+  # Stricter readiness probe for production
+  readinessProbe:
+    initialDelaySeconds: 45
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 2
+
+# Frontend production configuration
+frontend:
+  replicaCount: 3
+
+  image:
+    repository: 123456789012.dkr.ecr.us-east-1.amazonaws.com/sovd-frontend
+    tag: "v1.0.0"
+    pullPolicy: Always
+
+  imagePullSecrets:
+    - name: ecr-registry-secret
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "200m"
+    limits:
+      memory: "256Mi"
+      cpu: "400m"
+
+# Vehicle Connector - disabled until gRPC implementation
+vehicleConnector:
+  enabled: false
+
+# HPA production configuration - more aggressive scaling
+hpa:
+  enabled: true
+  backend:
+    minReplicas: 5
+    maxReplicas: 20  # Higher ceiling for production traffic
+    targetCPUUtilizationPercentage: 70
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300  # 5 minutes
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 120  # Slower scale-down in production
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Pods
+            value: 3  # Scale up faster
+            periodSeconds: 60
+
+  frontend:
+    minReplicas: 3
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+# Ingress production configuration
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # Production TLS certificate from ACM
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:123456789012:certificate/your-cert-id"
+    alb.ingress.kubernetes.io/ssl-redirect: "443"  # Force HTTPS
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
+    # Production health check settings
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    # Connection settings
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+    # Security headers
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true
+    # Tags for cost allocation
+    alb.ingress.kubernetes.io/tags: Environment=production,Application=sovd-webapp,Team=platform
+
+  hosts:
+    - host: sovd.production.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port: 8000
+        - path: /ws
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port: 8000
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: frontend
+              port: 80
+
+  tls:
+    - secretName: sovd-production-tls
+      hosts:
+        - sovd.production.com
+
+# Production database configuration (AWS RDS)
+config:
+  database:
+    host: "sovd-production.c9akciq32.us-east-1.rds.amazonaws.com"
+    port: "5432"
+    name: "sovd_production"
+    user: "sovd_admin"
+
+  # Production Redis configuration (AWS ElastiCache)
+  redis:
+    host: "sovd-production.abc123.ng.0001.use1.cache.amazonaws.com"
+    port: "6379"
+    db: "0"
+
+  # Application configuration
+  app:
+    logLevel: "WARNING"
+    corsOrigins: "https://sovd.production.com"
+    environment: "production"
+
+# Production secrets - use External Secrets Operator
+# These placeholders should be replaced by External Secrets Operator
+secrets:
+  # NOTE: In production, these should be managed by AWS Secrets Manager
+  # via External Secrets Operator. These are placeholders only.
+  databasePassword: ""  # Managed by External Secrets Operator
+  jwtSecret: ""  # Managed by External Secrets Operator
+  redisPassword: ""  # Managed by External Secrets Operator
+
+# Deployment strategy - zero downtime
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0  # Zero downtime deployments
+
+# Service Account with IAM role for AWS resources
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/sovd-webapp-production"
+  name: "sovd-webapp-production-sa"
+
+# RBAC
+rbac:
+  create: true

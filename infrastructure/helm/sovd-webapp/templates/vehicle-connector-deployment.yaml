@@ -1,0 +1,122 @@
+{{- if .Values.vehicleConnector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sovd-webapp.fullname" . }}-vehicle-connector
+  labels:
+    {{- include "sovd-webapp.vehicleConnector.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.vehicleConnector.replicaCount }}
+  strategy:
+    type: {{ .Values.deploymentStrategy.type }}
+    {{- if eq .Values.deploymentStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxSurge: {{ .Values.deploymentStrategy.rollingUpdate.maxSurge }}
+      maxUnavailable: {{ .Values.deploymentStrategy.rollingUpdate.maxUnavailable }}
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sovd-webapp.vehicleConnector.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.vehicleConnector.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "sovd-webapp.vehicleConnector.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.vehicleConnector.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sovd-webapp.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.vehicleConnector.podSecurityContext | nindent 8 }}
+      containers:
+      - name: vehicle-connector
+        securityContext:
+          {{- toYaml .Values.vehicleConnector.securityContext | nindent 12 }}
+        image: {{ include "sovd-webapp.vehicleConnector.image" . }}
+        imagePullPolicy: {{ .Values.vehicleConnector.image.pullPolicy }}
+        ports:
+        - name: grpc
+          containerPort: {{ .Values.vehicleConnector.service.targetPort }}
+          protocol: TCP
+        env:
+        # Database configuration (may be needed for vehicle data persistence)
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-secrets
+              key: database-password
+        - name: DATABASE_URL
+          value: {{ include "sovd-webapp.databaseUrl" . | quote }}
+
+        # Redis configuration (for caching vehicle data)
+        {{- if .Values.secrets.redisPassword }}
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-secrets
+              key: redis-password
+        {{- end }}
+        - name: REDIS_URL
+          value: {{ include "sovd-webapp.redisUrl" . | quote }}
+
+        # Application configuration from ConfigMap
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-config
+              key: LOG_LEVEL
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "sovd-webapp.fullname" . }}-config
+              key: ENVIRONMENT
+
+        # gRPC specific configuration
+        - name: GRPC_PORT
+          value: {{ .Values.vehicleConnector.service.targetPort | quote }}
+
+        {{- if .Values.vehicleConnector.livenessProbe.enabled }}
+        livenessProbe:
+          grpc:
+            port: {{ .Values.vehicleConnector.livenessProbe.grpc.port }}
+          initialDelaySeconds: {{ .Values.vehicleConnector.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.vehicleConnector.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.vehicleConnector.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.vehicleConnector.livenessProbe.failureThreshold }}
+        {{- end }}
+
+        {{- if .Values.vehicleConnector.readinessProbe.enabled }}
+        readinessProbe:
+          grpc:
+            port: {{ .Values.vehicleConnector.readinessProbe.grpc.port }}
+          initialDelaySeconds: {{ .Values.vehicleConnector.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.vehicleConnector.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.vehicleConnector.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.vehicleConnector.readinessProbe.failureThreshold }}
+        {{- end }}
+
+        resources:
+          {{- toYaml .Values.vehicleConnector.resources | nindent 12 }}
+
+      {{- with .Values.vehicleConnector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.vehicleConnector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.vehicleConnector.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

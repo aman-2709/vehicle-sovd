@@ -10,29 +10,31 @@ This is the full specification of the task you must complete.
 
 ```json
 {
-  "task_id": "I5.T1",
+  "task_id": "I5.T2",
   "iteration_id": "I5",
   "iteration_goal": "Production Deployment Infrastructure - Kubernetes, CI/CD & gRPC Foundation",
-  "description": "Create optimized production Dockerfiles for frontend and backend with multi-stage builds. Backend: build stage (install deps) + runtime stage (copy app, non-root user). Frontend: build stage (npm build) + runtime stage (Nginx Alpine, static files). Create Nginx config for frontend with gzip, security headers, API reverse proxy. Create .dockerignore files.",
+  "description": "Create Helm chart in infrastructure/helm/sovd-webapp/. Structure: Chart.yaml, values.yaml, values-production.yaml, templates/. Templates: backend/frontend/vehicle-connector deployments (3 replicas, health checks, resources), services, ingress (ALB with TLS), configmap, secrets, HPA (CPU 70%, 3-10 replicas). Configure resource requests/limits. Document in README.",
   "agent_type_hint": "BackendAgent",
-  "inputs": "Architecture Blueprint Section 3.9; Docker best practices.",
+  "inputs": "Architecture Blueprint Section 3.9; Kubernetes/Helm best practices.",
   "target_files": [
-    "backend/Dockerfile.prod",
-    "backend/.dockerignore",
-    "frontend/Dockerfile.prod",
-    "frontend/.dockerignore",
-    "infrastructure/docker/nginx.conf"
+    "infrastructure/helm/sovd-webapp/Chart.yaml",
+    "infrastructure/helm/sovd-webapp/values.yaml",
+    "infrastructure/helm/sovd-webapp/values-production.yaml",
+    "infrastructure/helm/sovd-webapp/templates/backend-deployment.yaml",
+    "infrastructure/helm/sovd-webapp/templates/frontend-deployment.yaml",
+    "infrastructure/helm/sovd-webapp/templates/vehicle-connector-deployment.yaml",
+    "infrastructure/helm/sovd-webapp/templates/services.yaml",
+    "infrastructure/helm/sovd-webapp/templates/ingress.yaml",
+    "infrastructure/helm/sovd-webapp/templates/configmap.yaml",
+    "infrastructure/helm/sovd-webapp/templates/secrets.yaml",
+    "infrastructure/helm/sovd-webapp/templates/hpa.yaml",
+    "infrastructure/helm/sovd-webapp/README.md"
   ],
-  "input_files": [
-    "backend/requirements.txt",
-    "frontend/package.json"
-  ],
-  "deliverables": "Production Dockerfiles; Nginx config; .dockerignore files; tested images.",
-  "acceptance_criteria": "Backend build succeeds, image <500MB, runs as non-root; Frontend build succeeds, image <50MB, serves at :80; Nginx has gzip+security headers+API proxy; .dockerignore excludes tests/node_modules; No build errors",
-  "dependencies": [
-    "I4.T1"
-  ],
-  "parallelizable": true,
+  "input_files": [],
+  "deliverables": "Complete Helm chart; production values; HPA; documentation.",
+  "acceptance_criteria": "helm lint passes; helm template generates valid YAML; All resources present; 3 replicas, health checks, resources set; Ingress for ALB; HPA targets 70% CPU; ConfigMap/Secrets placeholders; README documents install/upgrade",
+  "dependencies": ["I5.T1"],
+  "parallelizable": false,
   "done": false
 }
 ```
@@ -45,6 +47,7 @@ The following are the relevant sections from the architecture and plan documents
 
 ### Context: production-deployment (from 05_Operational_Architecture.md)
 
+```markdown
 **Production Environment (AWS EKS)**
 
 **Orchestration:** Kubernetes (EKS)
@@ -92,33 +95,149 @@ sovd-helm-chart/
 │   └── secrets.yaml
 ```
 
-### Context: deployment-constraints (from 01_Context_and_Drivers.md)
+**Deployment Command:**
+```bash
+helm upgrade --install sovd-webapp ./sovd-helm-chart \
+  -f values-production.yaml \
+  -n production
+```
+```
 
-**Deployment Constraints:**
-- Must support containerization (Docker)
-- Must be deployable to cloud platforms (AWS, GCP, Azure)
-- Local development environment using docker-compose
-- Production deployment using Kubernetes (EKS/GKE/AKS)
+### Context: task-i5-t2 (from 02_Iteration_I5.md)
 
-### Context: nfr-performance (from 01_Context_and_Drivers.md)
+```markdown
+*   **Task 5.2: Create Kubernetes Helm Chart**
+    *   **Task ID:** `I5.T2`
+    *   **Description:** Create Helm chart for Kubernetes deployment in `infrastructure/helm/sovd-webapp/`. Chart structure: `Chart.yaml` (metadata), `values.yaml` (default values), `values-production.yaml` (production overrides), `templates/` directory with Kubernetes manifests. Templates to create: 1) `backend-deployment.yaml`: Deployment for backend (3 replicas, resource requests/limits, health checks using /health/live and /health/ready, environment variables from ConfigMap and Secrets), 2) `frontend-deployment.yaml`: Deployment for frontend (3 replicas, Nginx container), 3) `vehicle-connector-deployment.yaml`: Deployment for vehicle connector (2 replicas, can be same image as backend with different entrypoint or CMD), 4) `services.yaml`: ClusterIP Services for backend, frontend, vehicle-connector, 5) `ingress.yaml`: Ingress for ALB (AWS Application Load Balancer) with TLS termination, routes for frontend (/) and backend (/api/*), 6) `configmap.yaml`: ConfigMap for non-sensitive config (database host, Redis host, log level), 7) `secrets.yaml`: placeholder for Secrets (database password, JWT secret, Redis password) - note: use External Secrets Operator in real deployment, 8) `hpa.yaml`: HorizontalPodAutoscaler for backend (target CPU 70%, min 3, max 10 replicas). Configure resource requests/limits: backend (requests: 256Mi memory, 250m CPU; limits: 512Mi, 500m), frontend (requests: 64Mi, 100m; limits: 128Mi, 200m). Document Helm chart usage in `infrastructure/helm/sovd-webapp/README.md`.
+    *   **Acceptance Criteria:**
+        *   `helm lint infrastructure/helm/sovd-webapp` passes without errors
+        *   `helm template sovd-webapp infrastructure/helm/sovd-webapp` generates valid Kubernetes YAML
+        *   Generated manifests include all specified resources (Deployments, Services, Ingress, ConfigMap, Secrets, HPA)
+        *   Backend deployment has 3 replicas, health checks configured, resource limits set
+        *   Ingress configured for ALB with annotations (AWS-specific: `alb.ingress.kubernetes.io/*`)
+        *   HPA targets CPU utilization 70%, scales backend from 3 to 10 replicas
+        *   ConfigMap includes: DATABASE_HOST, REDIS_HOST, LOG_LEVEL
+        *   Secrets template includes placeholders for: DATABASE_PASSWORD, JWT_SECRET, REDIS_PASSWORD
+        *   `values-production.yaml` overrides: image tags (use specific version, not `latest`), resource limits (higher than defaults), ingress host (production domain)
+        *   README documents: installation (`helm install`), upgrade (`helm upgrade`), configuration options
+```
 
-**Performance Requirements:**
-- API response time: <200ms for CRUD operations (p95)
-- Command execution roundtrip: <500ms for simple commands
-- WebSocket message latency: <100ms
-- Database query performance: <50ms for indexed lookups
-- Frontend: First Contentful Paint (FCP) <1.5s, Time to Interactive (TTI) <3s
+### Context: horizontal-scaling (from 05_Operational_Architecture.md)
 
-### Context: nfr-security (from 01_Context_and_Drivers.md)
+```markdown
+**Horizontal Scaling Strategy**
 
-**Security Requirements:**
-- All data encrypted in transit (TLS 1.2+)
-- All data encrypted at rest (AES-256)
-- JWT-based authentication with short-lived tokens (15min access, 7d refresh)
-- Role-based access control (RBAC) for engineers and admins
-- Comprehensive audit logging for all critical operations
-- No secrets in codebase or container images
-- Regular security scanning of dependencies and container images
+The architecture is designed for horizontal scalability to handle increased load without modifying the application code.
+
+**Stateless Application Design:**
+- Backend (FastAPI) and Frontend (React SPA) are stateless and can scale horizontally by adding more pod replicas
+- Session state stored externally in Redis (not in-memory within application)
+- No sticky sessions required for load balancing
+
+**Kubernetes Horizontal Pod Autoscaler (HPA):**
+- **Backend HPA Configuration:**
+  - Target Metric: Average CPU Utilization
+  - Target Value: 70%
+  - Min Replicas: 3 (high availability baseline)
+  - Max Replicas: 10 (cost-controlled scaling limit)
+  - Scaling Behavior: Scale up aggressively (add 2 replicas per interval), scale down conservatively (remove 1 replica per interval with 5-minute stabilization window)
+
+- **Frontend HPA Configuration:**
+  - Target Metric: Average CPU Utilization
+  - Target Value: 70%
+  - Min Replicas: 2
+  - Max Replicas: 5
+  - Rationale: Frontend is lightweight; typically constrained by backend capacity
+
+**Load Balancer Configuration:**
+- AWS Application Load Balancer (ALB) distributes traffic across backend replicas
+- Health checks use `/health/ready` endpoint to ensure only healthy pods receive traffic
+- Connection draining enabled (30 seconds) for graceful pod termination
+
+**Database Scaling:**
+- Vertical scaling for PostgreSQL RDS (upgrade instance class when needed)
+- Read replicas can be added for read-heavy workloads (future enhancement)
+- Connection pooling in application (SQLAlchemy pool_size=20) prevents connection exhaustion
+
+**Redis Scaling:**
+- ElastiCache cluster mode enables horizontal scaling by adding shards
+- Replication group provides high availability (primary + replicas)
+```
+
+### Context: deployment-strategy (from docs/runbooks/deployment.md)
+
+```markdown
+## Production Deployment
+
+Production deployment follows the same Helm-based process as staging but includes additional safeguards and a blue-green deployment strategy.
+
+### Prerequisites
+- All staging smoke tests passed
+- Change ticket approved (for tracking)
+- Rollback plan prepared
+- On-call engineer available
+
+### Step 1: Pre-Deployment Checklist
+
+- [ ] Staging deployment successful
+- [ ] Smoke tests passed in staging
+- [ ] Database migrations tested (if any)
+- [ ] Rollback procedure reviewed
+- [ ] Monitoring dashboards open (Grafana)
+- [ ] On-call engineer notified
+
+### Step 2: Authenticate to Production
+
+```bash
+aws eks update-kubeconfig --region us-east-1 --name sovd-production-cluster
+```
+
+**Verification**: Check you're in the production context:
+```bash
+kubectl config current-context
+# Should show production cluster
+```
+
+### Step 3: Deploy with Gradual Rollout
+
+Production uses a gradual rollout strategy (10% → 50% → 100%) with automatic rollback on errors.
+
+```bash
+cd sovd-helm-chart
+
+# Deploy with gradual rollout
+helm upgrade --install sovd-webapp . \
+  -f values-production.yaml \
+  -n production \
+  --set backend.image.tag=${COMMIT_SHA} \
+  --set frontend.image.tag=${COMMIT_SHA} \
+  --set deployment.strategy.type=RollingUpdate \
+  --set deployment.strategy.rollingUpdate.maxSurge=1 \
+  --set deployment.strategy.rollingUpdate.maxUnavailable=0 \
+  --wait \
+  --timeout 10m
+```
+
+### Step 4: Monitor Deployment Progress
+
+Watch the rollout in real-time:
+
+```bash
+# Watch pods being updated
+kubectl rollout status deployment/backend-deployment -n production
+kubectl rollout status deployment/frontend-deployment -n production
+
+# Monitor error rates in Prometheus
+# Navigate to Grafana: http://<grafana-url>
+# Check "Operations Dashboard" for error rate spikes
+```
+
+**Success Criteria**:
+- All pods transition to "Running" state
+- Error rate remains <1%
+- P95 latency remains <3s
+- No increase in 5xx responses
+```
 
 ---
 
@@ -126,188 +245,218 @@ sovd-helm-chart/
 
 The following analysis is based on my direct review of the current codebase. Use these notes and tips to guide your implementation.
 
-### CRITICAL FINDING: Task Already Completed!
+*   **File:** `backend/Dockerfile.prod`
+    *   **Summary:** This is the production Docker image for the backend FastAPI application. It uses multi-stage builds with Python 3.11, installs production dependencies, runs as non-root user (appuser, UID 1001), exposes port 8000, and includes a health check on `/health/ready`.
+    *   **Recommendation:** You MUST reference this Dockerfile in your Helm chart backend deployment. The image should be built from this file and tagged appropriately. Note that it uses 4 workers with uvicorn, listens on port 8000, and has health check configured.
+    *   **Port Configuration:** Backend listens on port 8000 inside the container.
+    *   **Health Check Configuration:** The Dockerfile uses `/health/ready` for health checks with 30s interval, 10s timeout, 40s start period, and 3 retries.
 
-**All target files already exist and appear to be production-ready:**
+*   **File:** `frontend/Dockerfile.prod`
+    *   **Summary:** This is the production Docker image for the frontend React application. It uses multi-stage builds (Node 20 builder + nginx:alpine runtime), serves static files from `/usr/share/nginx/html`, exposes port 80, and runs as nginx user (UID 101).
+    *   **Recommendation:** You MUST reference this Dockerfile in your Helm chart frontend deployment. The nginx configuration is copied from `frontend/nginx.conf` which includes API proxying to the backend service.
+    *   **Port Configuration:** Frontend Nginx listens on port 80 inside the container.
+    *   **Health Check:** Simple nc check on port 80 with 30s interval.
 
-#### Existing Files Analysis:
+*   **File:** `infrastructure/docker/nginx.conf`
+    *   **Summary:** This is the Nginx configuration for the frontend that includes gzip compression, security headers, SPA routing, and critical proxy configurations for `/api/` and `/ws/` endpoints.
+    *   **Recommendation:** Note that the nginx.conf proxies `/api/` requests to `http://backend:8000` and `/ws/` to the same backend for WebSocket support. In your Helm chart, the Service for backend MUST be named `backend` (or update nginx.conf accordingly), and it must expose port 8000.
+    *   **WebSocket Support:** The nginx.conf includes special WebSocket upgrade headers for `/ws/` location with 7-day timeouts.
+    *   **Important:** The proxy_pass uses service name `backend:8000`, so your backend Service name in Kubernetes MUST be `backend`.
 
-1. **`backend/Dockerfile.prod`** - ALREADY EXISTS AND IS COMPLETE
-   - **Summary:** Production-ready multi-stage Dockerfile for FastAPI backend
-   - **Features:**
-     - Multi-stage build (builder + runtime)
-     - Builder stage: Python 3.11-slim with gcc, python3-dev, libpq-dev for compiling dependencies
-     - Runtime stage: Python 3.11-slim with minimal runtime libraries (libpq5, curl)
-     - Non-root user execution (UID 1001, user: appuser)
-     - Dependencies installed to user site-packages and copied from builder
-     - Uvicorn production config: 4 workers, uvloop, httptools
-     - Health check using /health/ready endpoint
-     - Image optimization: no build tools in runtime, no pip cache
-   - **Recommendation:** This file meets all acceptance criteria. Verify image size <500MB by building it.
+*   **File:** `backend/app/config.py`
+    *   **Summary:** This file defines the application configuration using Pydantic Settings. It loads the following environment variables: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `JWT_ALGORITHM` (default HS256), `JWT_EXPIRATION_MINUTES` (default 15), `LOG_LEVEL` (default INFO), `CORS_ORIGINS` (default localhost:3000).
+    *   **Recommendation:** Your ConfigMap MUST include these configuration keys (non-sensitive ones like LOG_LEVEL, CORS_ORIGINS), and your Secrets MUST include the sensitive ones (JWT_SECRET, database password, Redis password). You should construct DATABASE_URL and REDIS_URL from these components in the deployment environment variables.
+    *   **Environment Variables Structure:**
+        - DATABASE_URL format: `postgresql+asyncpg://sovd_user:sovd_pass@db:5432/sovd`
+        - REDIS_URL format: `redis://redis:6379/0`
+        - In Kubernetes, replace `db` with RDS endpoint and `redis` with ElastiCache endpoint.
 
-2. **`backend/.dockerignore`** - ALREADY EXISTS AND IS COMPREHENSIVE
-   - **Summary:** Comprehensive exclusion list for backend build context
-   - **Excludes:** Python cache (\_\_pycache\_\_, *.pyc), tests, coverage files, dev files (.env, .vscode, .idea), Git files, Docker files, docs, CI/CD configs, virtual envs, logs, temp files
-   - **Recommendation:** This file meets acceptance criteria. All required exclusions are present.
+*   **File:** `docker-compose.yml`
+    *   **Summary:** This shows the development environment setup with all services. It includes PostgreSQL (port 5432), Redis (port 6379), backend (port 8000), frontend (port 3000), Prometheus (port 9090), and Grafana (port 3001).
+    *   **Recommendation:** Use this as a reference for service dependencies and configurations. The backend depends on both db and redis with health check conditions. Your Kubernetes deployment should reflect these dependencies using init containers or readiness probes.
+    *   **Service Names:** In docker-compose, services are named: `db`, `redis`, `backend`, `frontend`, `prometheus`, `grafana`. In Kubernetes, you'll need Services with similar names for internal communication.
 
-3. **`frontend/Dockerfile.prod`** - ALREADY EXISTS AND IS COMPLETE
-   - **Summary:** Production-ready multi-stage Dockerfile for React SPA with Nginx
-   - **Features:**
-     - Multi-stage build (builder + runtime)
-     - Builder stage: Node 20 Alpine with build tools, npm ci for clean install, Vite build for optimized static assets
-     - Runtime stage: nginx:alpine for minimal footprint
-     - Copies only dist/ artifacts (no source, no node_modules)
-     - Custom nginx.conf for gzip, security headers, SPA routing, API proxy
-     - Health check on /health endpoint
-     - Nginx runs in foreground (daemon off)
-   - **IMPORTANT BUILD CONTEXT NOTE:** The Dockerfile expects to be built from project root with frontend/ subdirectory:
-     - `COPY frontend/package*.json ./` and `COPY frontend/ ./`
-     - Build command: `docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .` (from project root)
-   - **Recommendation:** This file meets all acceptance criteria. Verify image size <50MB by building it.
+### Implementation Tips & Notes
 
-4. **`frontend/.dockerignore`** - ALREADY EXISTS AND IS COMPREHENSIVE
-   - **Summary:** Comprehensive exclusion list for frontend build context
-   - **Excludes:** node_modules, dist/build output, test files, coverage, dev files (.env, .vscode, .idea), Git files, Docker files, docs, CI/CD configs, linter configs (eslintrc, prettierrc), tsconfig, bundle reports, logs, temp files
-   - **Recommendation:** This file meets acceptance criteria. All required exclusions are present.
+*   **Tip:** The production Dockerfiles (I5.T1) are already created and working. You SHOULD use image references like `{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}` in your deployment templates and define these in values.yaml.
 
-5. **`infrastructure/docker/nginx.conf`** - ALREADY EXISTS AND IS PRODUCTION-READY
-   - **Summary:** Production Nginx configuration for serving React SPA and proxying API/WebSocket
-   - **Features:**
-     - Gzip compression (6 levels, multiple MIME types)
-     - Security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy)
-     - Cache control: 1y for /assets/, 6M for images/fonts, no-cache for HTML
-     - SPA routing: try_files with fallback to index.html
-     - API reverse proxy: /api/ → http://backend:8000
-     - WebSocket proxy: /ws/ → http://backend:8000 with upgrade headers and 7d timeout
-     - Health check endpoint: /health returns 200 "healthy"
-     - Custom error pages
-   - **Recommendation:** This config is complete and meets all acceptance criteria. It already includes all required features: gzip, security headers, API/WebSocket proxy.
+*   **Tip:** For AWS ALB Ingress, you MUST use specific annotations. The essential ones are:
+    - `kubernetes.io/ingress.class: alb` (or use ingressClassName: alb in newer versions)
+    - `alb.ingress.kubernetes.io/scheme: internet-facing`
+    - `alb.ingress.kubernetes.io/target-type: ip` (for EKS with VPC CNI)
+    - `alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'`
+    - `alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...` (for TLS)
+    - `alb.ingress.kubernetes.io/ssl-redirect: '443'` (redirect HTTP to HTTPS)
 
-### Implementation Guidance
+*   **Note:** The backend has both liveness (`/health/live`) and readiness (`/health/ready`) endpoints implemented in `backend/app/api/health.py`. Your deployment SHOULD use:
+    - `livenessProbe` → `/health/live` (checks if container is alive)
+    - `readinessProbe` → `/health/ready` (checks if container can serve traffic, includes DB and Redis checks)
+    - Use appropriate initialDelaySeconds (30-40s for backend), periodSeconds (10s), timeoutSeconds (5s), failureThreshold (3)
 
-**STOP! Before proceeding, you MUST verify the task status.**
+*   **Tip:** For the HPA (HorizontalPodAutoscaler), target the backend deployment with `apiVersion: autoscaling/v2` (or v2beta2). Specify:
+    - `scaleTargetRef` pointing to backend deployment
+    - `minReplicas: 3`, `maxReplicas: 10`
+    - `metrics` with `type: Resource`, `resource.name: cpu`, `target.type: Utilization`, `target.averageUtilization: 70`
+    - Include `behavior` section for controlled scale-down (e.g., stabilizationWindowSeconds: 300)
 
-The task is marked as `"done": false`, but ALL target files already exist and appear to meet the acceptance criteria. You have THREE options:
+*   **Note:** The architecture blueprint specifies vehicle-connector as a separate deployment (2 replicas). However, this component hasn't been fully implemented yet as a standalone service. For now, you can create the deployment template using the same backend image but with a different command/args that would be configured when the gRPC vehicle connector is implemented (that's task I5.T6). Use a placeholder in values.yaml like `vehicleConnector.enabled: false` to allow disabling it initially.
 
-#### Option 1: Verify and Mark Complete (RECOMMENDED)
-1. Build the Docker images to verify they meet acceptance criteria:
-   ```bash
-   # Backend (from project root)
-   docker build -f backend/Dockerfile.prod -t sovd-backend:prod backend/
+*   **Warning:** For the ConfigMap, DO NOT hardcode database credentials or JWT secrets. Only include non-sensitive configuration like:
+    - `LOG_LEVEL: INFO`
+    - `CORS_ORIGINS: https://your-domain.com`
+    - Database and Redis hosts/ports (not passwords)
+    - Environment-specific settings
 
-   # Frontend (from project root - note the context is root!)
-   docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .
-   ```
+*   **Tip:** For the Secrets template, create placeholder base64-encoded values that will be replaced by External Secrets Operator in real deployments. Document in comments that these are placeholders and should not be used in production. Example structure:
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: sovd-secrets
+    type: Opaque
+    data:
+      database-password: cGxhY2Vob2xkZXI=  # placeholder - use External Secrets Operator in production
+      jwt-secret: cGxhY2Vob2xkZXI=  # placeholder
+      redis-password: ""  # Redis may not require password in some setups
+    ```
 
-2. Check image sizes:
-   ```bash
-   docker images | grep sovd
-   # Backend should be <500MB
-   # Frontend should be <50MB
-   ```
+*   **Tip:** In your values.yaml, structure the configuration hierarchically:
+    ```yaml
+    global:
+      namespace: production
+      domain: sovd.example.com
 
-3. Test the images:
-   ```bash
-   # Backend: Check it runs as non-root
-   docker run --rm sovd-backend:prod id
-   # Should show: uid=1001(appuser) gid=1001(appuser)
+    backend:
+      replicaCount: 3
+      image:
+        repository: YOUR_ECR_REGISTRY/sovd-backend
+        tag: latest  # Override in production with specific SHA
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
 
-   # Frontend: Check it serves on port 80
-   docker run -d -p 8080:80 sovd-frontend:prod
-   curl http://localhost:8080/health
-   # Should return: healthy
-   ```
+    frontend:
+      replicaCount: 3
+      image:
+        repository: YOUR_ECR_REGISTRY/sovd-frontend
+        tag: latest
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "200m"
 
-4. If all tests pass, update the task status to `"done": true` in the tasks JSON file and report completion.
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
 
-#### Option 2: Improve Existing Files (If Gaps Found)
-If you find any deficiencies during verification:
-1. Document the specific issues found
-2. Make targeted improvements to address only those issues
-3. Retest to confirm fixes
-4. Update task status when complete
+    ingress:
+      enabled: true
+      className: alb
+      annotations:
+        alb.ingress.kubernetes.io/scheme: internet-facing
+      hosts:
+        - host: sovd.example.com
+      tls:
+        - secretName: sovd-tls
+          hosts:
+            - sovd.example.com
+    ```
 
-#### Option 3: Question the Task Status (If Uncertain)
-If you're uncertain about the completion status:
-1. Ask the user to clarify whether the task needs to be done or just verified
-2. Provide your analysis of the existing files
-3. Wait for user confirmation before proceeding
+*   **Tip:** Your values-production.yaml should override only production-specific values:
+    ```yaml
+    backend:
+      image:
+        tag: "v1.0.0"  # Specific version, not latest
+      replicaCount: 5  # More replicas in production
+      resources:
+        requests:
+          memory: "512Mi"  # Higher than default
+          cpu: "500m"
 
-### Key Project Context
+    frontend:
+      image:
+        tag: "v1.0.0"
 
-**Backend Dependencies (requirements.txt):**
-- FastAPI, uvicorn[standard]
-- SQLAlchemy 2.0, alembic, asyncpg (PostgreSQL)
-- Redis, slowapi (rate limiting)
-- python-jose[cryptography] (JWT), passlib[bcrypt]
-- pydantic, pydantic-settings, jsonschema
-- structlog (logging)
-- prometheus-fastapi-instrumentator (metrics)
+    ingress:
+      hosts:
+        - host: sovd.production.com  # Production domain
+      annotations:
+        alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789:certificate/abc123
+        alb.ingress.kubernetes.io/ssl-redirect: '443'
+    ```
 
-**Frontend Dependencies (package.json):**
-- React 18, react-router-dom
-- Material-UI (MUI)
-- TanStack React Query, axios
-- TypeScript, Vite
-- Testing: vitest, testing-library/react
+*   **Note:** The Chart.yaml should follow Helm v3 format:
+    ```yaml
+    apiVersion: v2
+    name: sovd-webapp
+    description: A Helm chart for SOVD Command WebApp
+    type: application
+    version: 1.0.0  # Chart version
+    appVersion: "1.0.0"  # Application version
+    keywords:
+      - sovd
+      - automotive
+      - vehicle-diagnostics
+    maintainers:
+      - name: SOVD Team
+    ```
 
-**Application Structure:**
-- **Backend:** FastAPI app at `app.main:app` with middleware: CORS, logging, rate limiting, security headers, error handling
-- **Frontend:** React SPA with Vite, client-side routing, API client with JWT auth
-- **APIs:** /api/v1/auth, /api/v1/vehicles, /api/v1/commands, /ws/responses, /health/live, /health/ready, /metrics
+*   **Tip:** For the Services template, you'll need three services:
+    1. **backend-service**: ClusterIP, port 8000, selector matches backend deployment
+    2. **frontend-service**: ClusterIP, port 80, selector matches frontend deployment (this is what ALB Ingress will target)
+    3. **vehicle-connector-service**: ClusterIP, port 50051 (gRPC), selector matches vehicle-connector deployment
 
-### Docker Build Best Practices Applied
+*   **Important:** Remember that the nginx.conf in the frontend expects to proxy to a service named `backend`. So your backend Service MUST be named `backend`, or you need to update the nginx configuration. Since the nginx.conf is baked into the frontend Docker image, it's easier to name the Service `backend` to match.
 
-The existing Dockerfiles follow industry best practices:
+*   **Tip:** Use Helm template functions for flexibility:
+    - `{{ include "sovd-webapp.fullname" . }}` for resource names
+    - `{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}` for images
+    - `{{ .Release.Namespace }}` for namespace
+    - Define helper templates in `_helpers.tpl` for common labels and selectors
 
-1. **Multi-stage builds:** Separate builder and runtime stages minimize final image size
-2. **Minimal base images:** `python:3.11-slim` and `nginx:alpine` for small footprint
-3. **Layer caching optimization:** COPY requirements/package.json first, then source code
-4. **No root execution:** Backend uses UID 1001 non-root user
-5. **No secrets in images:** All secrets loaded from environment at runtime
-6. **Health checks:** Both images include HEALTHCHECK directives
-7. **Production tuning:** Uvicorn with 4 workers, uvloop, httptools for backend; Nginx with gzip for frontend
-8. **Security hardening:** Minimal runtime dependencies, no dev tools, security headers in Nginx
+*   **Tip:** For health checks in deployments, use this pattern:
+    ```yaml
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: 8000
+      initialDelaySeconds: 40
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
 
-### Potential Issues to Watch For
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 8000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    ```
 
-1. **Frontend Dockerfile build context:** Must be built from project root, not frontend/ directory
-   - Correct: `docker build -f frontend/Dockerfile.prod -t sovd-frontend:prod .`
-   - Wrong: `cd frontend && docker build -f Dockerfile.prod -t sovd-frontend:prod .`
+*   **Note:** Create a comprehensive README.md in the helm chart directory that documents:
+    - Chart overview and purpose
+    - Prerequisites (kubectl, helm, AWS credentials)
+    - Installation instructions with examples
+    - Configuration options (all values.yaml parameters)
+    - Upgrade and rollback procedures
+    - Troubleshooting common issues
+    - Links to architecture documentation
 
-2. **Backend image size:** With all dependencies, may approach 500MB limit. If it exceeds:
-   - Consider using `python:3.11-slim` (already done)
-   - Ensure \_\_pycache\_\_ and .pyc files excluded (already done in .dockerignore)
-   - Verify no unnecessary packages in requirements.txt
+### Deployment Strategy Notes
 
-3. **Nginx CSP header:** The existing nginx.conf has basic security headers but may need Content-Security-Policy (CSP) added if not already set by backend middleware
-   - Check if backend's security_headers_middleware.py sets CSP for API responses
-   - If not, consider adding to nginx.conf: `add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;`
+*   The deployment runbook (docs/runbooks/deployment.md) shows that production deployments use rolling updates with `maxSurge: 1` and `maxUnavailable: 0` to ensure zero-downtime deployments. Your deployment templates should include this strategy configuration.
 
-### Testing Checklist
+*   The architecture specifies a 3-node EKS cluster across 3 AZs. Consider adding pod anti-affinity rules to spread replicas across different nodes/AZs for high availability.
 
-Before marking this task complete, verify:
-
-- [ ] Backend image builds without errors
-- [ ] Backend image size <500MB
-- [ ] Backend runs as non-root user (uid=1001)
-- [ ] Frontend image builds without errors
-- [ ] Frontend image size <50MB
-- [ ] Frontend serves on port 80
-- [ ] Nginx has gzip compression enabled
-- [ ] Nginx has security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection)
-- [ ] Nginx proxies /api/ to backend
-- [ ] Nginx proxies /ws/ with WebSocket upgrade headers
-- [ ] .dockerignore files exclude tests, node_modules, \_\_pycache\_\_
-- [ ] No build errors or warnings
-
-### Recommendation
-
-**This task appears to be ALREADY COMPLETE.** All deliverables exist and meet the specified acceptance criteria.
-
-**Your next action should be:**
-1. Run the verification tests listed above
-2. If all tests pass, mark the task as done
-3. Proceed to the next task (I5.T2: Create Helm Chart)
-
-If any tests fail or gaps are found, address them specifically rather than recreating the entire solution.
+*   Resource requests are critical for HPA to work correctly. The HPA scales based on actual CPU usage vs requested CPU, so requests must be realistic (not too low, not too high).
