@@ -1,0 +1,195 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
+
+' AWS EKS Production Deployment Architecture for SOVD Command WebApp
+' Shows VPC, multi-AZ deployment, ALB, EKS cluster, RDS, ElastiCache, and supporting AWS services
+
+LAYOUT_TOP_DOWN()
+
+title Deployment Diagram - SOVD Command WebApp on AWS EKS
+
+' External actors and systems
+Person(user, "User", "Vehicle Diagnostics Engineer")
+System_Ext(vehicle, "Connected Vehicle", "SOVD 2.0 endpoint over internet")
+
+' AWS Route53
+Deployment_Node(route53, "Route53", "AWS DNS Service") {
+  Container(dns, "DNS Records", "Route53", "sovd.example.com → ALB")
+}
+
+' AWS VPC (10.0.0.0/16)
+Deployment_Node(vpc, "VPC", "AWS Virtual Private Cloud (10.0.0.0/16)") {
+
+  ' Availability Zone 1 (us-east-1a)
+  Deployment_Node(az1, "Availability Zone 1", "us-east-1a") {
+
+    ' Public Subnet in AZ1
+    Deployment_Node(az1_public, "Public Subnet", "10.0.1.0/24") {
+      Deployment_Node(alb1, "ALB Target 1", "AWS Application Load Balancer Node") {
+        Container(alb_node1, "ALB Instance", "AWS ALB", "HTTP/HTTPS listener")
+      }
+      Deployment_Node(nat1, "NAT Gateway 1", "AWS NAT Gateway") {
+        Container(nat_gw1, "NAT GW", "AWS NAT", "Outbound internet access")
+      }
+    }
+
+    ' Private Subnet in AZ1
+    Deployment_Node(az1_private, "Private Subnet", "10.0.11.0/24") {
+      Deployment_Node(eks_node1, "EKS Worker Node 1", "EC2 t3.medium") {
+        Container(backend_pod1, "Backend Pod", "FastAPI Container", "3-10 replicas (HPA)")
+        Container(frontend_pod1, "Frontend Pod", "Nginx Container", "2-5 replicas (HPA)")
+      }
+    }
+
+    ' Data Subnet in AZ1
+    Deployment_Node(az1_data, "Data Subnet", "10.0.21.0/24") {
+      Deployment_Node(rds1, "RDS Primary", "PostgreSQL 15 Multi-AZ") {
+        ContainerDb(postgres_primary, "PostgreSQL", "RDS", "Primary instance")
+      }
+      Deployment_Node(cache1, "ElastiCache Node 1", "Redis 7") {
+        ContainerDb(redis_node1, "Redis", "ElastiCache", "Cache cluster node")
+      }
+    }
+  }
+
+  ' Availability Zone 2 (us-east-1b)
+  Deployment_Node(az2, "Availability Zone 2", "us-east-1b") {
+
+    ' Public Subnet in AZ2
+    Deployment_Node(az2_public, "Public Subnet", "10.0.2.0/24") {
+      Deployment_Node(alb2, "ALB Target 2", "AWS Application Load Balancer Node") {
+        Container(alb_node2, "ALB Instance", "AWS ALB", "HTTP/HTTPS listener")
+      }
+      Deployment_Node(nat2, "NAT Gateway 2", "AWS NAT Gateway") {
+        Container(nat_gw2, "NAT GW", "AWS NAT", "Outbound internet access")
+      }
+    }
+
+    ' Private Subnet in AZ2
+    Deployment_Node(az2_private, "Private Subnet", "10.0.12.0/24") {
+      Deployment_Node(eks_node2, "EKS Worker Node 2", "EC2 t3.medium") {
+        Container(backend_pod2, "Backend Pod", "FastAPI Container", "3-10 replicas (HPA)")
+        Container(frontend_pod2, "Frontend Pod", "Nginx Container", "2-5 replicas (HPA)")
+      }
+    }
+
+    ' Data Subnet in AZ2
+    Deployment_Node(az2_data, "Data Subnet", "10.0.22.0/24") {
+      Deployment_Node(rds2, "RDS Standby", "PostgreSQL 15 Multi-AZ") {
+        ContainerDb(postgres_standby, "PostgreSQL", "RDS", "Standby instance")
+      }
+      Deployment_Node(cache2, "ElastiCache Node 2", "Redis 7") {
+        ContainerDb(redis_node2, "Redis", "ElastiCache", "Cache cluster node")
+      }
+    }
+  }
+
+  ' Availability Zone 3 (us-east-1c)
+  Deployment_Node(az3, "Availability Zone 3", "us-east-1c") {
+
+    ' Public Subnet in AZ3
+    Deployment_Node(az3_public, "Public Subnet", "10.0.3.0/24") {
+      Deployment_Node(alb3, "ALB Target 3", "AWS Application Load Balancer Node") {
+        Container(alb_node3, "ALB Instance", "AWS ALB", "HTTP/HTTPS listener")
+      }
+      Deployment_Node(nat3, "NAT Gateway 3", "AWS NAT Gateway") {
+        Container(nat_gw3, "NAT GW", "AWS NAT", "Outbound internet access")
+      }
+    }
+
+    ' Private Subnet in AZ3
+    Deployment_Node(az3_private, "Private Subnet", "10.0.13.0/24") {
+      Deployment_Node(eks_node3, "EKS Worker Node 3", "EC2 t3.medium") {
+        Container(backend_pod3, "Backend Pod", "FastAPI Container", "3-10 replicas (HPA)")
+        Container(frontend_pod3, "Frontend Pod", "Nginx Container", "2-5 replicas (HPA)")
+      }
+    }
+
+    ' Data Subnet in AZ3
+    Deployment_Node(az3_data, "Data Subnet", "10.0.23.0/24") {
+      Deployment_Node(cache3, "ElastiCache Node 3", "Redis 7") {
+        ContainerDb(redis_node3, "Redis", "ElastiCache", "Cache cluster node")
+      }
+    }
+  }
+}
+
+' External AWS Services
+Deployment_Node(aws_services, "AWS Management Services", "AWS Cloud") {
+  System_Ext(secrets_manager, "Secrets Manager", "Stores database passwords, JWT secrets, Redis passwords")
+  System_Ext(cloudwatch, "CloudWatch", "Logs, metrics, and alarms for monitoring")
+  System_Ext(s3, "S3", "Stores deployment artifacts, Helm charts, backups")
+  System_Ext(ecr, "ECR/GHCR", "Container image registry for backend/frontend images")
+}
+
+' Internet Gateway
+System_Ext(igw, "Internet Gateway", "AWS IGW for VPC")
+
+' Relationships - User traffic flow
+Rel(user, dns, "Resolves domain", "DNS (UDP 53)")
+Rel(dns, alb_node1, "Routes to", "HTTPS (443)")
+Rel(dns, alb_node2, "Routes to", "HTTPS (443)")
+Rel(dns, alb_node3, "Routes to", "HTTPS (443)")
+
+' ALB to pods (path-based routing)
+Rel(alb_node1, backend_pod1, "Routes /api, /ws", "HTTP (8000)")
+Rel(alb_node1, frontend_pod1, "Routes /", "HTTP (80)")
+Rel(alb_node2, backend_pod2, "Routes /api, /ws", "HTTP (8000)")
+Rel(alb_node2, frontend_pod2, "Routes /", "HTTP (80)")
+Rel(alb_node3, backend_pod3, "Routes /api, /ws", "HTTP (8000)")
+Rel(alb_node3, frontend_pod3, "Routes /", "HTTP (80)")
+
+' Backend pods to databases
+Rel(backend_pod1, postgres_primary, "Reads/Writes", "PostgreSQL (5432)")
+Rel(backend_pod1, redis_node1, "Caches, Pub/Sub", "Redis (6379)")
+Rel(backend_pod2, postgres_primary, "Reads/Writes", "PostgreSQL (5432)")
+Rel(backend_pod2, redis_node2, "Caches, Pub/Sub", "Redis (6379)")
+Rel(backend_pod3, postgres_primary, "Reads/Writes", "PostgreSQL (5432)")
+Rel(backend_pod3, redis_node3, "Caches, Pub/Sub", "Redis (6379)")
+
+' RDS Multi-AZ replication
+Rel(postgres_primary, postgres_standby, "Synchronous replication", "PostgreSQL replication")
+
+' ElastiCache cluster replication
+Rel(redis_node1, redis_node2, "Cluster sync", "Redis cluster protocol")
+Rel(redis_node2, redis_node3, "Cluster sync", "Redis cluster protocol")
+
+' Backend pods to AWS services
+Rel(backend_pod1, secrets_manager, "Fetches secrets via External Secrets Operator", "HTTPS (443)")
+Rel(backend_pod2, secrets_manager, "Fetches secrets via External Secrets Operator", "HTTPS (443)")
+Rel(backend_pod3, secrets_manager, "Fetches secrets via External Secrets Operator", "HTTPS (443)")
+
+' CloudWatch monitoring
+Rel(backend_pod1, cloudwatch, "Sends logs/metrics", "CloudWatch API")
+Rel(backend_pod2, cloudwatch, "Sends logs/metrics", "CloudWatch API")
+Rel(backend_pod3, cloudwatch, "Sends logs/metrics", "CloudWatch API")
+Rel(postgres_primary, cloudwatch, "Sends metrics", "CloudWatch API")
+Rel(postgres_standby, cloudwatch, "Sends metrics", "CloudWatch API")
+Rel(redis_node1, cloudwatch, "Sends metrics", "CloudWatch API")
+
+' Internet Gateway connections
+Rel(alb_node1, igw, "Receives traffic", "HTTPS")
+Rel(alb_node2, igw, "Receives traffic", "HTTPS")
+Rel(alb_node3, igw, "Receives traffic", "HTTPS")
+
+' NAT Gateway for outbound traffic
+Rel(eks_node1, nat_gw1, "Outbound traffic", "HTTPS")
+Rel(eks_node2, nat_gw2, "Outbound traffic", "HTTPS")
+Rel(eks_node3, nat_gw3, "Outbound traffic", "HTTPS")
+Rel(nat_gw1, igw, "To internet", "HTTPS")
+Rel(nat_gw2, igw, "To internet", "HTTPS")
+Rel(nat_gw3, igw, "To internet", "HTTPS")
+
+' Vehicle communication (outbound through NAT)
+Rel(backend_pod1, vehicle, "Sends SOVD commands", "gRPC/WebSocket over TLS")
+Rel(backend_pod2, vehicle, "Sends SOVD commands", "gRPC/WebSocket over TLS")
+Rel(backend_pod3, vehicle, "Sends SOVD commands", "gRPC/WebSocket over TLS")
+
+' Deployment and CI/CD
+Rel(ecr, eks_node1, "Pulls images", "HTTPS")
+Rel(ecr, eks_node2, "Pulls images", "HTTPS")
+Rel(ecr, eks_node3, "Pulls images", "HTTPS")
+
+SHOW_LEGEND()
+
+@enduml
