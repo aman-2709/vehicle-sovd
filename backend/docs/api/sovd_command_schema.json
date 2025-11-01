@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SOVD Command Schema",
+  "description": "JSON Schema for SOVD 2.0 command validation",
+  "definitions": {
+    "ReadDTC": {
+      "type": "object",
+      "required": ["ecuAddress"],
+      "properties": {
+        "ecuAddress": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{2}$",
+          "description": "ECU address in hexadecimal format (0x00 to 0xFF)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ClearDTC": {
+      "type": "object",
+      "required": ["ecuAddress"],
+      "properties": {
+        "ecuAddress": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{2}$",
+          "description": "ECU address in hexadecimal format"
+        },
+        "dtcCode": {
+          "type": "string",
+          "pattern": "^P[0-9A-F]{4}$",
+          "description": "Optional specific DTC code to clear (e.g., P0420)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReadDataByID": {
+      "type": "object",
+      "required": ["ecuAddress", "dataId"],
+      "properties": {
+        "ecuAddress": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{2}$",
+          "description": "ECU address in hexadecimal format"
+        },
+        "dataId": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{4}$",
+          "description": "Data identifier in hexadecimal format (0x0000 to 0xFFFF)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

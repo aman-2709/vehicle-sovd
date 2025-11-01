@@ -4,6 +4,9 @@ metadata:
   name: {{ include "sovd-webapp.fullname" . }}-config
   labels:
     {{- include "sovd-webapp.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-9"
 data:
   # Database configuration (non-sensitive)
   DATABASE_HOST: {{ .Values.config.database.host | quote }}

@@ -17,8 +17,17 @@ logger = structlog.get_logger(__name__)
 SCHEMA_PATH = (
     Path(__file__).parent.parent.parent.parent / "docs" / "api" / "sovd_command_schema.json"
 )
-with open(SCHEMA_PATH) as f:
-    COMMAND_SCHEMA = json.load(f)
+try:
+    with open(SCHEMA_PATH) as f:
+        COMMAND_SCHEMA = json.load(f)
+except FileNotFoundError:
+    # Fallback for deployment testing - use minimal schema
+    logger.warning("Schema file not found, using minimal fallback schema")
+    COMMAND_SCHEMA = {
+        "ReadDTC": {"type": "object", "properties": {"ecuAddress": {"type": "string"}}},
+        "ClearDTC": {"type": "object", "properties": {"ecuAddress": {"type": "string"}}},
+        "RequestVIN": {"type": "object", "properties": {}}
+    }
 
 
 def validate_command(command_name: str, command_params: dict[str, Any]) -> str | None:

@@ -1,0 +1,163 @@
+# Local Kubernetes (kind) overrides for sovd-webapp
+# This file contains local-specific configurations for testing with kind cluster
+
+global:
+  namespace: staging
+  domain: localhost
+
+# Backend local configuration
+backend:
+  replicaCount: 3  # Start with 3 for HPA testing
+
+  image:
+    repository: sovd-backend
+    tag: "local"
+    pullPolicy: Never  # Use local images loaded into kind
+
+  # No image pull secrets needed for local images
+  imagePullSecrets: []
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  env:
+    LOG_LEVEL: "INFO"
+
+  # Relaxed readiness probe for local testing
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Frontend local configuration
+frontend:
+  replicaCount: 2  # Less replicas for local
+
+  image:
+    repository: sovd-frontend
+    tag: "local"
+    pullPolicy: Never
+
+  imagePullSecrets: []
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    name: frontend
+
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+
+# Vehicle Connector - disabled (using mock)
+vehicleConnector:
+  enabled: false
+
+# HPA local configuration - test scaling from 3 to 5
+hpa:
+  enabled: true
+  backend:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 180  # 3 minutes
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 60
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Pods
+            value: 2  # Scale up by 2 pods at a time
+            periodSeconds: 60
+
+  frontend:
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# Ingress disabled for local - using port-forward instead
+ingress:
+  enabled: false
+
+# Local database configuration (docker containers on kind network)
+# Database and Redis containers connected to kind network
+config:
+  database:
+    host: "172.18.0.5"  # sovd-db container IP on kind network
+    port: "5432"
+    name: "sovd"
+    user: "sovd_user"
+
+  # Local Redis configuration
+  redis:
+    host: "172.18.0.6"  # sovd-redis container IP on kind network
+    port: "6379"
+    db: "0"
+
+  # Application configuration
+  app:
+    logLevel: "INFO"
+    corsOrigins: "*"  # Allow all origins for local testing
+    environment: "staging"
+
+# Local secrets - hardcoded for testing (NOT FOR PRODUCTION)
+secrets:
+  databasePassword: "sovd_pass"  # From docker-compose
+  jwtSecret: "supersecretjwtkey12345678901234567890123456789012"  # 64 char minimum
+  redisPassword: ""  # No password for local redis
+
+# Deployment strategy
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Service Account - no AWS IAM role needed for local
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "sovd-webapp-staging-sa"
+
+# RBAC
+rbac:
+  create: true
+
+# External Secrets Operator - DISABLED FOR LOCAL
+externalSecrets:
+  enabled: false
