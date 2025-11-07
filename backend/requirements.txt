@@ -17,6 +17,7 @@ slowapi>=0.1.9
 # Authentication and security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt<5.0.0  # Pin to 4.x for passlib compatibility
 
 # Data validation and settings
 pydantic>=2.4.0

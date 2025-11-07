@@ -62,7 +62,7 @@ const Header: React.FC = () => {
   ];
 
   return (
-    <AppBar position="sticky" elevation={1}>
+    <AppBar position="fixed" elevation={1} sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
       <Toolbar>
         {/* App Title */}
         <Typography variant="h6" component="div" sx={{ fontWeight: 600, letterSpacing: 0.5 }}>

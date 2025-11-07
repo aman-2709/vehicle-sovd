@@ -114,7 +114,7 @@ The backend follows a strict **API → Services → Repositories** layered patte
 ### Real-Time Communication Architecture
 
 **WebSocket Connection Pattern**:
-- Client connects to `/ws/{command_id}` with JWT token
+- Client connects to `/ws/responses/{command_id}` with JWT token
 - Backend registers connection in `WebSocketManager` (singleton)
 - Command responses broadcast via Redis pub/sub to all connected clients
 - Connection lifecycle managed per command (not global)
@@ -151,9 +151,9 @@ async def get_all(db: AsyncSession) -> list[Vehicle]:
 ```
 
 **Transaction Handling**:
-- Use `async with db.begin()` for explicit transactions in services
-- Repositories should NOT commit/rollback (handled by service layer)
-- `get_db()` dependency auto-commits on success, auto-rollbacks on exception
+- **Repository Pattern**: Repositories handle their own commits (e.g., `await db.commit()` after inserts/updates)
+- **Service Pattern**: Services coordinate multiple repository calls; use `async with db.begin()` for multi-step transactions
+- **Session Lifecycle**: `get_db()` dependency provides session; repositories commit explicitly; sessions auto-rollback on exception
 
 **Migration Strategy**:
 - All schema changes via Alembic migrations (never manual SQL)
@@ -178,6 +178,38 @@ Middleware executes in **LIFO** (Last-In-First-Out) order:
 5. **Route Handler**: Actual endpoint logic
 
 **Error Handling**: Global exception handlers in `app/main.py` convert all exceptions to standardized JSON responses with error codes (`app/utils/error_codes.py`).
+
+### Error Handling & Observability Patterns
+
+**Standardized Error Responses**:
+All errors return consistent JSON structure via global exception handlers in `app/main.py`:
+```json
+{
+  "error": {
+    "code": "AUTH_001",
+    "message": "Invalid authentication credentials",
+    "correlation_id": "abc123...",
+    "path": "/api/v1/vehicles"
+  }
+}
+```
+
+**Error Code System** (`app/utils/error_codes.py`):
+- Centralized error code definitions with human-readable messages
+- Categories: AUTH_xxx (authentication), RATE_xxx (rate limiting), VAL_xxx (validation)
+- Used across all exception handlers for consistency
+
+**Correlation IDs for Debugging**:
+- `LoggingMiddleware` generates unique correlation ID for each request
+- Stored in structlog context (`correlation_id`) and logged with all events
+- Returned in error responses for tracing requests across services
+- Access pattern: `structlog.contextvars.get_contextvars().get("correlation_id")`
+
+**Structured Logging Pattern**:
+```python
+logger.info("event_name", key1=value1, key2=value2)  # JSON output
+logger.warning("auth_failed", user_id=str(user_id), reason="invalid_token")
+```
 
 ### Frontend State Management
 
@@ -261,3 +293,40 @@ Middleware executes in **LIFO** (Last-In-First-Out) order:
 - Use `Depends(get_current_user)` for protected endpoints
 - Hash passwords with bcrypt (never store plaintext)
 - Sanitize error messages (no sensitive data in responses)
+
+## Development Patterns & Gotchas
+
+### Common Patterns
+
+**Background Task Execution**:
+- Use FastAPI's `BackgroundTasks` for async operations (e.g., command execution via vehicle connector)
+- Pattern: `background_tasks.add_task(function, arg1, arg2)`
+- Example: `command_service.submit_command()` triggers async vehicle communication in backend/app/services/command_service.py:90
+
+**WebSocket Authentication**:
+- WebSocket endpoints cannot use standard `Depends(get_current_user)`
+- Instead: Pass JWT token as query parameter (`?token=xxx`)
+- Manual validation in endpoint using `verify_access_token()` from auth_service
+- See `backend/app/api/v1/websocket.py:30-108` for implementation pattern
+
+**Redis Pub/Sub for Broadcasting**:
+- Vehicle responses published to channel: `response:{command_id}`
+- WebSocket endpoint subscribes and forwards to connected clients
+- Cleanup: Always unsubscribe and close Redis client in `finally` block
+
+### Important Gotchas
+
+**SQLAlchemy 2.0 Style**:
+- Use `select()` for all queries (not `Query` API)
+- Relationships need explicit loading or `joinedload()`/`selectinload()`
+- Example: `result = await db.execute(select(Vehicle))` then `result.scalars().all()`
+
+**Async Context Managers**:
+- Use `async with` for Redis clients, database transactions
+- Don't forget `await` on `aclose()` for Redis clients
+- Pattern: `async with db.begin():` for explicit transactions
+
+**Frontend Token Refresh**:
+- Axios interceptor in `frontend/src/api/client.ts` handles 401 auto-retry
+- Access token stored in memory (module-level variable in client.ts)
+- Never access localStorage directly for tokens; use `useAuth()` hook

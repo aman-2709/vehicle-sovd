@@ -57,18 +57,53 @@ This project develops a secure, cloud-based web application that enables automot
 ## Quick Start
 
 ### Prerequisites
+
+**For Ubuntu/Debian Users (Automated Installation):**
+
+If you're using Ubuntu or Debian, run the automated setup script to install all dependencies:
+
+```bash
+# Make script executable
+chmod +x scripts/setup-ubuntu.sh
+
+# Run installation script
+./scripts/setup-ubuntu.sh
+```
+
+> **Note:** This script has been tested on Ubuntu 22.04 LTS. It should work on Ubuntu 20.04+ and Debian 11+.
+
+The script will install:
+- Docker Engine and Docker Compose
+- Make utility
+- Git
+- Python 3 (optional, for backend development)
+- Node.js 18+ (optional, for frontend development)
+- PostgreSQL client tools (optional, for database access)
+
+**For Other Operating Systems (Manual Installation):**
 - Docker and Docker Compose installed
 - Make utility installed
 - Ports 3000, 8000, 5432, and 6379 available on localhost
 
 ### Getting Started
 
+**IMPORTANT: First-Time Setup Order**
+
+The database must be initialized AFTER starting services (not before). Follow this exact sequence:
+
 ```bash
-# Start all services (frontend, backend, database, redis)
+# 1. Start all services (frontend, backend, database, redis)
 make up
 
-# Initialize the database with schema and seed data
+# 2. Wait for PostgreSQL to be healthy (check status)
+docker compose ps
+# Look for "healthy" status on the db service - this may take 10-30 seconds
+
+# 3. Initialize the database with schema and seed data (REQUIRED on first run)
 POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh
+
+# 4. Verify initialization succeeded (optional but recommended)
+docker compose logs backend | grep "Database connection successful"
 
 # View logs from all services
 make logs
@@ -76,6 +111,17 @@ make logs
 # Stop all services
 make down
 ```
+
+**When to Run `init_db.sh`:**
+- ✅ **First time** setting up the project
+- ✅ **After** running `docker compose down -v` (volumes deleted)
+- ✅ **After** database corruption or schema changes
+- ❌ **Not needed** for routine restarts (data persists in volumes)
+
+**What happens if you skip it:**
+- Backend will fail to start with "relation 'users' does not exist" errors
+- API endpoints will return 500 errors
+- No login credentials available (admin/engineer users missing)
 
 The application will be available at:
 - Frontend: http://localhost:3000
@@ -229,25 +275,71 @@ When adding new features, follow these guidelines to maintain performance:
 
 ### Database Initialization
 
-After starting the services for the first time, initialize the database:
+**Critical Step:** The database MUST be initialized after starting services for the first time.
+
+**Step-by-Step Initialization:**
 
 ```bash
-# Wait for PostgreSQL to be healthy (check with docker-compose ps)
-docker-compose ps
+# 1. Ensure services are running
+docker compose ps
+# Expected: All services should show "Up" or "healthy" status
 
-# Run the initialization script
+# 2. Wait for PostgreSQL to be healthy (may take 10-30 seconds)
+# Look for "healthy" status on the db service
+# If "starting", wait a bit longer and check again
+
+# 3. Run the initialization script
 POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh
 ```
 
-This script will:
-- Create all database tables (users, vehicles, commands, responses, sessions, audit_logs)
-- Create 21+ indexes for performance optimization
-- Insert seed data (2 test users and 2 test vehicles)
-- Verify the schema was created successfully
+**What the script does:**
+1. Waits for PostgreSQL to be ready (auto-retries up to 30 times)
+2. Creates all database tables (users, vehicles, commands, responses, sessions, audit_logs)
+3. Creates 21+ indexes for performance optimization
+4. Inserts seed data (2 test users and 4 test vehicles)
+5. Verifies schema and data were created successfully
+6. Displays summary with test credentials
 
 **Seed Data Credentials:**
-- Admin: `admin` / `admin123`
-- Engineer: `engineer` / `engineer123`
+- **Admin User:** `admin` / `admin123` (full access)
+- **Engineer User:** `engineer` / `engineer123` (limited access)
+
+**Test Vehicles:**
+- VIN: `1HGBH41JXMN109186` (Tesla Model 3 2023, connected)
+- VIN: `5YJSA1E14HF123456` (Tesla Model S 2022, connected)
+- VIN: `WBADT43452G123456` (BMW i4 2024, disconnected)
+- VIN: `WAUZZZ8V8KA123456` (Audi e-tron GT 2023, connected)
+
+**Verification:**
+```bash
+# Check if initialization succeeded
+docker compose logs backend | tail -20
+# Should see: "Database connection successful" and no errors
+
+# Manually verify database
+PGPASSWORD=sovd_pass psql -h localhost -p 5433 -U sovd_user -d sovd -c "SELECT username, role FROM users;"
+# Should return admin and engineer users
+```
+
+**Troubleshooting Initialization:**
+
+**Error: "POSTGRES_PASSWORD environment variable is required"**
+- Solution: Always prefix the command with `POSTGRES_PASSWORD=sovd_pass`
+- Example: `POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh`
+
+**Error: "PostgreSQL did not become ready"**
+- Solution: PostgreSQL may still be starting up
+- Wait 30 seconds and try again
+- Check status: `docker compose logs db | tail -20`
+
+**Error: "relation already exists"**
+- Cause: Database already initialized
+- Solution: No action needed (script is idempotent for some operations)
+- To reinitialize: `docker compose down -v && make up && POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh`
+
+**Error: "connection refused"**
+- Cause: PostgreSQL container not running
+- Solution: Run `make up` first, then wait for health check
 
 ### Development Workflow
 
@@ -303,9 +395,12 @@ If ports are already in use, you'll see errors like "port is already allocated".
 - Change ports in `docker-compose.yml`
 
 **Database Connection Issues:**
-- Verify PostgreSQL is healthy: `docker-compose ps` (should show "healthy")
-- Check logs: `docker-compose logs db`
-- Ensure `init_db.sh` was run successfully
+- Verify PostgreSQL is healthy: `docker compose ps` (should show "healthy")
+- Check logs: `docker compose logs db`
+- **Most Common Cause:** `init_db.sh` was not run - see "Database Initialization" section above
+- Verify initialization: `PGPASSWORD=sovd_pass psql -h localhost -p 5433 -U sovd_user -d sovd -c "SELECT COUNT(*) FROM users;"`
+  - Should return 2 (admin and engineer)
+  - If "relation 'users' does not exist" → run `init_db.sh`
 
 **Backend Won't Start:**
 - Check if database is healthy and initialized
@@ -323,16 +418,31 @@ If ports are already in use, you'll see errors like "port is already allocated".
 
 **Clean Slate Restart:**
 ```bash
-# Stop all services and remove volumes
-docker-compose down -v
+# Stop all services and remove volumes (deletes all data!)
+docker compose down -v
 
-# Remove all containers and images
-docker-compose down --rmi all -v
+# Remove all containers and images (optional - saves disk space)
+docker compose down --rmi all -v
 
-# Start fresh
+# Start fresh (follow the correct order!)
 make up
+
+# Wait for PostgreSQL to be healthy (10-30 seconds)
+docker compose ps
+
+# Re-initialize database (required after -v flag)
 POSTGRES_PASSWORD=sovd_pass ./scripts/init_db.sh
+
+# Verify backend started successfully
+docker compose logs backend | grep "Application startup complete"
 ```
+
+**⚠️ WARNING:** Using `docker compose down -v` deletes ALL data including:
+- User accounts (admin, engineer)
+- Vehicles
+- Command history
+- Audit logs
+You MUST run `init_db.sh` again after using `-v` flag.
 
 ### Additional Commands
 

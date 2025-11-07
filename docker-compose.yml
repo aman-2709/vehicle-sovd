@@ -18,7 +18,7 @@ services:
       POSTGRES_USER: sovd_user          # Database user
       POSTGRES_PASSWORD: sovd_pass      # Database password
     ports:
-      - "5432:5432"  # Expose PostgreSQL on localhost:5432
+      - "5433:5432"  # Expose PostgreSQL on localhost:5433 (avoiding conflict with system PostgreSQL)
     volumes:
       # Persist database data across container restarts
       - sovd-db-data:/var/lib/postgresql/data
@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes  # Enable AOF persistence
     ports:
-      - "6379:6379"  # Expose Redis on localhost:6379
+      - "6380:6379"  # Expose Redis on localhost:6380 (avoiding potential conflicts)
     volumes:
       # Persist Redis data across container restarts
       - sovd-redis-data:/data
@@ -105,7 +105,7 @@ services:
     restart: on-failure
     environment:
       # API endpoint for frontend to connect to backend
-      VITE_API_URL: http://localhost:8000
+      VITE_API_BASE_URL: http://localhost:8000
     ports:
       - "3000:3000"  # Expose frontend on localhost:3000
     volumes:

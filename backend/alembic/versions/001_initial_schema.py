@@ -51,6 +51,7 @@ def upgrade() -> None:
         sa.Column("email", sa.String(length=255), nullable=False, unique=True),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("role", sa.String(length=20), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
         sa.Column("updated_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
         sa.CheckConstraint("role IN ('engineer', 'admin')", name="users_role_check"),

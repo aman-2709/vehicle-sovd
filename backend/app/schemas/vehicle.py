@@ -34,7 +34,7 @@ class VehicleResponse(BaseModel):
     year: int
     connection_status: str
     last_seen_at: datetime | None
-    metadata: dict[str, Any] | None = Field(default=None, alias="vehicle_metadata")
+    metadata: dict[str, Any] | None = Field(default=None, serialization_alias="metadata", validation_alias="vehicle_metadata")
 
     @field_serializer("vehicle_id")
     def serialize_vehicle_id(self, value: UUID) -> str:

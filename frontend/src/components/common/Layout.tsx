@@ -16,30 +16,32 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+    <>
       {/* Header - fixed at top */}
       <Header />
 
-      {/* Sidebar - fixed on left */}
-      <Sidebar />
+      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+        {/* Sidebar - fixed on left */}
+        <Sidebar />
 
-      {/* Main content area */}
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          bgcolor: 'background.default',
-          p: 3,
-          width: { sm: `calc(100% - 240px)` }, // 240px = sidebar width
-        }}
-      >
-        {/* Spacer to push content below fixed header */}
-        <Toolbar />
+        {/* Main content area */}
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            bgcolor: 'background.default',
+            p: 3,
+            marginLeft: { sm: `240px` }, // 240px = sidebar width
+          }}
+        >
+          {/* Spacer to push content below fixed header */}
+          <Toolbar />
 
-        {/* Page content */}
-        {children}
+          {/* Page content */}
+          {children}
+        </Box>
       </Box>
-    </Box>
+    </>
   );
 };
 
