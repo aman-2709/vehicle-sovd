@@ -12,6 +12,8 @@ __pycache__/
 *.pyd
 .Python
 *.so
+.mypy_cache/
+.ruff_cache/
 
 # Environment variables
 .env
@@ -49,6 +51,11 @@ coverage.json
 htmlcov/
 .pytest_cache/
 frontend/coverage/
+
+# Playwright
+.playwright-mcp/
+playwright-report/
+test-results/
 
 # Logs
 *.log
